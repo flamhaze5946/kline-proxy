@@ -11,7 +11,7 @@
   </parent>
   <groupId>com.zx.quant</groupId>
   <artifactId>kline-proxy</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+  <version>1.0.0</version>
   <name>kline-proxy</name>
   <description>kline-proxy</description>
   <properties>
