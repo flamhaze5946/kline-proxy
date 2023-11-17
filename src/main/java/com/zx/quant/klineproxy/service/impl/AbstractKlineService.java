@@ -391,7 +391,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         () -> {
           synchronized (subscribedSymbols) {
-            Set<String> exchangeSymbols = new HashSet<>(getSymbols());
+            Set<String> exchangeSymbols = new HashSet<>(getSubscribeSymbols());
             Set<String> needSubscribeSymbols = new HashSet<>(exchangeSymbols);
             needSubscribeSymbols.removeAll(subscribedSymbols);
 
