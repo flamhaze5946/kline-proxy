@@ -1,9 +1,10 @@
 FROM openjdk:17-alpine
 
+ENV JAVA_OPTS="-Xms800m"
 COPY target/kline-proxy-1.0.0.jar /app/
 VOLUME ["/app/application.yaml"]
 
 WORKDIR /app
 EXPOSE 8888
 
-ENTRYPOINT ["java", "-jar", "kline-proxy-1.0.0.jar", "--spring.config.location=file:/app/application.yaml"]
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar kline-proxy-1.0.0.jar --spring.config.location=file:/app/application.yaml"]
