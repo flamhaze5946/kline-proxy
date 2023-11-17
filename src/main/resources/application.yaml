@@ -1,0 +1,9 @@
+server:
+  port: 8090
+kline:
+  minMaintainCount: 1000
+  listen:
+    intervals:
+      - 1m
+      - 1h
+      - 1d

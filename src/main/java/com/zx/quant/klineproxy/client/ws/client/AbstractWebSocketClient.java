@@ -97,7 +97,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   @Override
   public void reconnect() {
     if (group != null) {
-      this.group.shutdownGracefully();
+      this.group.shutdownGracefully().syncUninterruptibly();
     }
     this.group = null;
     this.connect();
@@ -131,6 +131,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
+  public void onReceiveNoHandle() {
+    monitorTask.heartbeat();
+  }
+
+  @Override
   public URI uri() {
     if (uri == null) {
       synchronized (this) {
@@ -156,7 +161,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     } catch (Exception e) {
       log.error("websocket client: {} start failed.", clientName(), e);
       if (group != null) {
-        group.shutdownGracefully();
+        group.shutdownGracefully().syncUninterruptibly();
       }
     }
   }
@@ -216,6 +221,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       } else {
         sslCtx = null;
       }
+      if (group != null && !group.isShutdown()) {
+        group.shutdownGracefully().syncUninterruptibly();
+      }
       group = new NioEventLoopGroup(2);
       Bootstrap bootstrap = new Bootstrap();
       bootstrap
@@ -235,7 +243,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     } catch (Exception e) {
       log.error(" websocket client: {} start error.", clientName(), e);
       if (group != null) {
-        group.shutdownGracefully();
+        group.shutdownGracefully().syncUninterruptibly();
       }
     }
   }

@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.service.impl;
 
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
+import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
@@ -14,15 +15,27 @@ import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeSet;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
+import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -31,8 +44,10 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * abstract kline service
@@ -41,28 +56,41 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Slf4j
 public abstract class AbstractKlineService<T extends WebSocketClient> implements KlineService, InitializingBean {
 
+  private static final String MANAGE_EXECUTOR_GROUP = "kline-manage";
+  private static final String KLINE_FETCH_EXECUTOR_GROUP = "kline-fetch";
+
+  private static final ExecutorService MANAGE_EXECUTOR = buildManageExecutor();
+
+  private static final ExecutorService KLINE_FETCH_EXECUTOR = buildKlineFetchExecutor();
+
   private static final String KLINE_EVENT = "kline";
 
-  private static final IntervalEnum WS_KLINE_INTERVAL = IntervalEnum.ONE_MINUTE;
-
-  private static final int SYMBOLS_PER_CONNECTION = 300;
+  private static final int SYMBOLS_PER_CONNECTION = 800;
 
   private static final String SYNC_SYMBOLS_GROUP = "symbols-sync-";
 
-  private static final ScheduledExecutorService EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(2,
+  private static final ScheduledExecutorService SCHEDULE_EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(4,
       ThreadFactoryUtil.getNamedThreadFactory(SYNC_SYMBOLS_GROUP));
+
+  private static final Integer MAKE_UP_LIMIT = 499;
 
   protected static final Integer DEFAULT_LIMIT = 500;
 
   protected static final Integer MIN_LIMIT = 1;
 
-  protected static final Integer MAX_LIMIT = 1500;
+  protected static final Integer MAX_LIMIT = 1000;
 
   @Autowired
   protected Serializer serializer;
 
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
+
+  @Autowired
+  private RateLimitManager rateLimitManager;
+
+  @Value("${kline.minMaintainKlineCount:1000}")
+  private Integer minMaintainKlineCount;
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
@@ -72,23 +100,96 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected abstract List<String> getSymbols();
 
-  protected Consumer<String> getMessageHandler() {
-    return message -> {
-      EventKlineEvent eventKlineEvent = serializer.fromJsonString(message, EventKlineEvent.class);
-      if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
-        return;
-      }
-      Kline kline = convertToKline(eventKlineEvent);
-      updateKline(eventKlineEvent.getSymbol(), WS_KLINE_INTERVAL.code(), kline);
-    };
-  }
+  protected abstract List<IntervalEnum> getSubscribeIntervals();
 
-  protected String buildSymbolUpdateTopic(String symbol) {
-    return StringUtils.lowerCase(symbol) + "@kline_" + WS_KLINE_INTERVAL.code();
+  @Override
+  public List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
+    if (intervalEnum == null) {
+      throw new RuntimeException("invalid interval");
+    }
+    int realLimit = limit != null ? limit : DEFAULT_LIMIT;
+    realLimit = Math.min(realLimit, MAX_LIMIT);
+    realLimit = Math.max(realLimit, MIN_LIMIT);
+    long intervalMills = intervalEnum.getMills();
+    long klinesDuration = (intervalMills * (realLimit - 1));
+    long realStartTime;
+    long realEndTime;
+    if (startTime != null && endTime != null) {
+      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
+      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
+      long maxEndTime = realStartTime + klinesDuration;
+      realEndTime = Math.min(realEndTime, maxEndTime);
+    } else if (startTime == null && endTime == null) {
+      realEndTime = (long) Math.floor((double) System.currentTimeMillis() / (double) intervalMills) * intervalMills;
+      realStartTime = realEndTime - klinesDuration;
+    } else if (startTime == null) {
+      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
+      realStartTime = realEndTime - klinesDuration;
+    } else {
+      // endTime == null
+      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
+      realEndTime = realStartTime + klinesDuration;
+    }
+    KlineSetKey key = new KlineSetKey(symbol, interval);
+    KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
+    SortedMap<Long, Kline> savedKlineMap = klineSet.getKlineMap()
+        .subMap(realStartTime, true, realEndTime, true);
+    NavigableSet<Long> needMakeUpOpenTimes = new TreeSet<>();
+    long indexTime = realStartTime;
+    while (indexTime <= realEndTime) {
+      needMakeUpOpenTimes.add(indexTime);
+      indexTime += intervalMills;
+    }
+    needMakeUpOpenTimes.removeAll(savedKlineMap.keySet());
+    if (CollectionUtils.isNotEmpty(needMakeUpOpenTimes)) {
+      List<ImmutablePair<Long, Long>> makeUpTimeRanges = new ArrayList<>();
+      if (needMakeUpOpenTimes.size() > 1) {
+        Long makeStartTime = null;
+        Long makeEndTime = null;
+        for (Long needMakeUpOpenTime : needMakeUpOpenTimes) {
+          if (makeStartTime == null) {
+            makeStartTime = needMakeUpOpenTime;
+            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
+            continue;
+          }
+          if (needMakeUpOpenTime > makeEndTime) {
+            makeStartTime = needMakeUpOpenTime;
+            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
+          }
+        }
+      } else {
+        Long makeUpKlineTime = needMakeUpOpenTimes.first();
+        makeUpTimeRanges.add(ImmutablePair.of(makeUpKlineTime, makeUpKlineTime + 1));
+      }
+
+      CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
+      for(int i = 0; i < makeUpTimeRanges.size(); i++) {
+        ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
+        CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
+            safeQueryKlines(symbol, interval,
+                makeUpRange.getLeft(), makeUpRange.getRight(), MAKE_UP_LIMIT)
+            , KLINE_FETCH_EXECUTOR);
+        futures[i] = makeUpFuture;
+      }
+      CompletableFuture.allOf(futures).join();
+      savedKlineMap = klineSet.getKlineMap()
+          .subMap(realStartTime, realEndTime);
+    }
+
+    return savedKlineMap.values()
+        .stream()
+        .sorted(Comparator.comparing(Kline::getOpenTime))
+        .toList();
   }
 
   @Override
   public void updateKline(String symbol, String interval, Kline kline) {
+    if (kline == null) {
+      return;
+    }
     KlineSetKey klineSetKey = new KlineSetKey(symbol, interval);
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
@@ -96,12 +197,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
       klineSet.getKlineMap().put(kline.getOpenTime(), kline);
     }
-
-    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
-    if (intervalEnum == null) {
-      throw new RuntimeException("invalid interval");
-    }
-    log.info("kline: {}", kline);
   }
 
   @Override
@@ -109,45 +204,56 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     start();
   }
 
+  protected Consumer<String> getMessageHandler() {
+    return message -> {
+      EventKlineEvent eventKlineEvent = serializer.fromJsonString(message, EventKlineEvent.class);
+      if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+        return;
+      }
+      Kline kline = convertToKline(eventKlineEvent);
+      updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
+    };
+  }
+
+  protected String buildSymbolUpdateTopic(String symbol, IntervalEnum intervalEnum) {
+    return StringUtils.lowerCase(symbol) + "@kline_" + intervalEnum.code();
+  }
+
+  protected List<String> buildSymbolUpdateTopics(String symbol) {
+    return getSubscribeIntervals().stream()
+        .map(intervalEnum -> buildSymbolUpdateTopic(symbol, intervalEnum))
+        .collect(Collectors.toList());
+  }
+
+  /**
+   * query kline by rpc, no cache
+   * @param symbol    symbol
+   * @param interval  interval
+   * @param startTime startTime
+   * @param endTime   endTime
+   * @param limit     limit
+   * @return klines
+   */
+  protected abstract List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
+
   protected void start() {
     List<String> symbols = getSymbols();
-    connectionCount.set(Math.min(webSocketClients.size(), symbols.size() / SYMBOLS_PER_CONNECTION + 1));
+    List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+    int topicCount = symbols.size() * subscribeIntervals.size();
+    startKlineWebSocketUpdater(topicCount);
+    startKlineRpcUpdater();
+  }
+
+  private void startKlineWebSocketUpdater(int topicCount) {
+    int connectionCountNumber = Math.min(webSocketClients.size(), topicCount / SYMBOLS_PER_CONNECTION + 1);
+    connectionCountNumber = Math.max(connectionCountNumber, webSocketClients.size());
+    connectionCount.set(connectionCountNumber);
     for(int i = 0; i < connectionCount.get(); i++) {
       T webSocketClient = webSocketClients.get(i);
       webSocketClient.addMessageHandler(getMessageHandler());
       webSocketClient.start();
     }
-    EXECUTOR_SERVICE.scheduleWithFixedDelay(
-        () -> {
-          synchronized (subscribedSymbols) {
-            Set<String> exchangeSymbols = new HashSet<>(getSymbols());
-            Set<String> needSubscribeSymbols = new HashSet<>(exchangeSymbols);
-            needSubscribeSymbols.removeAll(subscribedSymbols);
-
-            Set<String> needUnsubscribeSymbols = new HashSet<>(subscribedSymbols);
-            needUnsubscribeSymbols.removeAll(exchangeSymbols);
-
-            if (CollectionUtils.isNotEmpty(needSubscribeSymbols)) {
-              Set<String> topics = needSubscribeSymbols.stream()
-                      .map(this::buildSymbolUpdateTopic)
-                      .collect(Collectors.toSet());
-              subscribe(topics);
-            }
-
-            if (CollectionUtils.isNotEmpty(needUnsubscribeSymbols)) {
-              Set<String> topics = needUnsubscribeSymbols.stream()
-                  .map(this::buildSymbolUpdateTopic)
-                  .collect(Collectors.toSet());
-              unsubscribe(topics);
-            }
-
-            subscribedSymbols.addAll(exchangeSymbols);
-            subscribedSymbols.removeAll(needUnsubscribeSymbols);
-          }
-        },
-        1000,
-        5000,
-        TimeUnit.MILLISECONDS);
+    adjustSubscribeSymbols();
   }
 
   protected void subscribe(Collection<String> topics) {
@@ -201,6 +307,78 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return limit;
   }
 
+  private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+    rateLimitManager.acquire(getClass().getName(), 1);
+    List<Kline> klines = queryKlines0(symbol, interval,
+        startTime, endTime, limit);
+    for (Kline makeUpKline : klines) {
+      updateKline(symbol, interval, makeUpKline);
+    }
+    return klines;
+  }
+
+  private void startKlineRpcUpdater() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(() -> {
+      List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+      List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
+      for (String symbol : getSymbols()) {
+        for (IntervalEnum interval : subscribeIntervals) {
+          symbolIntervals.add(ImmutablePair.of(symbol, interval));
+        }
+      }
+      CompletableFuture.runAsync(() -> {
+        CompletableFuture<?>[] syncFutures = new CompletableFuture[symbolIntervals.size()];
+        for(int i = 0; i < symbolIntervals.size(); i++) {
+          ImmutablePair<String, IntervalEnum> symbolInterval = symbolIntervals.get(i);
+          String symbol = symbolInterval.getLeft();
+          IntervalEnum interval = symbolInterval.getRight();
+          CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() -> {
+            safeQueryKlines(symbol, interval.code(), null, System.currentTimeMillis(), minMaintainKlineCount);
+          }, KLINE_FETCH_EXECUTOR);
+          syncFutures[i] = syncFuture;
+        }
+        CompletableFuture.allOf(syncFutures).join();
+        log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
+      }, MANAGE_EXECUTOR).join();
+    }, 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+  }
+
+  private void adjustSubscribeSymbols() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        () -> {
+          synchronized (subscribedSymbols) {
+            Set<String> exchangeSymbols = new HashSet<>(getSymbols());
+            Set<String> needSubscribeSymbols = new HashSet<>(exchangeSymbols);
+            needSubscribeSymbols.removeAll(subscribedSymbols);
+
+            Set<String> needUnsubscribeSymbols = new HashSet<>(subscribedSymbols);
+            needUnsubscribeSymbols.removeAll(exchangeSymbols);
+
+            if (CollectionUtils.isNotEmpty(needSubscribeSymbols)) {
+              Set<String> topics = needSubscribeSymbols.stream()
+                  .map(this::buildSymbolUpdateTopics)
+                  .flatMap(Collection::stream)
+                  .collect(Collectors.toSet());
+              subscribe(topics);
+            }
+
+            if (CollectionUtils.isNotEmpty(needUnsubscribeSymbols)) {
+              Set<String> topics = needUnsubscribeSymbols.stream()
+                  .map(this::buildSymbolUpdateTopics)
+                  .flatMap(Collection::stream)
+                  .collect(Collectors.toSet());
+              unsubscribe(topics);
+            }
+
+            subscribedSymbols.addAll(exchangeSymbols);
+            subscribedSymbols.removeAll(needUnsubscribeSymbols);
+          }
+        },
+        1000,
+        5000,
+        TimeUnit.MILLISECONDS);
+  }
+
   private List<T> getActiveWebSocketClients() {
     return webSocketClients.subList(0, connectionCount.get());
   }
@@ -225,5 +403,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     kline.setIgnore(eventKline.getIgnore());
 
     return kline;
+  }
+
+  private static ExecutorService buildKlineFetchExecutor() {
+    ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        KLINE_FETCH_EXECUTOR_GROUP);
+    return new ThreadPoolExecutor(0, 20,
+        1, TimeUnit.MINUTES, new SynchronousQueue<>(),
+        namedThreadFactory, new CallerRunsPolicy());
+  }
+
+  private static ExecutorService buildManageExecutor() {
+    ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        MANAGE_EXECUTOR_GROUP);
+    return new ThreadPoolExecutor(
+        5,
+        20,
+        1,
+        TimeUnit.MINUTES,
+        new ArrayBlockingQueue<>(1024),
+        namedThreadFactory,
+        new AbortPolicy());
   }
 }

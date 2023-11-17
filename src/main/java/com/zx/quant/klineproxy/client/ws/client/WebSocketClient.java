@@ -43,5 +43,7 @@ public interface WebSocketClient {
 
   void onReceive(String message);
 
+  default void onReceiveNoHandle() {}
+
   void addMessageHandler(Consumer<String> messageHandler);
 }

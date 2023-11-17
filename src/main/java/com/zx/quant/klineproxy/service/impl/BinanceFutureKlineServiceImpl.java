@@ -1,10 +1,12 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.google.common.collect.Lists;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.ws.client.BinanceFutureWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ClientUtil;
@@ -36,32 +38,26 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   private BinanceFutureClient binanceFutureClient;
 
   @Override
-  public List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     Call<List<Object[]>> klinesCall = binanceFutureClient.getKlines(symbol, interval, startTime, endTime, getLimit(limit));
     List<Object[]> responseBody = ClientUtil.getResponseBody(klinesCall);
     return Objects.requireNonNull(responseBody).stream()
-        .map(this::serverKlineToKline).collect(Collectors.toList());
+        .map(this::serverKlineToKline)
+        .collect(Collectors.toList());
   }
 
   @Override
   protected List<String> getSymbols() {
-//    return exchangeService.querySymbols();
-    return Collections.emptyList();
-  }
-
-
-  @Override
-  protected Consumer<String> getMessageHandler() {
-    return message -> log.info("future message: {}", message);
+    return exchangeService.querySymbols().stream()
+//        .filter(Objects::isNull)
+        .toList();
   }
 
   @Override
-  protected String buildSymbolUpdateTopic(String symbol) {
-    return StringUtils.lowerCase(symbol) + "@miniTicker";
-  }
-
-  @Override
-  public void afterPropertiesSet() throws Exception {
-
+  protected List<IntervalEnum> getSubscribeIntervals() {
+    return Lists.newArrayList(
+        IntervalEnum.ONE_MINUTE,
+        IntervalEnum.ONE_HOUR
+    );
   }
 }

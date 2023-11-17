@@ -87,12 +87,20 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
     } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
       webSocketClient.onReceive(textWebSocketFrame.text());
     } else if (frame instanceof PingWebSocketFrame) {
+      webSocketClient.onReceiveNoHandle();
       channel.writeAndFlush(new PongWebSocketFrame());
     } else if (frame instanceof PongWebSocketFrame) {
-      log.info("websocket client: {} receive pong!", webSocketClient.clientName());
+      webSocketClient.onReceiveNoHandle();
+      if (log.isDebugEnabled()) {
+        log.debug("websocket client: {} receive pong!", webSocketClient.clientName());
+      }
     } else if (frame instanceof CloseWebSocketFrame) {
+      webSocketClient.onReceiveNoHandle();
       log.info("websocket client: {} receive close.", webSocketClient.clientName());
       channel.close();
+    } else {
+      webSocketClient.onReceiveNoHandle();
+      log.debug("websocket client: {} receive unknown message: {}!", webSocketClient.clientName(), frame.content().toString());
     }
   }
 
