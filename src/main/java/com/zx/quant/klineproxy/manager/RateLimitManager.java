@@ -10,4 +10,6 @@ public interface RateLimitManager {
   }
 
   void acquire(String limiterName, int weight);
+
+  void stopAcquire(String limiterName, long mills);
 }

@@ -1,9 +1,15 @@
 server:
-  port: 8090
+  port: 8888
 kline:
-  minMaintainCount: 1000
-  listen:
-    intervals:
-      - 1m
-      - 1h
-      - 1d
+  binance:
+    spot:
+      enabled: false
+      minMaintainCount: 2000
+      listenIntervals:
+        - 1h
+        - 1d
+    future:
+      minMaintainCount: 2000
+      listenIntervals:
+        - 1h
+        - 1d

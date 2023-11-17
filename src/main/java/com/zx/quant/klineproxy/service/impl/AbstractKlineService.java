@@ -7,6 +7,7 @@ import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
+import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
@@ -15,6 +16,7 @@ import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -43,11 +45,11 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 
 /**
  * abstract kline service
@@ -81,16 +83,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected static final Integer MAX_LIMIT = 1000;
 
   @Autowired
+  protected RateLimitManager rateLimitManager;
+
+  @Autowired
   protected Serializer serializer;
 
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
-
-  @Autowired
-  private RateLimitManager rateLimitManager;
-
-  @Value("${kline.minMaintainKlineCount:1000}")
-  private Integer minMaintainKlineCount;
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
@@ -98,9 +97,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected final Set<String> subscribedSymbols = new CopyOnWriteArraySet<>();
 
+  /**
+   * query kline by rpc, no cache
+   * @param symbol    symbol
+   * @param interval  interval
+   * @param startTime startTime
+   * @param endTime   endTime
+   * @param limit     limit
+   * @return klines
+   */
+  protected abstract List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
+
+  protected abstract String getRateLimiterName();
+
   protected abstract List<String> getSymbols();
 
-  protected abstract List<IntervalEnum> getSubscribeIntervals();
+  protected abstract KlineSyncConfigProperties getSyncConfig();
 
   @Override
   public List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
@@ -179,6 +191,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           .subMap(realStartTime, realEndTime);
     }
 
+    if (savedKlineMap.size() < realLimit && startTime == null && endTime == null) {
+      Kline lastKline = klineSet.getKlineMap().lastEntry().getValue();
+      long lastKlineOpenTime = lastKline.getOpenTime();
+      long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (realLimit - 1));
+      savedKlineMap = klineSet.getKlineMap()
+          .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
+    }
+
     return savedKlineMap.values()
         .stream()
         .sorted(Comparator.comparing(Kline::getOpenTime))
@@ -204,6 +224,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     start();
   }
 
+  protected List<IntervalEnum> getSubscribeIntervals() {
+    return getSyncConfig().getListenIntervals().stream()
+        .map(interval -> CommonUtil.getEnumByCode(interval, IntervalEnum.class))
+        .toList();
+  }
+
   protected Consumer<String> getMessageHandler() {
     return message -> {
       EventKlineEvent eventKlineEvent = serializer.fromJsonString(message, EventKlineEvent.class);
@@ -220,23 +246,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected List<String> buildSymbolUpdateTopics(String symbol) {
-    return getSubscribeIntervals().stream()
+    List<IntervalEnum> intervalEnums = getSyncConfig().getListenIntervals().stream()
+        .map(interval -> CommonUtil.getEnumByCode(interval, IntervalEnum.class))
+        .toList();
+    return intervalEnums.stream()
         .map(intervalEnum -> buildSymbolUpdateTopic(symbol, intervalEnum))
         .collect(Collectors.toList());
   }
 
-  /**
-   * query kline by rpc, no cache
-   * @param symbol    symbol
-   * @param interval  interval
-   * @param startTime startTime
-   * @param endTime   endTime
-   * @param limit     limit
-   * @return klines
-   */
-  protected abstract List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
-
   protected void start() {
+    if (!Boolean.TRUE.equals(getSyncConfig().getEnabled())) {
+      log.info("kline service {} disabled.", getClass().getSimpleName());
+      return;
+    }
     List<String> symbols = getSymbols();
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     int topicCount = symbols.size() * subscribeIntervals.size();
@@ -245,8 +267,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void startKlineWebSocketUpdater(int topicCount) {
-    int connectionCountNumber = Math.min(webSocketClients.size(), topicCount / SYMBOLS_PER_CONNECTION + 1);
-    connectionCountNumber = Math.max(connectionCountNumber, webSocketClients.size());
+    int connectionCountNumber = Math.min(webSocketClients.size(), (int) Math.ceil((double) topicCount / (double) SYMBOLS_PER_CONNECTION));
+    connectionCountNumber = Math.max(connectionCountNumber, 1);
     connectionCount.set(connectionCountNumber);
     for(int i = 0; i < connectionCount.get(); i++) {
       T webSocketClient = webSocketClients.get(i);
@@ -308,7 +330,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
-    rateLimitManager.acquire(getClass().getName(), 1);
+    rateLimitManager.acquire(getRateLimiterName(), 1);
     List<Kline> klines = queryKlines0(symbol, interval,
         startTime, endTime, limit);
     for (Kline makeUpKline : klines) {
@@ -333,7 +355,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           String symbol = symbolInterval.getLeft();
           IntervalEnum interval = symbolInterval.getRight();
           CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() -> {
-            safeQueryKlines(symbol, interval.code(), null, System.currentTimeMillis(), minMaintainKlineCount);
+            safeQueryKlines(symbol, interval.code(), null, System.currentTimeMillis(), getSyncConfig().getMinMaintainCount());
           }, KLINE_FETCH_EXECUTOR);
           syncFutures[i] = syncFuture;
         }

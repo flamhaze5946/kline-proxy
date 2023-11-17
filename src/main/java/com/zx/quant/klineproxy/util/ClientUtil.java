@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.util;
 
+import com.zx.quant.klineproxy.model.exceptions.OverRateLimitException;
 import java.io.IOException;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.ResponseBody;
@@ -16,15 +17,24 @@ public final class ClientUtil {
   private static final String DEFAULT_ERROR_MSG = "client call failed.";
 
   public static <T> T getResponseBody(Call<T> call) {
-    return getResponseBody(call, false);
+    return getResponseBody(call, false, null);
   }
 
-  public static <T> T getResponseBody(Call<T> call, boolean bodyAllowNull) {
+  public static <T> T getResponseBody(Call<T> call, Runnable onOverRate) {
+    return getResponseBody(call, false, onOverRate);
+  }
+
+  public static <T> T getResponseBody(Call<T> call, boolean bodyAllowNull, Runnable onOverRate) {
     Response<T> response = null;
     try {
       response = call.execute();
       int code = response.code();
       if (!response.isSuccessful()) {
+        if (code == 418 || code == 429) {
+          if (onOverRate != null) {
+            onOverRate.run();
+          }
+        }
         String errorMsg = DEFAULT_ERROR_MSG;
         try(ResponseBody errorBody = response.errorBody()) {
           if (errorBody != null) {

@@ -5,6 +5,8 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
+import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
@@ -33,6 +35,9 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
   @Autowired
   private BinanceFutureClient binanceFutureClient;
 
+  @Autowired
+  private RateLimitManager rateLimitManager;
+
   @Override
   public BinanceFutureExchange queryExchange() {
     BinanceFutureExchange exchange = exchangeCache.get(StringUtils.EMPTY);
@@ -55,7 +60,8 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
         .expireAfterWrite(Duration.of(1, ChronoUnit.MINUTES))
         .build(s -> {
           Call<BinanceFutureExchange> exchangeCall = binanceFutureClient.getExchange();
-          BinanceFutureExchange exchange = ClientUtil.getResponseBody(exchangeCall);
+          BinanceFutureExchange exchange = ClientUtil.getResponseBody(exchangeCall,
+              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE, 1000 * 30));
           if (exchange.getServerTime() != null) {
             long deltaMills = System.currentTimeMillis() - exchange.getServerTime();
             serverTimeDelta.set(deltaMills);

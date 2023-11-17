@@ -6,6 +6,8 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.BinanceSpotClient;
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.client.model.BinanceSpotSymbol;
+import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
@@ -31,6 +33,9 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
   private final LoadingCache<String, BinanceSpotExchange> exchangeCache = buildExchangeCache();
 
   @Autowired
+  private RateLimitManager rateLimitManager;
+
+  @Autowired
   private BinanceSpotClient binanceSpotClient;
 
   @Override
@@ -53,7 +58,8 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
           @Override
           public @Nullable BinanceSpotExchange load(String s) throws Exception {
             Call<BinanceSpotExchange> exchangeCall = binanceSpotClient.getExchange();
-            return ClientUtil.getResponseBody(exchangeCall);
+            return ClientUtil.getResponseBody(exchangeCall,
+                () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT, 1000 * 30));
           }
         });
   }

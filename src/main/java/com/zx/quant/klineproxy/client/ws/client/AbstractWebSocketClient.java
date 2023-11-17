@@ -91,7 +91,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(getScheduleExecutorGroupName());
     scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(scheduleThreadFactory);
     scheduledExecutorService.scheduleWithFixedDelay(monitorTask, 0,15000, TimeUnit.MILLISECONDS);
-    scheduledExecutorService.scheduleWithFixedDelay(pingTask, 0,60000, TimeUnit.MILLISECONDS);
+    scheduledExecutorService.scheduleWithFixedDelay(pingTask, 0,5000, TimeUnit.MILLISECONDS);
   }
 
   @Override
