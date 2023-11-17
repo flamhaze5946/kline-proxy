@@ -297,6 +297,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       webSocketClient.start();
     }
     adjustSubscribeSymbols();
+    releaseSymbolKlines();
   }
 
   protected void subscribe(Collection<String> topics) {
@@ -385,6 +386,20 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
       }, MANAGE_EXECUTOR).join();
     }, 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+  }
+
+  private void releaseSymbolKlines() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        () -> {
+          for (KlineSet klineSet : klineSetMap.values()) {
+            NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+            if (klineMap.size() > getSyncConfig().getMinMaintainCount() * 1.2) {
+              while (klineMap.size() > getSyncConfig().getMinMaintainCount()) {
+                klineMap.pollFirstEntry();
+              }
+            }
+          }
+        }, 1000, 5000, TimeUnit.MILLISECONDS);
   }
 
   private void adjustSubscribeSymbols() {
