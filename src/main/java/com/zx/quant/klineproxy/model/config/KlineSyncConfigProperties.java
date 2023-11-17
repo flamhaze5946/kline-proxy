@@ -21,6 +21,10 @@ public class KlineSyncConfigProperties {
       IntervalEnum.ONE_HOUR.code()
   );
 
+  private List<String> listenSymbolPatterns = Lists.newArrayList(
+      ".*"
+  );
+
   @ConfigurationProperties(prefix = "kline.binance.spot")
   public static class BinanceSpotKlineSyncConfigProperties extends KlineSyncConfigProperties {
   }

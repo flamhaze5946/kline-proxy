@@ -42,6 +42,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -230,6 +231,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         .toList();
   }
 
+  protected List<Pattern> getSubscribeSymbolPatterns() {
+    return getSyncConfig().getListenSymbolPatterns().stream()
+        .map(Pattern::compile)
+        .toList();
+  }
+
   protected Consumer<String> getMessageHandler() {
     return message -> {
       EventKlineEvent eventKlineEvent = serializer.fromJsonString(message, EventKlineEvent.class);
@@ -259,11 +266,25 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       log.info("kline service {} disabled.", getClass().getSimpleName());
       return;
     }
-    List<String> symbols = getSymbols();
+    List<String> symbols = getSubscribeSymbols();
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     int topicCount = symbols.size() * subscribeIntervals.size();
     startKlineWebSocketUpdater(topicCount);
     startKlineRpcUpdater();
+  }
+
+  private List<String> getSubscribeSymbols() {
+    List<Pattern> subscribeSymbolPatterns = getSubscribeSymbolPatterns();
+    List<String> symbols = getSymbols();
+    return symbols.stream()
+        .filter(symbol -> {
+          for (Pattern pattern : subscribeSymbolPatterns) {
+            if (pattern.matcher(symbol).matches()) {
+              return true;
+            }
+          }
+          return false;
+        }).toList();
   }
 
   private void startKlineWebSocketUpdater(int topicCount) {
@@ -342,8 +363,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private void startKlineRpcUpdater() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(() -> {
       List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+      List<String> subscribeSymbols = getSubscribeSymbols();
       List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
-      for (String symbol : getSymbols()) {
+      for (String symbol : subscribeSymbols) {
         for (IntervalEnum interval : subscribeIntervals) {
           symbolIntervals.add(ImmutablePair.of(symbol, interval));
         }

@@ -3,13 +3,16 @@ server:
 kline:
   binance:
     spot:
-      enabled: false
       minMaintainCount: 2000
       listenIntervals:
         - 1h
         - 1d
+      listenSymbolPatterns:
+        - .*?USDT
     future:
       minMaintainCount: 2000
       listenIntervals:
         - 1h
         - 1d
+      listenSymbolPatterns:
+        - .*?USDT

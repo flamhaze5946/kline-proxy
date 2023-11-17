@@ -6,4 +6,4 @@ VOLUME ["/app/application.yaml"]
 WORKDIR /app
 EXPOSE 8888
 
-ENTRYPOINT ["java", "-jar", "kline-proxy-1.0.0.jar"]
+ENTRYPOINT ["java", "-jar", "kline-proxy-1.0.0.jar", "--spring.config.location=file:/app/application.yaml"]
