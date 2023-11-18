@@ -51,9 +51,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Slf4j
 public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
-  private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor-";
+  private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
-  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-handler-";
+  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-handler";
 
   private static final ExecutorService MESSAGE_EXECUTOR = buildMessageExecutor();
 
@@ -125,8 +125,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void onReceive(String message) {
+    monitorTask.heartbeat();
     CompletableFuture.runAsync(() -> {
-      monitorTask.heartbeat();
       if (StringUtils.contains(message, PING)) {
         this.sendMessage(message.replace(PING, PONG));
         return;

@@ -73,7 +73,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final int SYMBOLS_PER_CONNECTION = 800;
 
-  private static final String SYNC_SYMBOLS_GROUP = "symbols-sync-";
+  private static final String SYNC_SYMBOLS_GROUP = "symbols-sync";
 
   private static final ScheduledExecutorService SCHEDULE_EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(4,
       ThreadFactoryUtil.getNamedThreadFactory(SYNC_SYMBOLS_GROUP));

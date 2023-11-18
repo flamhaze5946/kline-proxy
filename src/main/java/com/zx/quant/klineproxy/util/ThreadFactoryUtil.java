@@ -3,6 +3,8 @@ package com.zx.quant.klineproxy.util;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * named thread factory
@@ -27,18 +29,24 @@ public class ThreadFactoryUtil {
    * @return named thread factory
    */
   private static ThreadFactory newNamedThreadFactory(String groupName) {
-    return runnable -> {
-      ThreadGroup threadGroup = newThreadGroup(groupName);
-      return new Thread(threadGroup, runnable);
-    };
+    return new NamedThreadFactory(groupName);
   }
 
-  /**
-   * build new thread group
-   * @param groupName group name
-   * @return thread group
-   */
-  private static ThreadGroup newThreadGroup(String groupName) {
-    return new ThreadGroup(groupName);
+  private static class NamedThreadFactory implements ThreadFactory {
+
+    private static final String NAME_SEP = "-";
+
+    private final AtomicInteger threadNumber = new AtomicInteger(1);
+
+    private final String namePrefix;
+
+    public NamedThreadFactory(String namePrefix) {
+      this.namePrefix = namePrefix;
+    }
+
+    @Override
+    public Thread newThread(@NotNull Runnable runnable) {
+      return new Thread(runnable, String.join(NAME_SEP, namePrefix, String.valueOf(threadNumber.getAndIncrement())));
+    }
   }
 }
