@@ -1,6 +1,8 @@
 package com.zx.quant.klineproxy.service;
 
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Ticker;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -9,6 +11,13 @@ import java.util.List;
  * @author flamhaze5946
  */
 public interface KlineService {
+
+  /**
+   * query tickers
+   * @param symbols symbols, not required
+   * @return tickers
+   */
+  List<Ticker> queryTickers(Collection<String> symbols);
 
   /**
    * query klines

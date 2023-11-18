@@ -1,12 +1,27 @@
 package com.zx.quant.klineproxy.util;
 
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Ticker;
+import java.util.Collections;
+import java.util.List;
+import org.apache.commons.collections4.CollectionUtils;
 
 /**
  * convert util
  * @author flamhaze5946
  */
 public final class ConvertUtil {
+
+  public static Object convertToDisplayTicker(List<Ticker> tickers) {
+    if (CollectionUtils.isEmpty(tickers)) {
+      return Collections.emptyList();
+    }
+    if (tickers.size() == 1) {
+      return tickers.get(0);
+    } else {
+      return tickers;
+    }
+  }
 
   public static Object[] convertToDisplayKline(Kline kline) {
     if (kline == null) {

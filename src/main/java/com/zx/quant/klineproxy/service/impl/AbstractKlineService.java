@@ -7,6 +7,7 @@ import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
+import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.service.KlineService;
@@ -67,6 +68,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final ExecutorService KLINE_FETCH_EXECUTOR = buildKlineFetchExecutor();
 
+  private static final IntervalEnum DEFAULT_TICKER_INTERVAL = IntervalEnum.ONE_HOUR;
+
   private static final String KLINE_EVENT = "kline";
 
   private static final int SYMBOLS_PER_CONNECTION = 800;
@@ -115,6 +118,38 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected abstract List<String> getSymbols();
 
   protected abstract KlineSyncConfigProperties getSyncConfig();
+
+  @Override
+  public List<Ticker> queryTickers(Collection<String> symbols) {
+    IntervalEnum intervalEnum = DEFAULT_TICKER_INTERVAL;
+    List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+    if (CollectionUtils.isNotEmpty(subscribeIntervals)) {
+      intervalEnum = subscribeIntervals.get(0);
+    }
+    String interval = intervalEnum.code();
+    long engineTime = System.currentTimeMillis();
+    List<Ticker> tickers = new ArrayList<>();
+    Collection<String> realSymbols;
+    if (CollectionUtils.isNotEmpty(symbols)) {
+      realSymbols = symbols;
+    } else {
+      realSymbols = klineSetMap.keySet().stream()
+          .filter(key -> StringUtils.equals(key.getInterval(), interval))
+          .map(KlineSetKey::getSymbol)
+          .toList();
+    }
+
+    for (String symbol : realSymbols) {
+      KlineSetKey key = new KlineSetKey(symbol, interval);
+      KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
+      NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+      if (MapUtils.isNotEmpty(klineMap)) {
+        Kline kline = klineMap.lastEntry().getValue();
+        tickers.add(new Ticker(symbol, kline.getClosePrice(), engineTime));
+      }
+    }
+    return tickers;
+  }
 
   @Override
   public List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {

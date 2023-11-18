@@ -2,11 +2,15 @@ package com.zx.quant.klineproxy.controller;
 
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +36,26 @@ public class BinanceSpotController {
   @GetMapping("exchangeInfo")
   public BinanceSpotExchange queryExchange() {
     return exchangeService.queryExchange();
+  }
+
+
+  @GetMapping("ticker/price")
+  public Object queryTicker(
+      @RequestParam(value = "symbol", required = false) String symbol,
+      @RequestParam(value = "symbols", required = false) List<String> symbols
+  ) {
+    List<String> realSymbols = new ArrayList<>();
+    if (symbol != null) {
+      realSymbols.add(symbol);
+    }
+    if (CollectionUtils.isNotEmpty(symbols)) {
+      realSymbols.addAll(symbols);
+    }
+    realSymbols = realSymbols.stream()
+        .distinct()
+        .toList();
+    List<Ticker> tickers = klineService.queryTickers(realSymbols);
+    return ConvertUtil.convertToDisplayTicker(tickers);
   }
 
   @GetMapping("klines")
