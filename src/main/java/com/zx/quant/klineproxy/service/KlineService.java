@@ -3,6 +3,7 @@ package com.zx.quant.klineproxy.service;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -31,10 +32,17 @@ public interface KlineService {
   List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit);
 
   /**
-   * update kline
+   * update klines
    * @param symbol    symbol
    * @param interval  interval
-   * @param kline     kline
+   * @param klines    klines
    */
-  void updateKline(String symbol, String interval, Kline kline);
+  void updateKlines(String symbol, String interval, List<Kline> klines);
+
+  /**
+   * @see KlineService#updateKlines(String, String, List)
+   */
+  default void updateKline(String symbol, String interval, Kline kline) {
+    updateKlines(symbol, interval, Collections.singletonList(kline));
+  }
 }

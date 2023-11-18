@@ -204,16 +204,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public void updateKline(String symbol, String interval, Kline kline) {
-    if (kline == null) {
+  public void updateKlines(String symbol, String interval, List<Kline> klines) {
+    if (CollectionUtils.isEmpty(klines) || StringUtils.isBlank(symbol) || StringUtils.isBlank(interval)) {
       return;
     }
     KlineSetKey klineSetKey = new KlineSetKey(symbol, interval);
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-    Kline existKline = klineMap.get(kline.getOpenTime());
-    if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
-      klineMap.put(kline.getOpenTime(), kline);
+    for (Kline kline : klines) {
+      Kline existKline = klineMap.get(kline.getOpenTime());
+      if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
+        klineMap.put(kline.getOpenTime(), kline);
+      }
     }
   }
 
