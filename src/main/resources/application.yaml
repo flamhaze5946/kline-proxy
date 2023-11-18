@@ -16,3 +16,18 @@ kline:
         - 1d
       listenSymbolPatterns:
         - .*?USDT
+
+client:
+  binanceSpot:
+    api:
+      rootUrl: https://api.binance.com
+  binanceFuture:
+    api:
+      rootUrl: https://fapi.binance.com
+
+ws:
+  client:
+    binanceSpot:
+      url: wss://stream.binance.com/ws
+    binanceFuture:
+      url: wss://fstream.binance.com/ws
