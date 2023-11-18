@@ -28,9 +28,15 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -46,6 +52,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor-";
+
+  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-handler-";
+
+  private static final ExecutorService MESSAGE_EXECUTOR = buildMessageExecutor();
 
   private static final String PING = "PING";
 
@@ -115,19 +125,21 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void onReceive(String message) {
-    monitorTask.heartbeat();
-    if (StringUtils.contains(message, PING)) {
-      this.sendMessage(message.replace(PING, PONG));
-      return;
-    }
-    if (StringUtils.contains(message, PONG)) {
-      this.ping();
-      return;
-    }
+    CompletableFuture.runAsync(() -> {
+      monitorTask.heartbeat();
+      if (StringUtils.contains(message, PING)) {
+        this.sendMessage(message.replace(PING, PONG));
+        return;
+      }
+      if (StringUtils.contains(message, PONG)) {
+        this.ping();
+        return;
+      }
 
-    for (Consumer<String> messageHandler : messageHandlers) {
-      messageHandler.accept(message);
-    }
+      for (Consumer<String> messageHandler : messageHandlers) {
+        messageHandler.accept(message);
+      }
+    }, MESSAGE_EXECUTOR);
   }
 
   @Override
@@ -259,5 +271,18 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private String getScheduleExecutorGroupName() {
     return SCHEDULE_EXECUTOR_GROUP_PREFIX + clientName();
+  }
+
+  private static ExecutorService buildMessageExecutor() {
+    ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        MESSAGE_EXECUTOR_GROUP_PREFIX);
+    return new ThreadPoolExecutor(
+        2,
+        20,
+        1,
+        TimeUnit.MINUTES,
+        new LinkedBlockingQueue<>(1024),
+        namedThreadFactory,
+        new CallerRunsPolicy());
   }
 }
