@@ -51,13 +51,13 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   public void stopAcquire(String limiterName, long mills) {
     RateLimiterWrapper wrapper = getWrapper(limiterName);
     wrapper.getStoper().set(true);
-    timer.newTimeout(timeout -> wrapper.getStoper().set(false), mills, TimeUnit.SECONDS);
+    timer.newTimeout(timeout -> wrapper.getStoper().set(false), mills, TimeUnit.MILLISECONDS);
   }
 
   @Override
   public void afterPropertiesSet() throws Exception {
-    registerRateLimiter(Constants.BINANCE_SPOT, 30);
-    registerRateLimiter(Constants.BINANCE_FUTURE, 30);
+    registerRateLimiter(Constants.BINANCE_SPOT, 80);
+    registerRateLimiter(Constants.BINANCE_FUTURE, 35);
   }
 
   private RateLimiterWrapper getWrapper(String limiterName) {

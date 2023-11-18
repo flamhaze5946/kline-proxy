@@ -30,6 +30,10 @@ import retrofit2.Call;
 public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpotWebSocketClient>
     implements KlineService, InitializingBean {
 
+  private static final int MAKE_UP_KLINE_WEIGHT = 2;
+
+  private static final int MAKE_UP_KLINE_COUNT = 1000;
+
   @Autowired
   private BinanceSpotKlineSyncConfigProperties klineSyncConfigProperties;
 
@@ -43,7 +47,7 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     Call<List<Object[]>> klinesCall = binanceSpotClient.getKlines(symbol, interval, startTime, endTime, getLimit(limit));
     List<Object[]> responseBody = ClientUtil.getResponseBody(klinesCall,
-        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT, 1000 * 60 * 2));
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT, 1000 * 30));
     return Objects.requireNonNull(responseBody).stream()
         .map(this::serverKlineToKline)
         .collect(Collectors.toList());
@@ -62,5 +66,15 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   @Override
   protected KlineSyncConfigProperties getSyncConfig() {
     return klineSyncConfigProperties;
+  }
+
+  @Override
+  protected int getMakeUpKlinesLimit() {
+    return MAKE_UP_KLINE_COUNT;
+  }
+
+  @Override
+  protected int getMakeUpKlinesWeight() {
+    return MAKE_UP_KLINE_WEIGHT;
   }
 }

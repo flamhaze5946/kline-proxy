@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -79,8 +78,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private static final ScheduledExecutorService SCHEDULE_EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(4,
       ThreadFactoryUtil.getNamedThreadFactory(SYNC_SYMBOLS_GROUP));
 
-  private static final Integer MAKE_UP_LIMIT = 499;
-
   protected static final Integer DEFAULT_LIMIT = 500;
 
   protected static final Integer MIN_LIMIT = 1;
@@ -118,6 +115,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected abstract List<String> getSymbols();
 
   protected abstract KlineSyncConfigProperties getSyncConfig();
+
+  protected abstract int getMakeUpKlinesLimit();
+
+  protected abstract int getMakeUpKlinesWeight();
 
   @Override
   public List<Ticker> queryTickers(Collection<String> symbols) {
@@ -179,7 +180,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
         CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
                 safeQueryKlines(symbol, interval,
-                    makeUpRange.getLeft(), makeUpRange.getRight(), MAKE_UP_LIMIT)
+                    makeUpRange.getLeft(), makeUpRange.getRight(), getMakeUpKlinesLimit())
             , MANAGE_EXECUTOR);
         futures[i] = makeUpFuture;
       }
@@ -212,7 +213,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
     Kline existKline = klineMap.get(kline.getOpenTime());
     if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
-      klineSet.getKlineMap().put(kline.getOpenTime(), kline);
+      klineMap.put(kline.getOpenTime(), kline);
     }
   }
 
@@ -299,13 +300,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         for (Long needMakeUpOpenTime : needMakeUpOpenTimes) {
           if (makeStartTime == null) {
             makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeEndTime = makeStartTime + ((getMakeUpKlinesLimit() - 1) * intervalMills);
             makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
             continue;
           }
           if (needMakeUpOpenTime > makeEndTime) {
             makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeEndTime = makeStartTime + ((getMakeUpKlinesLimit() - 1) * intervalMills);
             makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
           }
         }
@@ -442,9 +443,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     for(int i = 0; i < makeUpTimeRanges.size(); i++) {
       ImmutablePair<Long, Long> rangePair = makeUpTimeRanges.get(i);
       CompletableFuture<List<Kline>> future = CompletableFuture.supplyAsync(() -> {
-        rateLimitManager.acquire(getRateLimiterName(), 1);
+        rateLimitManager.acquire(getRateLimiterName(), getMakeUpKlinesWeight());
         List<Kline> subKlines = queryKlines0(symbol, interval,
-            rangePair.getLeft(), rangePair.getRight(), MAKE_UP_LIMIT);
+            rangePair.getLeft(), rangePair.getRight(), getMakeUpKlinesLimit());
         for (Kline makeUpKline : subKlines) {
           updateKline(symbol, interval, makeUpKline);
         }
