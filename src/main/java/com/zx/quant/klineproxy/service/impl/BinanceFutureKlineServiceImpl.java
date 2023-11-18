@@ -43,7 +43,7 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     Call<List<Object[]>> klinesCall = binanceFutureClient.getKlines(symbol, interval, startTime, endTime, getLimit(limit));
     List<Object[]> responseBody = ClientUtil.getResponseBody(klinesCall,
-        () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE, 1000 * 30));
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE, 1000 * 60 * 2));
     return Objects.requireNonNull(responseBody).stream()
         .map(this::serverKlineToKline)
         .collect(Collectors.toList());

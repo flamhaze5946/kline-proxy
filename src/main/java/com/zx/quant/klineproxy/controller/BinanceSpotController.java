@@ -1,6 +1,6 @@
 package com.zx.quant.klineproxy.controller;
 
-import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
+import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
@@ -19,18 +19,18 @@ import org.springframework.web.bind.annotation.RestController;
  * @author flamhaze5946
  */
 @RestController
-@RequestMapping("fapi/v1")
-public class BinanceFutureController {
+@RequestMapping("api/v3")
+public class BinanceSpotController {
 
   @Autowired
-  @Qualifier("binanceFutureKlineService")
+  @Qualifier("binanceSpotKlineService")
   private KlineService klineService;
 
   @Autowired
-  private ExchangeService<BinanceFutureExchange> exchangeService;
+  private ExchangeService<BinanceSpotExchange> exchangeService;
 
   @GetMapping("exchangeInfo")
-  public BinanceFutureExchange queryExchange() {
+  public BinanceSpotExchange queryExchange() {
     return exchangeService.queryExchange();
   }
 
