@@ -1,8 +1,15 @@
 ### How to build
+
+```shell
 mvn clean package
 
+```
+
 ### How to launch
+
+```shell
 java $JAVA_OPTS -jar kline-proxy-1.0.0.jar --spring.config.location=file:/path/application.yaml
+```
 
 ### How to use
 
