@@ -21,9 +21,13 @@ java $JAVA_OPTS -jar kline-proxy-1.0.0.jar --spring.config.location=file:/path/a
 
 #### browser
 ##### spot klines
+http://localhost:8888/api/v3/exchangeInfo
+http://localhost:8888/api/v3/ticker/price
 http://localhost:8888/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100
 
 ##### future klines
+http://localhost:8888/fapi/v1/exchangeInfo
+http://localhost:8888/fapi/v1/ticker/price
 http://localhost:8888/fapi/v1/klines?symbol=BTCUSDT&interval=1d&limit=100
 
 #### python.ccxt
