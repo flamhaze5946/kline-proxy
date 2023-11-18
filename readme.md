@@ -1,3 +1,9 @@
+### Requirement
+at least 500MB free memory, depends on your configuration.
+
+### Configuration
+refer to src/main/resources/application.yaml
+
 ### How to build
 
 ```shell
