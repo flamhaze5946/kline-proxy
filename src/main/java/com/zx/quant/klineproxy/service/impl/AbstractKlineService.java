@@ -15,6 +15,7 @@ import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -121,70 +122,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
     }
-    int realLimit = limit != null ? limit : DEFAULT_LIMIT;
-    realLimit = Math.min(realLimit, MAX_LIMIT);
-    realLimit = Math.max(realLimit, MIN_LIMIT);
-    long intervalMills = intervalEnum.getMills();
-    long klinesDuration = (intervalMills * (realLimit - 1));
-    long realStartTime;
-    long realEndTime;
-    if (startTime != null && endTime != null) {
-      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
-      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
-      long maxEndTime = realStartTime + klinesDuration;
-      realEndTime = Math.min(realEndTime, maxEndTime);
-    } else if (startTime == null && endTime == null) {
-      realEndTime = (long) Math.floor((double) System.currentTimeMillis() / (double) intervalMills) * intervalMills;
-      realStartTime = realEndTime - klinesDuration;
-    } else if (startTime == null) {
-      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
-      realStartTime = realEndTime - klinesDuration;
-    } else {
-      // endTime == null
-      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
-      realEndTime = realStartTime + klinesDuration;
-    }
-    KlineSetKey key = new KlineSetKey(symbol, interval);
-    KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-    SortedMap<Long, Kline> savedKlineMap = klineSet.getKlineMap()
-        .subMap(realStartTime, true, realEndTime, true);
-    NavigableSet<Long> needMakeUpOpenTimes = new TreeSet<>();
-    long indexTime = realStartTime;
-    while (indexTime <= realEndTime) {
-      needMakeUpOpenTimes.add(indexTime);
-      indexTime += intervalMills;
-    }
-    needMakeUpOpenTimes.removeAll(savedKlineMap.keySet());
-    if (CollectionUtils.isNotEmpty(needMakeUpOpenTimes)) {
-      List<ImmutablePair<Long, Long>> makeUpTimeRanges = new ArrayList<>();
-      if (needMakeUpOpenTimes.size() > 1) {
-        Long makeStartTime = null;
-        Long makeEndTime = null;
-        for (Long needMakeUpOpenTime : needMakeUpOpenTimes) {
-          if (makeStartTime == null) {
-            makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
-            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
-            continue;
-          }
-          if (needMakeUpOpenTime > makeEndTime) {
-            makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
-            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
-          }
-        }
-      } else {
-        Long makeUpKlineTime = needMakeUpOpenTimes.first();
-        makeUpTimeRanges.add(ImmutablePair.of(makeUpKlineTime, makeUpKlineTime + 1));
-      }
+    int realLimit = calculateRealLimit(limit);
+    long klinesDuration = calculateKlinesDuration(intervalEnum, realLimit);
+    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, realLimit);
+    Long realStartTime = realTimePair.getLeft();
+    Long realEndTime = realTimePair.getRight();
 
+    KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
+    KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
+    Map<Long, Kline> savedKlineMap;
+
+    List<ImmutablePair<Long, Long>> makeUpTimeRanges =
+        buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
+
+    if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
+      savedKlineMap = klineSet.getKlineMap()
+          .subMap(realStartTime, true, realEndTime, true);
+    } else {
       CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
       for(int i = 0; i < makeUpTimeRanges.size(); i++) {
         ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
         CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
-            safeQueryKlines(symbol, interval,
-                makeUpRange.getLeft(), makeUpRange.getRight(), MAKE_UP_LIMIT)
-            , KLINE_FETCH_EXECUTOR);
+                safeQueryKlines(symbol, interval,
+                    makeUpRange.getLeft(), makeUpRange.getRight(), MAKE_UP_LIMIT)
+            , MANAGE_EXECUTOR);
         futures[i] = makeUpFuture;
       }
       CompletableFuture.allOf(futures).join();
@@ -273,6 +234,88 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     startKlineRpcUpdater();
   }
 
+
+  private List<ImmutablePair<Long, Long>> buildMakeUpTimeRanges(String symbol, Long startTime, Long endTime, IntervalEnum intervalEnum, Integer limit, boolean useSetCache) {
+    int realLimit = calculateRealLimit(limit);
+    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, realLimit);
+    long intervalMills = intervalEnum.getMills();
+    Long realStartTime = realTimePair.getLeft();
+    Long realEndTime = realTimePair.getRight();
+
+    NavigableSet<Long> needMakeUpOpenTimes = new TreeSet<>();
+    long indexTime = realStartTime;
+    while (indexTime <= realEndTime) {
+      needMakeUpOpenTimes.add(indexTime);
+      indexTime += intervalMills;
+    }
+    KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
+    if (useSetCache) {
+      KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
+      Map<Long, Kline> savedKlineMap = klineSet.getKlineMap()
+          .subMap(realStartTime, true, realEndTime, true);
+      needMakeUpOpenTimes.removeAll(savedKlineMap.keySet());
+    }
+
+    List<ImmutablePair<Long, Long>> makeUpTimeRanges = new ArrayList<>();
+    if (CollectionUtils.isNotEmpty(needMakeUpOpenTimes)) {
+      if (needMakeUpOpenTimes.size() > 1) {
+        Long makeStartTime = null;
+        Long makeEndTime = null;
+        for (Long needMakeUpOpenTime : needMakeUpOpenTimes) {
+          if (makeStartTime == null) {
+            makeStartTime = needMakeUpOpenTime;
+            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
+            continue;
+          }
+          if (needMakeUpOpenTime > makeEndTime) {
+            makeStartTime = needMakeUpOpenTime;
+            makeEndTime = makeStartTime + ((MAKE_UP_LIMIT - 1) * intervalMills);
+            makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
+          }
+        }
+      } else {
+        Long makeUpKlineTime = needMakeUpOpenTimes.first();
+        makeUpTimeRanges.add(ImmutablePair.of(makeUpKlineTime, makeUpKlineTime + 1));
+      }
+    }
+    return makeUpTimeRanges;
+  }
+
+  private int calculateRealLimit(Integer limit) {
+    int realLimit = limit != null ? limit : DEFAULT_LIMIT;
+    realLimit = Math.min(realLimit, MAX_LIMIT);
+    return Math.max(realLimit, MIN_LIMIT);
+  }
+
+  private long calculateKlinesDuration(IntervalEnum intervalEnum, int realLimit) {
+    return intervalEnum.getMills() * (realLimit - 1);
+  }
+
+  private ImmutablePair<Long, Long> calculateRealStartEndTime(Long startTime, Long endTime, IntervalEnum intervalEnum, int realLimit) {
+    long intervalMills = intervalEnum.getMills();
+    long klinesDuration = calculateKlinesDuration(intervalEnum, realLimit);
+    long realStartTime;
+    long realEndTime;
+    if (startTime != null && endTime != null) {
+      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
+      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
+      long maxEndTime = realStartTime + klinesDuration;
+      realEndTime = Math.min(realEndTime, maxEndTime);
+    } else if (startTime == null && endTime == null) {
+      realEndTime = (long) Math.floor((double) System.currentTimeMillis() / (double) intervalMills) * intervalMills;
+      realStartTime = realEndTime - klinesDuration;
+    } else if (startTime == null) {
+      realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
+      realStartTime = realEndTime - klinesDuration;
+    } else {
+      // endTime == null
+      realStartTime = (long) Math.ceil((double) startTime / (double) intervalMills) * intervalMills;
+      realEndTime = realStartTime + klinesDuration;
+    }
+    return ImmutablePair.of(realStartTime, realEndTime);
+  }
+
   private List<String> getSubscribeSymbols() {
     List<Pattern> subscribeSymbolPatterns = getSubscribeSymbolPatterns();
     List<String> symbols = getSymbols();
@@ -351,14 +394,35 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return limit;
   }
 
+  @SuppressWarnings("unchecked")
   private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
-    rateLimitManager.acquire(getRateLimiterName(), 1);
-    List<Kline> klines = queryKlines0(symbol, interval,
-        startTime, endTime, limit);
-    for (Kline makeUpKline : klines) {
-      updateKline(symbol, interval, makeUpKline);
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
+    List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(symbol, startTime,
+        endTime, intervalEnum, limit, false);
+    if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
+      return Collections.emptyList();
     }
-    return klines;
+
+    CompletableFuture<List<Kline>>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
+    for(int i = 0; i < makeUpTimeRanges.size(); i++) {
+      ImmutablePair<Long, Long> rangePair = makeUpTimeRanges.get(i);
+      CompletableFuture<List<Kline>> future = CompletableFuture.supplyAsync(() -> {
+        rateLimitManager.acquire(getRateLimiterName(), 1);
+        List<Kline> subKlines = queryKlines0(symbol, interval,
+            rangePair.getLeft(), rangePair.getRight(), MAKE_UP_LIMIT);
+        for (Kline makeUpKline : subKlines) {
+          updateKline(symbol, interval, makeUpKline);
+        }
+        return subKlines;
+      }, KLINE_FETCH_EXECUTOR);
+      futures[i] = future;
+    }
+    CompletableFuture.allOf(futures).join();
+    return Arrays.stream(futures)
+        .map(CompletableFuture::join)
+        .flatMap(Collection::stream)
+        .sorted(Comparator.comparing(Kline::getOpenTime))
+        .toList();
   }
 
   private void startKlineRpcUpdater() {
@@ -377,9 +441,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           ImmutablePair<String, IntervalEnum> symbolInterval = symbolIntervals.get(i);
           String symbol = symbolInterval.getLeft();
           IntervalEnum interval = symbolInterval.getRight();
-          CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() -> {
-            safeQueryKlines(symbol, interval.code(), null, System.currentTimeMillis(), getSyncConfig().getMinMaintainCount());
-          }, KLINE_FETCH_EXECUTOR);
+          CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() ->
+              safeQueryKlines(symbol, interval.code(),
+                  null, System.currentTimeMillis(),
+                  getSyncConfig().getMinMaintainCount()), KLINE_FETCH_EXECUTOR);
           syncFutures[i] = syncFuture;
         }
         CompletableFuture.allOf(syncFutures).join();
