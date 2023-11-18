@@ -20,8 +20,11 @@ java $JAVA_OPTS -jar kline-proxy-1.0.0.jar --spring.config.location=file:/path/a
 ### How to use
 
 #### browser
-http://localhost:8888/fapi/v1/klines?symbol=BTCUSDT&interval=1d&limit=100
+##### spot klines
 http://localhost:8888/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100
+
+##### future klines
+http://localhost:8888/fapi/v1/klines?symbol=BTCUSDT&interval=1d&limit=100
 
 #### python.ccxt
 ```python
