@@ -23,6 +23,13 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
 
   private final AtomicInteger idOffset = new AtomicInteger(0);
 
+  public BinanceWebSocketClient() {
+  }
+
+  public BinanceWebSocketClient(int clientNumber) {
+    super(clientNumber);
+  }
+
   @Override
   public synchronized void subscribeTopics(Collection<String> topics) {
     partitionSubscribeTopics(topics, true);
@@ -77,6 +84,7 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
       this.topics.removeAll(topics);
     }
   }
+
 
   @Data
   static class SubscribeBody {

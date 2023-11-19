@@ -71,7 +71,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final String KLINE_EVENT = "kline";
 
-  private static final int SYMBOLS_PER_CONNECTION = 800;
+  private static final int SYMBOLS_PER_CONNECTION = 150;
 
   private static final String SYNC_SYMBOLS_GROUP = "symbols-sync";
 

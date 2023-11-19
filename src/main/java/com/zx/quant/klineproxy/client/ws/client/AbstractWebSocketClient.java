@@ -50,6 +50,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Slf4j
 public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
+  private static final String CLIENT_NAME_SEP = "-";
+
   private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
   private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-message-handler";
@@ -63,6 +65,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   private final Supplier<WebSocketChannelInboundHandler> handlerSupplier;
 
   private final List<Consumer<String>> messageHandlers;
+
+  private final int clientNumber;
 
   @Autowired
   protected Serializer serializer;
@@ -81,11 +85,18 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private ScheduledExecutorService scheduledExecutorService;
 
+  private String clientName;
+
   public AbstractWebSocketClient() {
-    this(WebSocketChannelInboundHandler::new);
+    this(1);
   }
 
-  public AbstractWebSocketClient(Supplier<WebSocketChannelInboundHandler> handlerSupplier) {
+  public AbstractWebSocketClient(int clientNumber) {
+    this(clientNumber, WebSocketChannelInboundHandler::new);
+  }
+
+  public AbstractWebSocketClient(int clientNumber, Supplier<WebSocketChannelInboundHandler> handlerSupplier) {
+    this.clientNumber = clientNumber;
     this.handlerSupplier = handlerSupplier;
     this.messageHandlers = new ArrayList<>();
   }
@@ -195,6 +206,14 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
     channel.writeAndFlush(new TextWebSocketFrame(message));
     log.info("client: {} message: {} sent.", clientName(), message);
+  }
+
+  @Override
+  public String clientName() {
+    if (StringUtils.isBlank(clientName)) {
+      clientName = String.join(CLIENT_NAME_SEP, getClass().getSimpleName(), String.valueOf(clientNumber));
+    }
+    return clientName;
   }
 
   public void ping() {

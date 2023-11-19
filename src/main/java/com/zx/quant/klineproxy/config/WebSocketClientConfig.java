@@ -1,8 +1,11 @@
 package com.zx.quant.klineproxy.config;
 
+import com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceFutureWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceSpotWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.BeansException;
@@ -36,11 +39,11 @@ public class WebSocketClientConfig {
    * @author flamhaze5946
    */
   @Slf4j
-  private static class ClientRegisterProcessor<T extends WebSocketClient> implements BeanFactoryPostProcessor {
+  private static class ClientRegisterProcessor<T extends AbstractWebSocketClient<?>> implements BeanFactoryPostProcessor {
 
     private static final String BEAN_NAME_SEP = "_";
 
-    private static final int BEAN_COUNT = 8;
+    private static final int BEAN_COUNT = 30;
 
     private final Class<T> clazz;
 
@@ -53,10 +56,18 @@ public class WebSocketClientConfig {
         throws BeansException {
       for(int i = 0; i < BEAN_COUNT; i++) {
         String beanName = String.join(BEAN_NAME_SEP, clazz.getSimpleName(), String.valueOf(i));
-        BeanDefinition beanDefinition = new RootBeanDefinition(clazz);
+        int clientNumber = i;
+        BeanDefinition beanDefinition = new RootBeanDefinition(clazz, () -> {
+          try {
+            Constructor<T> constructor = clazz.getDeclaredConstructor(int.class);
+            return constructor.newInstance(clientNumber);
+          } catch (NoSuchMethodException | InvocationTargetException | InstantiationException |
+                   IllegalAccessException e) {
+            throw new RuntimeException(e);
+          }
+        });
         ((BeanDefinitionRegistry) beanFactory).registerBeanDefinition(
             beanName, beanDefinition);
-        log.info("webSocketClient bean: {} registered.", beanName);
       }
     }
   }
