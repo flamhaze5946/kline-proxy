@@ -33,7 +33,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
@@ -53,7 +52,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
-  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-handler";
+  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-message-handler";
 
   private static final ExecutorService MESSAGE_EXECUTOR = buildMessageExecutor();
 
@@ -106,15 +105,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void reconnect() {
-    if (group != null) {
-      this.group.shutdownGracefully().syncUninterruptibly();
-    }
-    this.group = null;
     this.connect();
-    if (!alive()) {
-      for (String topic : topics) {
-        this.subscribeTopic(topic);
-      }
+    if (alive()) {
+      this.subscribeTopics(topics);
     }
   }
 

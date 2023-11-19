@@ -24,12 +24,12 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
   private final AtomicInteger idOffset = new AtomicInteger(0);
 
   @Override
-  public void subscribeTopics(Collection<String> topics) {
+  public synchronized void subscribeTopics(Collection<String> topics) {
     partitionSubscribeTopics(topics, true);
   }
 
   @Override
-  public void unsubscribeTopics(Collection<String> topics) {
+  public synchronized void unsubscribeTopics(Collection<String> topics) {
     partitionSubscribeTopics(topics, false);
   }
 

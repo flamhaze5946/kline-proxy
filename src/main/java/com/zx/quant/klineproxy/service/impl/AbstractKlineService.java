@@ -571,7 +571,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         KLINE_FETCH_EXECUTOR_GROUP);
     return new ThreadPoolExecutor(0, 20,
-        1, TimeUnit.MINUTES, new SynchronousQueue<>(),
+        10, TimeUnit.MINUTES, new SynchronousQueue<>(),
         namedThreadFactory, new CallerRunsPolicy());
   }
 
