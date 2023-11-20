@@ -3,7 +3,6 @@ package com.zx.quant.klineproxy.config;
 import com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceFutureWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceSpotWebSocketClient;
-import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import lombok.extern.slf4j.Slf4j;
@@ -54,7 +53,7 @@ public class WebSocketClientConfig {
     @Override
     public void postProcessBeanFactory(@NotNull ConfigurableListableBeanFactory beanFactory)
         throws BeansException {
-      for(int i = 0; i < BEAN_COUNT; i++) {
+      for(int i = 1; i <= BEAN_COUNT; i++) {
         String beanName = String.join(BEAN_NAME_SEP, clazz.getSimpleName(), String.valueOf(i));
         int clientNumber = i;
         BeanDefinition beanDefinition = new RootBeanDefinition(clazz, () -> {

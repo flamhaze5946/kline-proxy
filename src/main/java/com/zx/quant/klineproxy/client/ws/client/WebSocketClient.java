@@ -3,6 +3,7 @@ package com.zx.quant.klineproxy.client.ws.client;
 import java.net.URI;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -24,6 +25,8 @@ public interface WebSocketClient {
   void close();
 
   boolean alive();
+
+  List<String> getSubscribedTopics();
 
   default void subscribeTopic(String topic) {
     subscribeTopics(Collections.singletonList(topic));

@@ -30,7 +30,6 @@ import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -96,8 +95,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
-
-  protected final Set<String> subscribedSymbols = new CopyOnWriteArraySet<>();
 
   /**
    * query kline by rpc, no cache
@@ -247,17 +244,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     };
   }
 
-  protected String buildSymbolUpdateTopic(String symbol, IntervalEnum intervalEnum) {
-    return StringUtils.lowerCase(symbol) + "@kline_" + intervalEnum.code();
-  }
-
-  protected List<String> buildSymbolUpdateTopics(String symbol) {
-    List<IntervalEnum> intervalEnums = getSyncConfig().getListenIntervals().stream()
-        .map(interval -> CommonUtil.getEnumByCode(interval, IntervalEnum.class))
-        .toList();
-    return intervalEnums.stream()
-        .map(intervalEnum -> buildSymbolUpdateTopic(symbol, intervalEnum))
-        .collect(Collectors.toList());
+  protected String buildSymbolUpdateTopic(String symbol, String interval) {
+    return StringUtils.lowerCase(symbol) + "@kline_" + interval;
   }
 
   protected void start() {
@@ -377,7 +365,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       webSocketClient.addMessageHandler(getMessageHandler());
       webSocketClient.start();
     }
-    adjustSubscribeSymbols();
+    adjustSubscribeTopics();
     releaseSymbolKlines();
   }
 
@@ -505,40 +493,58 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }, 1000, 5000, TimeUnit.MILLISECONDS);
   }
 
-  private void adjustSubscribeSymbols() {
+  private Set<String> buildNeedSubscribeTopics(Collection<String> needSubscribeSymbols, Collection<String> needSubscribeIntervals) {
+    if (CollectionUtils.isEmpty(needSubscribeSymbols) || CollectionUtils.isEmpty(needSubscribeIntervals)) {
+      return Collections.emptySet();
+    }
+    Set<String> topics = new HashSet<>(needSubscribeSymbols.size() * needSubscribeIntervals.size());
+    for (String symbol : needSubscribeSymbols) {
+      for (String interval : needSubscribeIntervals) {
+        String topic = buildSymbolUpdateTopic(symbol, interval);
+        topics.add(topic);
+      }
+    }
+    return topics;
+  }
+
+  private void adjustSubscribeTopics() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         () -> {
-          synchronized (subscribedSymbols) {
+          synchronized (this) {
             Set<String> exchangeSymbols = new HashSet<>(getSubscribeSymbols());
             Set<String> needSubscribeSymbols = new HashSet<>(exchangeSymbols);
-            needSubscribeSymbols.removeAll(subscribedSymbols);
+            Set<String> needSubscribeIntervals =
+                getSubscribeIntervals().stream()
+                    .map(IntervalEnum::code)
+                    .collect(Collectors.toSet());
+            Set<String> needSubscribeTopics =
+                buildNeedSubscribeTopics(needSubscribeSymbols, needSubscribeIntervals);
+            Set<String> needNewSubscribeTopics = new HashSet<>(needSubscribeTopics);
+            Set<String> subscribedTopics = getSubscribedTopics();
+            needNewSubscribeTopics.removeAll(subscribedTopics);
 
-            Set<String> needUnsubscribeSymbols = new HashSet<>(subscribedSymbols);
-            needUnsubscribeSymbols.removeAll(exchangeSymbols);
+            Set<String> needUnsubscribeTopics = new HashSet<>(subscribedTopics);
+            needUnsubscribeTopics.removeAll(needSubscribeTopics);
 
-            if (CollectionUtils.isNotEmpty(needSubscribeSymbols)) {
-              Set<String> topics = needSubscribeSymbols.stream()
-                  .map(this::buildSymbolUpdateTopics)
-                  .flatMap(Collection::stream)
-                  .collect(Collectors.toSet());
-              subscribe(topics);
+            if (CollectionUtils.isNotEmpty(needNewSubscribeTopics)) {
+              subscribe(needNewSubscribeTopics);
             }
 
-            if (CollectionUtils.isNotEmpty(needUnsubscribeSymbols)) {
-              Set<String> topics = needUnsubscribeSymbols.stream()
-                  .map(this::buildSymbolUpdateTopics)
-                  .flatMap(Collection::stream)
-                  .collect(Collectors.toSet());
-              unsubscribe(topics);
+            if (CollectionUtils.isNotEmpty(needUnsubscribeTopics)) {
+              unsubscribe(needUnsubscribeTopics);
             }
-
-            subscribedSymbols.addAll(exchangeSymbols);
-            subscribedSymbols.removeAll(needUnsubscribeSymbols);
           }
         },
         1000,
         5000,
         TimeUnit.MILLISECONDS);
+  }
+
+  private Set<String> getSubscribedTopics() {
+    return webSocketClients.stream()
+        .map(WebSocketClient::getSubscribedTopics)
+        .flatMap(Collection::stream)
+        .collect(Collectors.toSet());
   }
 
   private List<T> getActiveWebSocketClients() {

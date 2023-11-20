@@ -25,6 +25,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -40,6 +41,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -51,6 +54,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String CLIENT_NAME_SEP = "-";
+
+  private static final long BATCH_FUNC_WAIT_MILLS = 1000L;
 
   private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
@@ -119,6 +124,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.connect();
     if (alive()) {
       this.subscribeTopics(topics);
+    } else {
+      log.warn("websocket client: {} not alived when reconnect.", clientName());
     }
   }
 
@@ -152,6 +159,37 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
+  public synchronized void subscribeTopics(Collection<String> topics) {
+    partitionSubscribeTopics(topics, true);
+  }
+
+  @Override
+  public synchronized void unsubscribeTopics(Collection<String> topics) {
+    partitionSubscribeTopics(topics, false);
+  }
+
+  protected abstract void subscribeTopics0(Collection<String> topics, boolean subscribe);
+
+  protected abstract int getMaxTopicsPerTime();
+
+  public void partitionSubscribeTopics(Collection<String> topics, boolean subscribe) {
+    if (CollectionUtils.isEmpty(topics)) {
+      return;
+    }
+
+    List<List<String>> topicsList = ListUtils.partition(new ArrayList<>(topics), getMaxTopicsPerTime());
+    for (List<String> subTopics : topicsList) {
+      subscribeTopics0(subTopics, subscribe);
+      CommonUtil.sleep(BATCH_FUNC_WAIT_MILLS);
+    }
+  }
+
+  @Override
+  public List<String> getSubscribedTopics() {
+    return List.copyOf(topics);
+  }
+
+  @Override
   public URI uri() {
     if (uri == null) {
       synchronized (this) {
@@ -173,6 +211,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       connectWebSocket(uri(), handler);
       if (alive()) {
         handler.getHandshakeFuture().sync();
+      } else {
+        log.warn("websocket client: {} not alived when handshaking.", clientName());
       }
     } catch (Exception e) {
       log.error("websocket client: {} start failed.", clientName(), e);
@@ -219,6 +259,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   public void ping() {
     if (alive()) {
       channel.writeAndFlush(new PingWebSocketFrame());
+    } else {
+      log.warn("websocket client: {} not alived when ping.", clientName());
     }
   }
 
@@ -246,9 +288,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         sslCtx = null;
       }
       if (group != null && !group.isShutdown()) {
-        group.shutdownGracefully().syncUninterruptibly();
+        group.shutdownNow();
       }
-      group = new NioEventLoopGroup(2);
+      group = new NioEventLoopGroup(2, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
       Bootstrap bootstrap = new Bootstrap();
       bootstrap
           .group(group)
@@ -282,7 +324,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
 
   private String getScheduleExecutorGroupName() {
-    return SCHEDULE_EXECUTOR_GROUP_PREFIX + clientName();
+    return String.join(CLIENT_NAME_SEP, SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
   }
 
   private static ExecutorService buildMessageExecutor() {
