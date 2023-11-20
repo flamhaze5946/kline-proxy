@@ -217,7 +217,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     } catch (Exception e) {
       log.error("websocket client: {} start failed.", clientName(), e);
       if (group != null) {
-        group.shutdownGracefully().syncUninterruptibly();
+        group.shutdownGracefully().addListener(event ->
+            log.info("websocket client: {} event group: {} has been shutting down, cause by connect error.", clientName(), group));
       }
     }
   }
@@ -288,9 +289,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         sslCtx = null;
       }
       if (group != null && !group.isShutdown()) {
-        group.shutdownGracefully(1, 2, TimeUnit.SECONDS).sync();
+        group.shutdownGracefully().addListener(event ->
+            log.info("websocket client: {} event group: {} has been shutting down, cause by reconnect.", clientName(), group));
       }
       group = new NioEventLoopGroup(2, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
+      log.info("websocket client: {} new event group: {} has been startup.", clientName(), group);
       Bootstrap bootstrap = new Bootstrap();
       bootstrap
           .group(group)
@@ -309,7 +312,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     } catch (Exception e) {
       log.error(" websocket client: {} start error.", clientName(), e);
       if (group != null) {
-        group.shutdownGracefully().syncUninterruptibly();
+        group.shutdownGracefully().addListener(event ->
+            log.info("websocket client: {} event group: {} has been shutting down, cause by start error.", clientName(), group));
       }
     }
   }

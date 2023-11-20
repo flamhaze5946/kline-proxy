@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -32,6 +33,8 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
 
   private final LoadingCache<String, BinanceSpotExchange> exchangeCache = buildExchangeCache();
 
+  private final AtomicLong serverTimeDelta = new AtomicLong(0);
+
   @Autowired
   private RateLimitManager rateLimitManager;
 
@@ -40,7 +43,10 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
 
   @Override
   public BinanceSpotExchange queryExchange() {
-    return exchangeCache.get(StringUtils.EMPTY);
+    BinanceSpotExchange exchange = exchangeCache.get(StringUtils.EMPTY);
+    long serverTime = System.currentTimeMillis() - serverTimeDelta.get();
+    exchange.setServerTime(serverTime);
+    return exchange;
   }
 
   @Override
@@ -68,8 +74,13 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
           @Override
           public @Nullable BinanceSpotExchange load(String s) throws Exception {
             Call<BinanceSpotExchange> exchangeCall = binanceSpotClient.getExchange();
-            return ClientUtil.getResponseBody(exchangeCall,
+            BinanceSpotExchange exchange = ClientUtil.getResponseBody(exchangeCall,
                 () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT, 1000 * 30));
+            if (exchange.getServerTime() != null) {
+              long deltaMills = System.currentTimeMillis() - exchange.getServerTime();
+              serverTimeDelta.set(deltaMills);
+            }
+            return exchange;
           }
         });
   }
