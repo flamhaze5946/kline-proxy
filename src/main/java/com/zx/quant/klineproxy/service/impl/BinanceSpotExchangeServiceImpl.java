@@ -13,7 +13,7 @@ import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -44,6 +44,15 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
   }
 
   @Override
+  public long queryServerTime() {
+    Long serverTime = queryExchange().getServerTime();
+    if (serverTime != null) {
+      return serverTime;
+    }
+    return System.currentTimeMillis();
+  }
+
+  @Override
   public List<String> querySymbols() {
     return queryExchange().getSymbols().stream()
         .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
@@ -53,7 +62,8 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
 
   private LoadingCache<String, BinanceSpotExchange> buildExchangeCache() {
     return Caffeine.newBuilder()
-        .expireAfterWrite(Duration.of(1, ChronoUnit.MINUTES))
+        .expireAfterWrite(Duration.of(10, ChronoUnit.MINUTES))
+        .refreshAfterWrite(5, TimeUnit.MINUTES)
         .build(new CacheLoader<>() {
           @Override
           public @Nullable BinanceSpotExchange load(String s) throws Exception {

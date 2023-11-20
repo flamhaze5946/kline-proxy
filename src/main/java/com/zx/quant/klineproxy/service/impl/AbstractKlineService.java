@@ -117,6 +117,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected abstract int getMakeUpKlinesWeight();
 
+  protected long getServerTime() {
+    return System.currentTimeMillis();
+  }
+
   @Override
   public List<Ticker> queryTickers(Collection<String> symbols) {
     IntervalEnum intervalEnum = DEFAULT_TICKER_INTERVAL;
@@ -125,7 +129,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       intervalEnum = subscribeIntervals.get(0);
     }
     String interval = intervalEnum.code();
-    long engineTime = System.currentTimeMillis();
+    long serverTime = getServerTime();
     List<Ticker> tickers = new ArrayList<>();
     Collection<String> realSymbols;
     if (CollectionUtils.isNotEmpty(symbols)) {
@@ -143,7 +147,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
       if (MapUtils.isNotEmpty(klineMap)) {
         Kline kline = klineMap.lastEntry().getValue();
-        tickers.add(new Ticker(symbol, kline.getClosePrice(), engineTime));
+        tickers.add(new Ticker(symbol, kline.getClosePrice(), serverTime));
       }
     }
     return tickers;

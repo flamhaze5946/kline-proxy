@@ -288,7 +288,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         sslCtx = null;
       }
       if (group != null && !group.isShutdown()) {
-        group.shutdownNow();
+        group.shutdownGracefully(1, 2, TimeUnit.SECONDS).sync();
       }
       group = new NioEventLoopGroup(2, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
       Bootstrap bootstrap = new Bootstrap();

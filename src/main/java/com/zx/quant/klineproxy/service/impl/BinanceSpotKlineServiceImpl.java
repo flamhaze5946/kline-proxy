@@ -54,6 +54,11 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   }
 
   @Override
+  protected long getServerTime() {
+    return exchangeService.queryServerTime();
+  }
+
+  @Override
   protected String getRateLimiterName() {
     return Constants.BINANCE_FUTURE;
   }

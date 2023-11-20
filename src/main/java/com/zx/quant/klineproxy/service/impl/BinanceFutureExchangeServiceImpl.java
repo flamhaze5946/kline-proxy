@@ -12,6 +12,7 @@ import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
@@ -47,6 +48,15 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
   }
 
   @Override
+  public long queryServerTime() {
+    Long serverTime = queryExchange().getServerTime();
+    if (serverTime != null) {
+      return serverTime;
+    }
+    return System.currentTimeMillis();
+  }
+
+  @Override
   public List<String> querySymbols() {
     return queryExchange().getSymbols().stream()
         .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
@@ -57,7 +67,8 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
   private LoadingCache<String, BinanceFutureExchange> buildExchangeCache() {
     return Caffeine.newBuilder()
         .maximumSize(1)
-        .expireAfterWrite(Duration.of(1, ChronoUnit.MINUTES))
+        .expireAfterWrite(Duration.of(10, ChronoUnit.MINUTES))
+        .refreshAfterWrite(5, TimeUnit.MINUTES)
         .build(s -> {
           Call<BinanceFutureExchange> exchangeCall = binanceFutureClient.getExchange();
           BinanceFutureExchange exchange = ClientUtil.getResponseBody(exchangeCall,

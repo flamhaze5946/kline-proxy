@@ -15,6 +15,12 @@ public interface ExchangeService<T> {
   T queryExchange();
 
   /**
+   * get server time
+   * @return server time
+   */
+  long queryServerTime();
+
+  /**
    * query symbols
    * @return symbols
    */
