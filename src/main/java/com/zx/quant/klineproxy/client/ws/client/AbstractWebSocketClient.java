@@ -8,6 +8,7 @@ import com.zx.quant.klineproxy.client.ws.task.PingTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
+import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
@@ -48,6 +49,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -76,6 +78,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String PONG = "PONG";
 
+  private final AtomicBoolean launching;
+
   private final Supplier<WebSocketChannelInboundHandler> handlerSupplier;
 
   private final List<Consumer<String>> messageHandlers;
@@ -86,7 +90,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Queue<String> candidateUnsubscribeTopics;
 
-  private final Queue<WebSocketFrame> webSocketFrames;
+  private final Queue<WebSocketFrameWrapper> frameWrappers;
 
   private final Map<String, TopicMonitorTask> topicMonitorTaskMap;
 
@@ -107,12 +111,6 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   protected ClientMonitorTask clientMonitorTask;
 
-  protected PingTask pingTask;
-
-  protected TopicsSubscribeTask subscribeTask;
-
-  protected TopicsUnsubscribeTask unsubscribeTask;
-
   private ScheduledExecutorService monitorScheduler;
 
   private ScheduledExecutorService subscribeScheduler;
@@ -128,6 +126,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   public AbstractWebSocketClient(int clientNumber, Supplier<WebSocketChannelInboundHandler> handlerSupplier) {
+    this.launching = new AtomicBoolean(false);
     this.clientNumber = clientNumber;
     this.handlerSupplier = handlerSupplier;
     this.registeredTopics = new ConcurrentSkipListSet<>();
@@ -135,7 +134,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.messageTopicExtractors = new ArrayList<>();
     this.candidateSubscribeTopics = new LinkedBlockingQueue<>();
     this.candidateUnsubscribeTopics = new LinkedBlockingQueue<>();
-    this.webSocketFrames = new LinkedBlockingQueue<>();
+    this.frameWrappers = new LinkedBlockingQueue<>();
     this.topicMonitorTaskMap = new ConcurrentHashMap<>();
   }
 
@@ -164,31 +163,39 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   public void start() {
-    if (monitorScheduler != null) {
-      monitorScheduler.shutdown();
+    synchronized (launching) {
+      launching.set(false);
+      if (monitorScheduler != null) {
+        monitorScheduler.shutdown();
+      }
+      if (subscribeScheduler != null) {
+        subscribeScheduler.shutdown();
+      }
+
+      this.frameWrappers.clear();
+      this.candidateSubscribeTopics.clear();
+      this.candidateUnsubscribeTopics.clear();
+      this.topicMonitorTaskMap.clear();
+      this.registeredTopics.clear();
+
+      this.connect();
+      this.clientMonitorTask = new ClientMonitorTask(this);
+      PingTask pingTask = new PingTask(this);
+      monitorScheduler = buildMonitorScheduler();
+      monitorScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(clientMonitorTask), 1000 * 5, 1000, TimeUnit.MILLISECONDS);
+      monitorScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(pingTask), 1000 * 30, 1000 * 60, TimeUnit.MILLISECONDS);
+
+      TopicsSubscribeTask subscribeTask = new TopicsSubscribeTask(this.candidateSubscribeTopics, getMaxTopicsPerTime(), this::executeSubscribeTask);
+      TopicsUnsubscribeTask unsubscribeTask = new TopicsUnsubscribeTask(this.candidateUnsubscribeTopics, getMaxTopicsPerTime(), this::executeUnsubscribeTask);
+      subscribeScheduler = buildSubscribeScheduler();
+      subscribeScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(subscribeTask), 0, 1000, TimeUnit.MILLISECONDS);
+      subscribeScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(unsubscribeTask), 0, 1000, TimeUnit.MILLISECONDS);
+      launching.set(true);
     }
-    if (subscribeScheduler != null) {
-      subscribeScheduler.shutdown();
-    }
-
-    this.webSocketFrames.clear();
-    this.candidateSubscribeTopics.clear();
-    this.candidateUnsubscribeTopics.clear();
-    this.topicMonitorTaskMap.clear();
-    this.registeredTopics.clear();
-
-    this.connect();
-    this.clientMonitorTask = new ClientMonitorTask(this);
-    this.pingTask = new PingTask(this);
-    monitorScheduler = buildMonitorScheduler();
-    monitorScheduler.scheduleWithFixedDelay(clientMonitorTask, 0,1000, TimeUnit.MILLISECONDS);
-    monitorScheduler.scheduleWithFixedDelay(pingTask, 0,1000 * 60, TimeUnit.MILLISECONDS);
-
-    this.subscribeTask = new TopicsSubscribeTask(this.candidateSubscribeTopics, getMaxTopicsPerTime(), this::executeSubscribeTask);
-    this.unsubscribeTask = new TopicsUnsubscribeTask(this.candidateUnsubscribeTopics, getMaxTopicsPerTime(), this::executeUnsubscribeTask);
-    subscribeScheduler = buildSubscribeScheduler();
-    subscribeScheduler.scheduleWithFixedDelay(subscribeTask, 0, 1000, TimeUnit.MILLISECONDS);
-    subscribeScheduler.scheduleWithFixedDelay(unsubscribeTask, 0, 1000, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -262,36 +269,39 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void connect() {
-    try {
-      subId = generateSubId();
-      WebSocketChannelInboundHandler handler = handlerSupplier.get();
-      handler.init(this);
+    synchronized (launching) {
+      try {
+        subId = generateSubId();
+        WebSocketChannelInboundHandler handler = handlerSupplier.get();
+        handler.init(this);
 
-      connectWebSocket(uri(), handler);
-      if (alive()) {
-        handler.getHandshakeFuture().sync();
-        this.subscribeTopics(registeredTopics);
-      } else {
-        log.warn("websocket client: {} not alived when connect.", clientName());
-      }
-    } catch (Exception e) {
-      log.error("websocket client: {} start failed.", clientName(), e);
-      if (group != null) {
-        group.shutdownGracefully().addListener(event ->
-            log.info("websocket client: {} event group: {} has been shutting down, cause by connect error.", clientName(), group));
+        connectWebSocket(uri(), handler);
+        if (alive()) {
+          handler.getHandshakeFuture().sync();
+          this.subscribeTopics(registeredTopics);
+        } else {
+          log.warn("websocket client: {} not alived when connect.", clientName());
+        }
+      } catch (Exception e) {
+        log.error("websocket client: {} start failed.", clientName(), e);
+        shutdownGroup("connect error");
       }
     }
   }
 
   @Override
   public void reconnect() {
-    try{
-      log.info("websocket client: {} start to reconnect.", clientName());
-      this.connect();
-    } catch (Exception e) {
-      log.warn("websocket client: {} reconnect failed.", clientName(), e);
-    } finally{
-      log.warn("websocket client: {} reconnect complete.", clientName());
+    synchronized (launching) {
+      launching.set(false);
+      try{
+        log.info("websocket client: {} start to reconnect.", clientName());
+        this.connect();
+      } catch (Exception e) {
+        log.warn("websocket client: {} reconnect failed.", clientName(), e);
+      } finally{
+        log.warn("websocket client: {} reconnect complete.", clientName());
+      }
+      launching.set(true);
     }
   }
 
@@ -376,10 +386,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       } else {
         sslCtx = null;
       }
-      if (group != null && !group.isShutdown()) {
-        group.shutdownGracefully().addListener(event ->
-            log.info("websocket client: {} event group: {} has been shutting down, cause by reconnect.", clientName(), group));
-      }
+      shutdownGroup("reconnect");
       group = new NioEventLoopGroup(2, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
       log.info("websocket client: {} new event group: {} has been startup.", clientName(), group);
       Bootstrap bootstrap = new Bootstrap();
@@ -393,16 +400,13 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
               if (sslCtx != null) {
                 pipeline.addLast(sslCtx.newHandler(ch.alloc(), host, port));
               }
-              pipeline.addLast(new HttpClientCodec(), new HttpObjectAggregator(81920), handler);
+              pipeline.addLast(new HttpClientCodec(), new HttpObjectAggregator(8192), handler);
             }
           });
       channel = bootstrap.connect(host, port).sync().channel();
     } catch (Exception e) {
       log.error(" websocket client: {} start error.", clientName(), e);
-      if (group != null) {
-        group.shutdownGracefully().addListener(event ->
-            log.info("websocket client: {} event group: {} has been shutting down, cause by start error.", clientName(), group));
-      }
+      shutdownGroup("start error");
     }
   }
 
@@ -414,10 +418,18 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
+  private void shutdownGroup(String causeBy) {
+    if (group != null && !group.isShutdown() && !group.isShuttingDown()) {
+      group.shutdownGracefully().addListener(event ->
+          log.info("websocket client: {} event group: {} has been shutting down, cause by {}.", clientName(), group, causeBy));
+    }
+  }
+
   private void startTopicMessageMonitors(Collection<String> topics) {
     for (String topic : topics) {
       TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.computeIfAbsent(topic, var -> new TopicMonitorTask(this, topic));
-      monitorScheduler.scheduleWithFixedDelay(topicMonitorTask, 1000 * 10, 1000, TimeUnit.MILLISECONDS);
+      monitorScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(topicMonitorTask), 1000 * 10, 1000, TimeUnit.MILLISECONDS);
       topicMonitorTask.start();
     }
   }
@@ -455,7 +467,6 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     });
   }
 
-
   private String getMonitorScheduleExecutorGroupName() {
     return String.join(CLIENT_NAME_SEP, MONITOR_SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
   }
@@ -492,5 +503,22 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         new LinkedBlockingQueue<>(1024),
         namedThreadFactory,
         new CallerRunsPolicy());
+  }
+
+  private class SwitchableRunnable implements Runnable {
+
+    private final Runnable target;
+
+    private SwitchableRunnable(Runnable target) {
+      this.target = target;
+    }
+
+    @Override
+    public void run() {
+      if (!launching.get()) {
+        return;
+      }
+      target.run();
+    }
   }
 }

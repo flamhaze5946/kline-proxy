@@ -60,8 +60,8 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
 
   @Override
   public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-    log.warn("websocket client: {} disconnected, restart.", webSocketClient.clientName());
-    webSocketClient.start();
+    log.warn("websocket client: {} disconnected, reconnect.", webSocketClient.clientName());
+    webSocketClient.reconnect();
   }
   @Override
   public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
