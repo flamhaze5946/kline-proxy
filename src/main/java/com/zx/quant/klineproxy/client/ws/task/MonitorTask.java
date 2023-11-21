@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.client.ws.task;
 
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -8,33 +9,51 @@ import lombok.extern.slf4j.Slf4j;
  * @author flamhaze5946
  */
 @Slf4j
-public class MonitorTask implements Runnable {
+public abstract class MonitorTask implements Runnable {
 
-  private static final long CHECK_INTERVAL_MILLS = 20000L;
+  protected final WebSocketClient client;
 
-  private long startTime = System.currentTimeMillis();
+  protected final int skipCheckTimes;
 
-  private final WebSocketClient client;
+  protected final AtomicLong invokeTimes = new AtomicLong(0);
 
-  public MonitorTask(WebSocketClient client) {
+  protected long lastMessageTime = System.currentTimeMillis();
+
+  protected MonitorTask(WebSocketClient client, int skipCheckTimes) {
     this.client = client;
+    this.skipCheckTimes = skipCheckTimes;
+  }
+
+  protected MonitorTask(WebSocketClient client) {
+    this(client, 0);
   }
 
   public void heartbeat() {
-    this.startTime = System.currentTimeMillis();
+    this.lastMessageTime = System.currentTimeMillis();
   }
 
   @Override
   public void run() {
-    if (System.currentTimeMillis() - this.startTime > CHECK_INTERVAL_MILLS) {
-      try {
-        log.info("{}ms not received messages from client {}, reconnect.", CHECK_INTERVAL_MILLS, client.clientName());
-        client.reconnect();
-      } catch (Exception e) {
-        log.warn("client {} reconnect failed.", client.clientName(), e);
-      } finally {
-        log.info("client {} reconnect complete.", client.clientName());
+    if (System.currentTimeMillis() - this.lastMessageTime > getCheckDurationMills()) {
+      synchronized (this) {
+        if (System.currentTimeMillis() - this.lastMessageTime > getCheckDurationMills()) {
+          long currentInvokeTimes = invokeTimes.incrementAndGet();
+          if (currentInvokeTimes <= skipCheckTimes) {
+            heartbeat();
+            if (log.isDebugEnabled()) {
+              log.debug("monitor: {} skip check in {}/{} times.", getClass().getSimpleName(), currentInvokeTimes, skipCheckTimes);
+            }
+            return;
+          }
+
+          overHeartBeat();
+          heartbeat();
+        }
       }
     }
   }
+
+  protected abstract void overHeartBeat();
+
+  protected abstract long getCheckDurationMills();
 }

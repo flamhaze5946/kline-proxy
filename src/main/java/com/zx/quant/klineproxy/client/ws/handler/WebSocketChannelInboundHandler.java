@@ -88,7 +88,7 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
       webSocketClient.onReceive(textWebSocketFrame.text());
     } else if (frame instanceof PingWebSocketFrame) {
       webSocketClient.onReceiveNoHandle();
-      channel.writeAndFlush(new PongWebSocketFrame());
+      webSocketClient.sendData(new PongWebSocketFrame());
     } else if (frame instanceof PongWebSocketFrame) {
       webSocketClient.onReceiveNoHandle();
       if (log.isDebugEnabled()) {

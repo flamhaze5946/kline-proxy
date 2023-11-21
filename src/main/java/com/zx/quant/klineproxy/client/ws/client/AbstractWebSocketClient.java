@@ -1,9 +1,13 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
+import com.google.common.collect.Sets;
 import com.zx.quant.klineproxy.client.ws.enums.ProtocolEnum;
 import com.zx.quant.klineproxy.client.ws.handler.WebSocketChannelInboundHandler;
-import com.zx.quant.klineproxy.client.ws.task.MonitorTask;
+import com.zx.quant.klineproxy.client.ws.task.ClientMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.PingTask;
+import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
+import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
+import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
@@ -18,7 +22,9 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -26,23 +32,26 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -55,9 +64,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String CLIENT_NAME_SEP = "-";
 
-  private static final long BATCH_FUNC_WAIT_MILLS = 1000L;
+  private static final String MONITOR_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
-  private static final String SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
+  private static final String SUBSCRIBE_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-subscribe";
 
   private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-message-handler";
 
@@ -71,7 +80,19 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final List<Consumer<String>> messageHandlers;
 
-  private final int clientNumber;
+  private final List<Function<String, String>> messageTopicExtractors;
+
+  private final Queue<String> candidateSubscribeTopics;
+
+  private final Queue<String> candidateUnsubscribeTopics;
+
+  private final Queue<WebSocketFrame> webSocketFrames;
+
+  private final Map<String, TopicMonitorTask> topicMonitorTaskMap;
+
+  protected final Set<String> registeredTopics;
+
+  protected final int clientNumber;
 
   @Autowired
   protected Serializer serializer;
@@ -82,13 +103,19 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   protected Channel channel;
 
-  protected Set<String> topics = new HashSet<>();
-
   protected EventLoopGroup group;
 
-  protected MonitorTask monitorTask;
+  protected ClientMonitorTask clientMonitorTask;
 
-  private ScheduledExecutorService scheduledExecutorService;
+  protected PingTask pingTask;
+
+  protected TopicsSubscribeTask subscribeTask;
+
+  protected TopicsUnsubscribeTask unsubscribeTask;
+
+  private ScheduledExecutorService monitorScheduler;
+
+  private ScheduledExecutorService subscribeScheduler;
 
   private String clientName;
 
@@ -103,30 +130,65 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   public AbstractWebSocketClient(int clientNumber, Supplier<WebSocketChannelInboundHandler> handlerSupplier) {
     this.clientNumber = clientNumber;
     this.handlerSupplier = handlerSupplier;
+    this.registeredTopics = new ConcurrentSkipListSet<>();
     this.messageHandlers = new ArrayList<>();
+    this.messageTopicExtractors = new ArrayList<>();
+    this.candidateSubscribeTopics = new LinkedBlockingQueue<>();
+    this.candidateUnsubscribeTopics = new LinkedBlockingQueue<>();
+    this.webSocketFrames = new LinkedBlockingQueue<>();
+    this.topicMonitorTaskMap = new ConcurrentHashMap<>();
+  }
+
+  private void executeSubscribeTask(Collection<String> topics) {
+    if (!alive()) {
+      log.warn("websocket client: {} not alive when subscribe topics", clientName());
+      throw new RuntimeException("websocket client not alive when subscribe topics");
+    }
+    subscribeTopics0(topics);
+    registeredTopics.addAll(topics);
+    if (monitorTopicMessage()) {
+      startTopicMessageMonitors(topics);
+    }
+  }
+
+  private void executeUnsubscribeTask(Collection<String> topics) {
+    if (!alive()) {
+      log.warn("websocket client: {} not alive when unsubscribe topics", clientName());
+      throw new RuntimeException("websocket client not alive when unsubscribe topics");
+    }
+    unsubscribeTopics0(topics);
+    registeredTopics.removeAll(Sets.newHashSet(topics));
+    if (monitorTopicMessage()) {
+      stopTopicMessageMonitors(topics);
+    }
   }
 
   public void start() {
-    this.connect();
-    if (scheduledExecutorService != null) {
-      scheduledExecutorService.shutdown();
+    if (monitorScheduler != null) {
+      monitorScheduler.shutdown();
     }
-    this.monitorTask = new MonitorTask(this);
-    PingTask pingTask = new PingTask(this);
-    ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(getScheduleExecutorGroupName());
-    scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(scheduleThreadFactory);
-    scheduledExecutorService.scheduleWithFixedDelay(monitorTask, 0,15000, TimeUnit.MILLISECONDS);
-    scheduledExecutorService.scheduleWithFixedDelay(pingTask, 0,5000, TimeUnit.MILLISECONDS);
-  }
+    if (subscribeScheduler != null) {
+      subscribeScheduler.shutdown();
+    }
 
-  @Override
-  public void reconnect() {
+    this.webSocketFrames.clear();
+    this.candidateSubscribeTopics.clear();
+    this.candidateUnsubscribeTopics.clear();
+    this.topicMonitorTaskMap.clear();
+    this.registeredTopics.clear();
+
     this.connect();
-    if (alive()) {
-      this.subscribeTopics(topics);
-    } else {
-      log.warn("websocket client: {} not alived when reconnect.", clientName());
-    }
+    this.clientMonitorTask = new ClientMonitorTask(this);
+    this.pingTask = new PingTask(this);
+    monitorScheduler = buildMonitorScheduler();
+    monitorScheduler.scheduleWithFixedDelay(clientMonitorTask, 0,1000, TimeUnit.MILLISECONDS);
+    monitorScheduler.scheduleWithFixedDelay(pingTask, 0,1000 * 60, TimeUnit.MILLISECONDS);
+
+    this.subscribeTask = new TopicsSubscribeTask(this.candidateSubscribeTopics, getMaxTopicsPerTime(), this::executeSubscribeTask);
+    this.unsubscribeTask = new TopicsUnsubscribeTask(this.candidateUnsubscribeTopics, getMaxTopicsPerTime(), this::executeUnsubscribeTask);
+    subscribeScheduler = buildSubscribeScheduler();
+    subscribeScheduler.scheduleWithFixedDelay(subscribeTask, 0, 1000, TimeUnit.MILLISECONDS);
+    subscribeScheduler.scheduleWithFixedDelay(unsubscribeTask, 0, 1000, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -135,15 +197,20 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
+  public void addMessageTopicExtractorHandler(Function<String, String> messageTopicExtractor) {
+    this.messageTopicExtractors.add(messageTopicExtractor);
+  }
+
+  @Override
   public void onReceive(String message) {
-    monitorTask.heartbeat();
+    clientMonitorTask.heartbeat();
+    heartbeatTopic(message);
     CompletableFuture.runAsync(() -> {
       if (StringUtils.contains(message, PING)) {
         this.sendMessage(message.replace(PING, PONG));
         return;
       }
       if (StringUtils.contains(message, PONG)) {
-        this.ping();
         return;
       }
 
@@ -155,38 +222,30 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void onReceiveNoHandle() {
-    monitorTask.heartbeat();
+    clientMonitorTask.heartbeat();
   }
 
   @Override
   public synchronized void subscribeTopics(Collection<String> topics) {
-    partitionSubscribeTopics(topics, true);
+    candidateSubscribeTopics.addAll(topics);
   }
 
   @Override
   public synchronized void unsubscribeTopics(Collection<String> topics) {
-    partitionSubscribeTopics(topics, false);
+    candidateUnsubscribeTopics.addAll(topics);
   }
 
-  protected abstract void subscribeTopics0(Collection<String> topics, boolean subscribe);
+  protected abstract void subscribeTopics0(Collection<String> topics);
+
+  protected abstract void unsubscribeTopics0(Collection<String> topics);
 
   protected abstract int getMaxTopicsPerTime();
 
-  public void partitionSubscribeTopics(Collection<String> topics, boolean subscribe) {
-    if (CollectionUtils.isEmpty(topics)) {
-      return;
-    }
-
-    List<List<String>> topicsList = ListUtils.partition(new ArrayList<>(topics), getMaxTopicsPerTime());
-    for (List<String> subTopics : topicsList) {
-      subscribeTopics0(subTopics, subscribe);
-      CommonUtil.sleep(BATCH_FUNC_WAIT_MILLS);
-    }
-  }
+  protected abstract boolean monitorTopicMessage();
 
   @Override
   public List<String> getSubscribedTopics() {
-    return List.copyOf(topics);
+    return List.copyOf(registeredTopics);
   }
 
   @Override
@@ -211,8 +270,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       connectWebSocket(uri(), handler);
       if (alive()) {
         handler.getHandshakeFuture().sync();
+        this.subscribeTopics(registeredTopics);
       } else {
-        log.warn("websocket client: {} not alived when handshaking.", clientName());
+        log.warn("websocket client: {} not alived when connect.", clientName());
       }
     } catch (Exception e) {
       log.error("websocket client: {} start failed.", clientName(), e);
@@ -224,15 +284,27 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
+  public void reconnect() {
+    try{
+      log.info("websocket client: {} start to reconnect.", clientName());
+      this.connect();
+    } catch (Exception e) {
+      log.warn("websocket client: {} reconnect failed.", clientName(), e);
+    } finally{
+      log.warn("websocket client: {} reconnect complete.", clientName());
+    }
+  }
+
+  @Override
   public boolean alive() {
     return channel != null && channel.isActive();
   }
 
   @Override
   public void close() {
-    monitorTask = null;
-    if (scheduledExecutorService != null && !scheduledExecutorService.isShutdown()) {
-      scheduledExecutorService.shutdown();
+    clientMonitorTask = null;
+    if (monitorScheduler != null && !monitorScheduler.isShutdown()) {
+      monitorScheduler.shutdown();
     }
     if (channel != null) {
       channel.close();
@@ -240,13 +312,19 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
-  public void sendMessage(String message) {
+  public void sendData(WebSocketFrame frame) {
     if (!alive()) {
-      log.warn("client: {} not alive, message: {} send failed.", clientName(), message);
+      log.warn("client: {} not alive, data: {} send failed.", clientName(), frame);
       return;
     }
-    channel.writeAndFlush(new TextWebSocketFrame(message));
-    log.info("client: {} message: {} sent.", clientName(), message);
+    channel.writeAndFlush(frame);
+    String frameLog;
+    if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
+      frameLog = textWebSocketFrame.text();
+    } else {
+      frameLog = frame.getClass().getSimpleName();
+    }
+    log.info("client: {} data: {} sent.", clientName(), frameLog);
   }
 
   @Override
@@ -257,11 +335,21 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     return clientName;
   }
 
+  @Override
   public void ping() {
     if (alive()) {
       channel.writeAndFlush(new PingWebSocketFrame());
     } else {
       log.warn("websocket client: {} not alived when ping.", clientName());
+    }
+  }
+
+  @Override
+  public void pong() {
+    if (alive()) {
+      channel.writeAndFlush(new PongWebSocketFrame());
+    } else {
+      log.warn("websocket client: {} not alived when pong.", clientName());
     }
   }
 
@@ -326,9 +414,71 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
+  private void startTopicMessageMonitors(Collection<String> topics) {
+    for (String topic : topics) {
+      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.computeIfAbsent(topic, var -> new TopicMonitorTask(this, topic));
+      monitorScheduler.scheduleWithFixedDelay(topicMonitorTask, 1000 * 10, 1000, TimeUnit.MILLISECONDS);
+      topicMonitorTask.start();
+    }
+  }
 
-  private String getScheduleExecutorGroupName() {
-    return String.join(CLIENT_NAME_SEP, SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
+  private void stopTopicMessageMonitors(Collection<String> topics) {
+    for (String topic : topics) {
+      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
+      if (topicMonitorTask != null) {
+        topicMonitorTask.stop();
+      }
+    }
+  }
+
+  private ScheduledExecutorService buildMonitorScheduler() {
+    ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        getMonitorScheduleExecutorGroupName());
+    return new ScheduledThreadPoolExecutor(2, scheduleThreadFactory, new AbortPolicy() {
+      @Override
+      public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+        log.warn("client: {} monitor scheduler {} reject task: {}.", clientName(), e, r);
+        super.rejectedExecution(r, e);
+      }
+    });
+  }
+
+  private ScheduledExecutorService buildSubscribeScheduler() {
+    ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        getSubscribeScheduleExecutorGroupName());
+    return new ScheduledThreadPoolExecutor(2, scheduleThreadFactory, new AbortPolicy() {
+      @Override
+      public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+        log.warn("client: {} subscribe scheduler {} reject task: {}.", clientName(), e, r);
+        super.rejectedExecution(r, e);
+      }
+    });
+  }
+
+
+  private String getMonitorScheduleExecutorGroupName() {
+    return String.join(CLIENT_NAME_SEP, MONITOR_SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
+  }
+
+  private String getSubscribeScheduleExecutorGroupName() {
+    return String.join(CLIENT_NAME_SEP, SUBSCRIBE_SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
+  }
+
+  private void heartbeatTopic(String message) {
+    String topic = null;
+    for (Function<String, String> topicExtractor : messageTopicExtractors) {
+      String extractTopic = topicExtractor.apply(message);
+      if (StringUtils.isNotBlank(extractTopic)) {
+        topic = extractTopic;
+        break;
+      }
+    }
+    if (StringUtils.isNotBlank(topic)) {
+      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
+      if (topicMonitorTask != null) {
+        topicMonitorTask.heartbeat();
+      }
+    }
   }
 
   private static ExecutorService buildMessageExecutor() {

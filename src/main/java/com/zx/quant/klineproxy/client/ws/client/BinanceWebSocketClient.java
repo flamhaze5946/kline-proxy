@@ -3,7 +3,6 @@ package com.zx.quant.klineproxy.client.ws.client;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -17,41 +16,40 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
 
   private final AtomicInteger idOffset = new AtomicInteger(0);
 
-  public BinanceWebSocketClient() {
-  }
-
   public BinanceWebSocketClient(int clientNumber) {
     super(clientNumber);
   }
 
   @Override
-  protected int getMaxTopicsPerTime() {
-    return 100;
+  protected boolean monitorTopicMessage() {
+    return true;
   }
 
-  protected void subscribeTopics0(Collection<String> topics, boolean subscribe) {
-    if (!alive()) {
-      log.warn("websocket client: {} not alived when subscribe topics.", clientName());
-      return;
-    }
-    String method = subscribe ? SubscribeBody.SUBSCRIBE_METHOD : SubscribeBody.UNSUBSCRIBE_METHOD;
-    SubscribeBody body = new SubscribeBody(method);
+  @Override
+  protected int getMaxTopicsPerTime() {
+    return 50;
+  }
+
+  protected void subscribeTopics0(Collection<String> topics) {
+    sendSubscribeMessage(topics, SubscribeBody.SUBSCRIBE_METHOD);
+  }
+
+  protected void unsubscribeTopics0(Collection<String> topics) {
+    sendSubscribeMessage(topics, SubscribeBody.UNSUBSCRIBE_METHOD);
+  }
+
+  protected void sendSubscribeMessage(Collection<String> topics, String subscribeMethod) {
+    SubscribeBody body = new SubscribeBody(subscribeMethod);
     body.setParams(new ArrayList<>(topics));
     body.setId(generateId());
 
     String dataJson = serializer.toJsonString(body);
     this.sendMessage(dataJson);
-
-    if (subscribe) {
-      this.topics.addAll(topics);
-    } else {
-      this.topics.removeAll(topics);
-    }
   }
 
   @Override
   protected Integer generateSubId() {
-    return new Random().nextInt(10000);
+    return clientNumber * (Integer.MAX_VALUE / 1000);
   }
 
   @Override

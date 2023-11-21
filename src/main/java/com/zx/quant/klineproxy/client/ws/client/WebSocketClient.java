@@ -1,10 +1,13 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import java.net.URI;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * websocket client
@@ -40,13 +43,21 @@ public interface WebSocketClient {
 
   void unsubscribeTopics(Collection<String> topics);
 
-  void sendMessage(String message);
+  default void sendMessage(String message) {
+    sendData(new TextWebSocketFrame(message));
+  }
+
+  void sendData(WebSocketFrame frame);
 
   void ping();
+
+  void pong();
 
   void onReceive(String message);
 
   default void onReceiveNoHandle() {}
 
   void addMessageHandler(Consumer<String> messageHandler);
+
+  void addMessageTopicExtractorHandler(Function<String, String> messageTopicExtractor);
 }

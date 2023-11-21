@@ -1,5 +1,8 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.EventKline;
@@ -8,6 +11,7 @@ import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.service.KlineService;
@@ -25,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -42,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -93,6 +99,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private List<T> webSocketClients = new ArrayList<>();
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
+
+  private final LoadingCache<String, Optional<EventKlineEvent>> messageEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> Optional.ofNullable(serializer.fromJsonString(message, EventKlineEvent.class)));
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
 
@@ -239,12 +250,29 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Consumer<String> getMessageHandler() {
     return message -> {
-      EventKlineEvent eventKlineEvent = serializer.fromJsonString(message, EventKlineEvent.class);
+      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
       if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+        WebsocketResponse websocketResponse = serializer.fromJsonString(message, WebsocketResponse.class);
+        if (websocketResponse == null) {
+          log.info("not handlable message received: {}", message);
+        }
         return;
       }
       Kline kline = convertToKline(eventKlineEvent);
       updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
+    };
+  }
+
+  protected Function<String, String> getMessageTopicExtractor() {
+    return message -> {
+      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
+      if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+        return null;
+      }
+      EventKline eventKline = eventKlineEvent.getEventKline();
+      String symbol = eventKlineEvent.getSymbol();
+      String interval = eventKline.getInterval();
+      return buildSymbolUpdateTopic(symbol, interval);
     };
   }
 
@@ -367,6 +395,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     for(int i = 0; i < connectionCount.get(); i++) {
       T webSocketClient = webSocketClients.get(i);
       webSocketClient.addMessageHandler(getMessageHandler());
+      webSocketClient.addMessageTopicExtractorHandler(getMessageTopicExtractor());
       webSocketClient.start();
     }
     adjustSubscribeTopics();
@@ -575,6 +604,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     kline.setIgnore(eventKline.getIgnore());
 
     return kline;
+  }
+
+  private EventKlineEvent convertToEventKlineEvent(String message) {
+    Optional<EventKlineEvent> eventOptional = messageEventLruCache.get(message);
+    return eventOptional.orElse(null);
   }
 
   private static ExecutorService buildKlineFetchExecutor() {
