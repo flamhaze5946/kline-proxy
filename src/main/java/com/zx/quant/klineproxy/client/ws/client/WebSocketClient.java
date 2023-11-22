@@ -47,7 +47,11 @@ public interface WebSocketClient {
     sendData(new TextWebSocketFrame(message));
   }
 
-  void sendData(WebSocketFrame frame);
+  void sendData(WebSocketFrame frame, Runnable afterSendFunc);
+
+  default void sendData(WebSocketFrame frame) {
+    sendData(frame, null);
+  }
 
   void ping();
 

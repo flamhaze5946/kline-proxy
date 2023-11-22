@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
+import com.zx.quant.klineproxy.model.constant.Constants;
 import org.springframework.beans.factory.annotation.Value;
 
 /**
@@ -13,6 +14,16 @@ public class BinanceFutureWebSocketClient extends BinanceWebSocketClient impleme
 
   public BinanceFutureWebSocketClient(int clientNumber) {
     super(clientNumber);
+  }
+
+  @Override
+  protected int getMaxFramesPerSecond() {
+    return 4;
+  }
+
+  @Override
+  protected String globalFrameSendRateLimiter() {
+    return Constants.BINANCE_FUTURE_GLOBAL_WS_FRAME_RATE_LIMITER_NAME;
   }
 
   @Override

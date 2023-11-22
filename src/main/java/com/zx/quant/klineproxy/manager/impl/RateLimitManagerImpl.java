@@ -56,8 +56,10 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
 
   @Override
   public void afterPropertiesSet() throws Exception {
-    registerRateLimiter(Constants.BINANCE_SPOT, 80);
-    registerRateLimiter(Constants.BINANCE_FUTURE, 35);
+    registerRateLimiter(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 80);
+    registerRateLimiter(Constants.BINANCE_SPOT_GLOBAL_WS_FRAME_RATE_LIMITER_NAME, 1);
+    registerRateLimiter(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 35);
+    registerRateLimiter(Constants.BINANCE_FUTURE_GLOBAL_WS_FRAME_RATE_LIMITER_NAME, 1);
   }
 
   private RateLimiterWrapper getWrapper(String limiterName) {

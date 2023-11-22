@@ -41,8 +41,6 @@ public class TopicMonitorTask extends MonitorTask implements Runnable {
       client.subscribeTopic(topic);
     } catch (Exception e) {
       log.warn("client {} resubscribe topic {} failed.", client.clientName(), topic, e);
-    } finally {
-      log.info("client {} resubscribe topic {} complete.", client.clientName(), topic);
     }
   }
 

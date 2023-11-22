@@ -72,7 +72,7 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
         .build(s -> {
           Call<BinanceFutureExchange> exchangeCall = binanceFutureClient.getExchange();
           BinanceFutureExchange exchange = ClientUtil.getResponseBody(exchangeCall,
-              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE, 1000 * 30));
+              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
           if (exchange.getServerTime() != null) {
             long deltaMills = System.currentTimeMillis() - exchange.getServerTime();
             serverTimeDelta.set(deltaMills);

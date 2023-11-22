@@ -4,10 +4,12 @@ import com.google.common.collect.Sets;
 import com.zx.quant.klineproxy.client.ws.enums.ProtocolEnum;
 import com.zx.quant.klineproxy.client.ws.handler.WebSocketChannelInboundHandler;
 import com.zx.quant.klineproxy.client.ws.task.ClientMonitorTask;
+import com.zx.quant.klineproxy.client.ws.task.FrameSendTask;
 import com.zx.quant.klineproxy.client.ws.task.PingTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
+import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -66,6 +68,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String CLIENT_NAME_SEP = "-";
 
+  private static final String COMMON_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-common";
+
   private static final String MONITOR_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-monitor";
 
   private static final String SUBSCRIBE_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-subscribe";
@@ -90,7 +94,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Queue<String> candidateUnsubscribeTopics;
 
-  private final Queue<WebSocketFrameWrapper> frameWrappers;
+  private final Queue<WebSocketFrameWrapper> candidateFrameWrappers;
 
   private final Map<String, TopicMonitorTask> topicMonitorTaskMap;
 
@@ -101,6 +105,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   @Autowired
   protected Serializer serializer;
 
+  @Autowired
+  protected RateLimitManager rateLimitManager;
+
   protected T subId;
 
   protected volatile URI uri;
@@ -110,6 +117,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   protected EventLoopGroup group;
 
   protected ClientMonitorTask clientMonitorTask;
+
+  private ExecutorService commonScheduler;
 
   private ScheduledExecutorService monitorScheduler;
 
@@ -134,7 +143,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.messageTopicExtractors = new ArrayList<>();
     this.candidateSubscribeTopics = new LinkedBlockingQueue<>();
     this.candidateUnsubscribeTopics = new LinkedBlockingQueue<>();
-    this.frameWrappers = new LinkedBlockingQueue<>();
+    this.candidateFrameWrappers = new LinkedBlockingQueue<>();
     this.topicMonitorTaskMap = new ConcurrentHashMap<>();
   }
 
@@ -143,11 +152,15 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       log.warn("websocket client: {} not alive when subscribe topics", clientName());
       throw new RuntimeException("websocket client not alive when subscribe topics");
     }
-    subscribeTopics0(topics);
-    registeredTopics.addAll(topics);
-    if (monitorTopicMessage()) {
-      startTopicMessageMonitors(topics);
-    }
+    WebSocketFrame frame = buildSubscribeFrame(topics);
+    Runnable afterSendFunc = () -> {
+      registeredTopics.addAll(topics);
+      if (monitorTopicMessage()) {
+        startTopicMessageMonitors(topics);
+      }
+      log.info("websocket client: {} subscribe topics: {} message sent.", clientName(), topics);
+    };
+    sendData(frame, afterSendFunc);
   }
 
   private void executeUnsubscribeTask(Collection<String> topics) {
@@ -155,11 +168,15 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       log.warn("websocket client: {} not alive when unsubscribe topics", clientName());
       throw new RuntimeException("websocket client not alive when unsubscribe topics");
     }
-    unsubscribeTopics0(topics);
-    registeredTopics.removeAll(Sets.newHashSet(topics));
-    if (monitorTopicMessage()) {
-      stopTopicMessageMonitors(topics);
-    }
+    WebSocketFrame frame = buildUnsubscribeFrame(topics);
+    Runnable afterSendFunc = () -> {
+      registeredTopics.removeAll(Sets.newHashSet(topics));
+      if (monitorTopicMessage()) {
+        stopTopicMessageMonitors(topics);
+      }
+      log.info("websocket client: {} unsubscribe topics: {} message sent.", clientName(), topics);
+    };
+    sendData(frame, afterSendFunc);
   }
 
   public void start() {
@@ -171,14 +188,20 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       if (subscribeScheduler != null) {
         subscribeScheduler.shutdown();
       }
+      if (commonScheduler != null) {
+        commonScheduler.shutdown();
+      }
 
-      this.frameWrappers.clear();
+      this.candidateFrameWrappers.clear();
       this.candidateSubscribeTopics.clear();
       this.candidateUnsubscribeTopics.clear();
       this.topicMonitorTaskMap.clear();
       this.registeredTopics.clear();
 
       this.connect();
+
+      this.commonScheduler = buildCommonExecutor();
+
       this.clientMonitorTask = new ClientMonitorTask(this);
       PingTask pingTask = new PingTask(this);
       monitorScheduler = buildMonitorScheduler();
@@ -187,13 +210,18 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       monitorScheduler.scheduleWithFixedDelay(
           new SwitchableRunnable(pingTask), 1000 * 30, 1000 * 60, TimeUnit.MILLISECONDS);
 
+      FrameSendTask frameSendTask = new FrameSendTask(this::sendData0, this.candidateFrameWrappers, commonScheduler);
+      long millsIntervalForFrameSend = 1000 / getMaxFramesPerSecond();
       TopicsSubscribeTask subscribeTask = new TopicsSubscribeTask(this.candidateSubscribeTopics, getMaxTopicsPerTime(), this::executeSubscribeTask);
       TopicsUnsubscribeTask unsubscribeTask = new TopicsUnsubscribeTask(this.candidateUnsubscribeTopics, getMaxTopicsPerTime(), this::executeUnsubscribeTask);
       subscribeScheduler = buildSubscribeScheduler();
       subscribeScheduler.scheduleWithFixedDelay(
-          new SwitchableRunnable(subscribeTask), 0, 1000, TimeUnit.MILLISECONDS);
+          new SwitchableRunnable(frameSendTask), 0, millsIntervalForFrameSend, TimeUnit.MILLISECONDS);
       subscribeScheduler.scheduleWithFixedDelay(
-          new SwitchableRunnable(unsubscribeTask), 0, 1000, TimeUnit.MILLISECONDS);
+          new SwitchableRunnable(subscribeTask), 0, 5000, TimeUnit.MILLISECONDS);
+      subscribeScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(unsubscribeTask), 0, 5000, TimeUnit.MILLISECONDS);
+
       launching.set(true);
     }
   }
@@ -242,13 +270,19 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     candidateUnsubscribeTopics.addAll(topics);
   }
 
-  protected abstract void subscribeTopics0(Collection<String> topics);
+  protected abstract WebSocketFrame buildSubscribeFrame(Collection<String> topics);
 
-  protected abstract void unsubscribeTopics0(Collection<String> topics);
+  protected abstract WebSocketFrame buildUnsubscribeFrame(Collection<String> topics);
 
   protected abstract int getMaxTopicsPerTime();
 
+  protected abstract int getMaxFramesPerSecond();
+
   protected abstract boolean monitorTopicMessage();
+
+  protected String globalFrameSendRateLimiter() {
+    return null;
+  };
 
   @Override
   public List<String> getSubscribedTopics() {
@@ -322,19 +356,38 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
-  public void sendData(WebSocketFrame frame) {
+  public void sendData(WebSocketFrame frame, Runnable afterSendFunc) {
     if (!alive()) {
       log.warn("client: {} not alive, data: {} send failed.", clientName(), frame);
       return;
     }
-    channel.writeAndFlush(frame);
-    String frameLog;
-    if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
-      frameLog = textWebSocketFrame.text();
-    } else {
-      frameLog = frame.getClass().getSimpleName();
+
+    if (afterSendFunc == null) {
+      afterSendFunc = () -> {
+        String frameLog;
+        if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
+          frameLog = textWebSocketFrame.text();
+        } else {
+          frameLog = frame.getClass().getSimpleName();
+        }
+        log.info("client: {} data: {} sent.", clientName(), frameLog);
+      };
     }
-    log.info("client: {} data: {} sent.", clientName(), frameLog);
+    WebSocketFrameWrapper wrapper = new WebSocketFrameWrapper(frame, afterSendFunc);
+    candidateFrameWrappers.offer(wrapper);
+  }
+
+  public void sendData0(WebSocketFrame frame) {
+    if (!alive()) {
+      log.warn("client: {} not alive, data: {} send failed.", clientName(), frame);
+      return;
+    }
+    String limiterName = globalFrameSendRateLimiter();
+    if (limiterName != null) {
+      rateLimitManager.acquire(limiterName, 1);
+    }
+
+    channel.writeAndFlush(frame);
   }
 
   @Override
@@ -443,6 +496,15 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
+  private ExecutorService buildCommonExecutor() {
+    ThreadFactory threadFactory = ThreadFactoryUtil.getNamedThreadFactory(
+        getMonitorScheduleExecutorGroupName());
+    return new ThreadPoolExecutor(
+        2, 10,
+        1, TimeUnit.MINUTES,
+        new LinkedBlockingQueue<>(1024), threadFactory, new CallerRunsPolicy());
+  }
+
   private ScheduledExecutorService buildMonitorScheduler() {
     ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         getMonitorScheduleExecutorGroupName());
@@ -465,6 +527,10 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         super.rejectedExecution(r, e);
       }
     });
+  }
+
+  private String getCommonScheduleExecutorGroupName() {
+    return String.join(CLIENT_NAME_SEP, COMMON_SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
   }
 
   private String getMonitorScheduleExecutorGroupName() {

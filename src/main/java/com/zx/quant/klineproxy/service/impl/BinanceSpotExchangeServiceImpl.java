@@ -75,7 +75,7 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
           public @Nullable BinanceSpotExchange load(String s) throws Exception {
             Call<BinanceSpotExchange> exchangeCall = binanceSpotClient.getExchange();
             BinanceSpotExchange exchange = ClientUtil.getResponseBody(exchangeCall,
-                () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT, 1000 * 30));
+                () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
             if (exchange.getServerTime() != null) {
               long deltaMills = System.currentTimeMillis() - exchange.getServerTime();
               serverTimeDelta.set(deltaMills);

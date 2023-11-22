@@ -1,5 +1,7 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -30,21 +32,21 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
     return 50;
   }
 
-  protected void subscribeTopics0(Collection<String> topics) {
-    sendSubscribeMessage(topics, SubscribeBody.SUBSCRIBE_METHOD);
+  protected WebSocketFrame buildSubscribeFrame(Collection<String> topics) {
+    return buildSubscribeFrame(topics, SubscribeBody.SUBSCRIBE_METHOD);
   }
 
-  protected void unsubscribeTopics0(Collection<String> topics) {
-    sendSubscribeMessage(topics, SubscribeBody.UNSUBSCRIBE_METHOD);
+  protected WebSocketFrame buildUnsubscribeFrame(Collection<String> topics) {
+    return buildSubscribeFrame(topics, SubscribeBody.UNSUBSCRIBE_METHOD);
   }
 
-  protected void sendSubscribeMessage(Collection<String> topics, String subscribeMethod) {
+  protected WebSocketFrame buildSubscribeFrame(Collection<String> topics, String subscribeMethod) {
     SubscribeBody body = new SubscribeBody(subscribeMethod);
     body.setParams(new ArrayList<>(topics));
     body.setId(generateId());
 
     String dataJson = serializer.toJsonString(body);
-    this.sendMessage(dataJson);
+    return new TextWebSocketFrame(dataJson);
   }
 
   @Override
