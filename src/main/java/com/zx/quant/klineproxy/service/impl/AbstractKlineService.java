@@ -1,10 +1,10 @@
 package com.zx.quant.klineproxy.service.impl;
 
-import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.CombineKlineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
@@ -46,7 +46,6 @@ import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -99,6 +98,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private List<T> webSocketClients = new ArrayList<>();
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
+
+  private final LoadingCache<String, Optional<CombineKlineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> Optional.ofNullable(serializer.fromJsonString(message, CombineKlineEvent.class)));
 
   private final LoadingCache<String, Optional<EventKlineEvent>> messageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
@@ -248,22 +252,52 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         .toList();
   }
 
-  protected Consumer<String> getMessageHandler() {
+  protected Function<String, Boolean> getCombineKlineEventMessageHandler() {
     return message -> {
-      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
-      if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+      CombineKlineEvent combineKlineEvent = convertToCombineKlineEvent(message);
+      if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
         WebsocketResponse websocketResponse = serializer.fromJsonString(message, WebsocketResponse.class);
         if (websocketResponse == null) {
           log.info("not handlable message received: {}", message);
         }
-        return;
+        return false;
       }
-      Kline kline = convertToKline(eventKlineEvent);
-      updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
+      EventKlineEvent klineEvent = combineKlineEvent.getData();
+      return doForKlineEvent(klineEvent, message);
     };
   }
 
-  protected Function<String, String> getMessageTopicExtractor() {
+  protected Function<String, Boolean> getKlineEventMessageHandler() {
+    return message -> {
+      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
+      return doForKlineEvent(eventKlineEvent, message);
+    };
+  }
+
+  protected boolean doForKlineEvent(EventKlineEvent eventKlineEvent, String originalMessage) {
+    if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+      WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
+      if (websocketResponse == null) {
+        log.info("not handlable message received: {}", originalMessage);
+      }
+      return false;
+    }
+    Kline kline = convertToKline(eventKlineEvent);
+    updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
+    return true;
+  }
+
+  protected Function<String, String> getCombineKlineEventMessageTopicExtractor() {
+    return message -> {
+      CombineKlineEvent combineKlineEvent = convertToCombineKlineEvent(message);
+      if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
+        return null;
+      }
+      return combineKlineEvent.getStream();
+    };
+  }
+
+  protected Function<String, String> getKlineEventMessageTopicExtractor() {
     return message -> {
       EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
       if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
@@ -394,8 +428,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     connectionCount.set(connectionCountNumber);
     for(int i = 0; i < connectionCount.get(); i++) {
       T webSocketClient = webSocketClients.get(i);
-      webSocketClient.addMessageHandler(getMessageHandler());
-      webSocketClient.addMessageTopicExtractorHandler(getMessageTopicExtractor());
+      webSocketClient.addMessageHandler(getCombineKlineEventMessageHandler());
+      webSocketClient.addMessageHandler(getKlineEventMessageHandler());
+      webSocketClient.addMessageTopicExtractorHandler(getCombineKlineEventMessageTopicExtractor());
+      webSocketClient.addMessageTopicExtractorHandler(getKlineEventMessageTopicExtractor());
       webSocketClient.start();
     }
     adjustSubscribeTopics();
@@ -604,6 +640,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     kline.setIgnore(eventKline.getIgnore());
 
     return kline;
+  }
+
+  private CombineKlineEvent convertToCombineKlineEvent(String message) {
+    Optional<CombineKlineEvent> eventOptional = combineMessageEventLruCache.get(message);
+    return eventOptional.orElse(null);
   }
 
   private EventKlineEvent convertToEventKlineEvent(String message) {

@@ -14,6 +14,8 @@ import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
+import com.zx.quant.klineproxy.util.queue.HashSetQueue;
+import com.zx.quant.klineproxy.util.queue.SetQueue;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -86,13 +88,13 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Supplier<WebSocketChannelInboundHandler> handlerSupplier;
 
-  private final List<Consumer<String>> messageHandlers;
+  private final List<Function<String, Boolean>> messageHandlers;
 
   private final List<Function<String, String>> messageTopicExtractors;
 
-  private final Queue<String> candidateSubscribeTopics;
+  private final SetQueue<String> candidateSubscribeTopics;
 
-  private final Queue<String> candidateUnsubscribeTopics;
+  private final SetQueue<String> candidateUnsubscribeTopics;
 
   private final Queue<WebSocketFrameWrapper> candidateFrameWrappers;
 
@@ -141,8 +143,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.registeredTopics = new ConcurrentSkipListSet<>();
     this.messageHandlers = new ArrayList<>();
     this.messageTopicExtractors = new ArrayList<>();
-    this.candidateSubscribeTopics = new LinkedBlockingQueue<>();
-    this.candidateUnsubscribeTopics = new LinkedBlockingQueue<>();
+    this.candidateSubscribeTopics = new HashSetQueue<>();
+    this.candidateUnsubscribeTopics = new HashSetQueue<>();
     this.candidateFrameWrappers = new LinkedBlockingQueue<>();
     this.topicMonitorTaskMap = new ConcurrentHashMap<>();
   }
@@ -227,7 +229,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
-  public synchronized void addMessageHandler(Consumer<String> messageHandler) {
+  public synchronized void addMessageHandler(Function<String, Boolean> messageHandler) {
     this.messageHandlers.add(messageHandler);
   }
 
@@ -249,8 +251,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         return;
       }
 
-      for (Consumer<String> messageHandler : messageHandlers) {
-        messageHandler.accept(message);
+      for (Function<String, Boolean> messageHandler : messageHandlers) {
+        boolean handled = messageHandler.apply(message);
+        if (handled) {
+          return;
+        }
       }
     }, MESSAGE_EXECUTOR);
   }
@@ -262,12 +267,12 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public synchronized void subscribeTopics(Collection<String> topics) {
-    candidateSubscribeTopics.addAll(topics);
+    candidateSubscribeTopics.offerAll(topics);
   }
 
   @Override
   public synchronized void unsubscribeTopics(Collection<String> topics) {
-    candidateUnsubscribeTopics.addAll(topics);
+    candidateUnsubscribeTopics.offerAll(topics);
   }
 
   protected abstract WebSocketFrame buildSubscribeFrame(Collection<String> topics);
@@ -542,20 +547,23 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   private void heartbeatTopic(String message) {
-    String topic = null;
-    for (Function<String, String> topicExtractor : messageTopicExtractors) {
-      String extractTopic = topicExtractor.apply(message);
-      if (StringUtils.isNotBlank(extractTopic)) {
-        topic = extractTopic;
-        break;
-      }
-    }
+    String topic = extractTopicFromMessage(message);
     if (StringUtils.isNotBlank(topic)) {
       TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
       if (topicMonitorTask != null) {
         topicMonitorTask.heartbeat();
       }
     }
+  }
+
+  private String extractTopicFromMessage(String message) {
+    for (Function<String, String> topicExtractor : messageTopicExtractors) {
+      String extractTopic = topicExtractor.apply(message);
+      if (StringUtils.isNotBlank(extractTopic)) {
+        return extractTopic;
+      }
+    }
+    return null;
   }
 
   private static ExecutorService buildMessageExecutor() {

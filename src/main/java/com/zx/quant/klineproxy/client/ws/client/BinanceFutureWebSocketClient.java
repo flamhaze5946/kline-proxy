@@ -9,7 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
  */
 public class BinanceFutureWebSocketClient extends BinanceWebSocketClient implements WebSocketClient {
 
-  @Value("${ws.client.binanceFuture.url:wss://fstream.binance.com/ws}")
+  @Value("${ws.client.binanceFuture.url:wss://fstream.binance.com/stream}")
   private String websocketUrl;
 
   public BinanceFutureWebSocketClient(int clientNumber) {

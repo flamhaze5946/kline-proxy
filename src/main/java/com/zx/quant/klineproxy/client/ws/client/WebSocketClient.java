@@ -61,7 +61,7 @@ public interface WebSocketClient {
 
   default void onReceiveNoHandle() {}
 
-  void addMessageHandler(Consumer<String> messageHandler);
+  void addMessageHandler(Function<String, Boolean> messageHandler);
 
   void addMessageTopicExtractorHandler(Function<String, String> messageTopicExtractor);
 }
