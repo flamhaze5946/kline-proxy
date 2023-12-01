@@ -484,19 +484,27 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   private void startTopicMessageMonitors(Collection<String> topics) {
-    for (String topic : topics) {
-      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.computeIfAbsent(topic, var -> new TopicMonitorTask(this, topic));
-      monitorScheduler.scheduleWithFixedDelay(
-          new SwitchableRunnable(topicMonitorTask), 1000 * 10, 1000, TimeUnit.MILLISECONDS);
-      topicMonitorTask.start();
+    synchronized (topicMonitorTaskMap) {
+      for (String topic : topics) {
+        TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
+        if (topicMonitorTask == null) {
+          topicMonitorTask = new TopicMonitorTask(this, topic);
+          topicMonitorTaskMap.put(topic, topicMonitorTask);
+          monitorScheduler.scheduleWithFixedDelay(
+              new SwitchableRunnable(topicMonitorTask), 1000 * 10, 1000, TimeUnit.MILLISECONDS);
+        }
+        topicMonitorTask.start();
+      }
     }
   }
 
   private void stopTopicMessageMonitors(Collection<String> topics) {
-    for (String topic : topics) {
-      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
-      if (topicMonitorTask != null) {
-        topicMonitorTask.stop();
+    synchronized (topicMonitorTaskMap) {
+      for (String topic : topics) {
+        TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
+        if (topicMonitorTask != null) {
+          topicMonitorTask.stop();
+        }
       }
     }
   }
