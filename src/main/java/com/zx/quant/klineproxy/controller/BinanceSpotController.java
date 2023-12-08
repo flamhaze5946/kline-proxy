@@ -7,7 +7,6 @@ import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.commons.collections4.CollectionUtils;

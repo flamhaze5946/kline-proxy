@@ -1,15 +1,16 @@
 package com.zx.quant.klineproxy.model;
 
+import java.util.List;
 import lombok.Data;
 
 /**
- * websocket response
+ * list topics
  * @author flamhaze5946
  */
 @Data
-public class WebsocketResponse {
+public class ListTopicsEvent {
 
-  private String result;
+  private List<String> result;
 
   private Long id;
 }

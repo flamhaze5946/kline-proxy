@@ -6,6 +6,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoop;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -20,6 +21,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -60,8 +62,12 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
 
   @Override
   public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-    log.warn("websocket client: {} disconnected, reconnect.", webSocketClient.clientName());
-    webSocketClient.reconnect();
+    final EventLoop eventLoop = ctx.channel().eventLoop();
+    eventLoop.schedule(() -> {
+      log.warn("websocket client: {} disconnected, reconnect.", webSocketClient.clientName());
+      webSocketClient.reconnect();
+    }, 5L, TimeUnit.SECONDS);
+    super.channelInactive(ctx);
   }
   @Override
   public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
@@ -83,12 +89,12 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
 
     WebSocketFrame frame = (WebSocketFrame) msg;
     if (frame instanceof BinaryWebSocketFrame binaryWebSocketFrame) {
-      webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content()));
+      webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()));
     } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
       webSocketClient.onReceive(textWebSocketFrame.text());
     } else if (frame instanceof PingWebSocketFrame) {
       webSocketClient.onReceiveNoHandle();
-      webSocketClient.sendData(new PongWebSocketFrame());
+      webSocketClient.sendData(new PongWebSocketFrame(frame.content().retain()));
     } else if (frame instanceof PongWebSocketFrame) {
       webSocketClient.onReceiveNoHandle();
       if (log.isDebugEnabled()) {

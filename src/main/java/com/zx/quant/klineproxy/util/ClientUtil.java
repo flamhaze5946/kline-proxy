@@ -1,6 +1,5 @@
 package com.zx.quant.klineproxy.util;
 
-import com.zx.quant.klineproxy.model.exceptions.OverRateLimitException;
 import java.io.IOException;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.ResponseBody;

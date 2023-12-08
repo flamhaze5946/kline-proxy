@@ -1,6 +1,5 @@
 package com.zx.quant.klineproxy.client.ws.task;
 
-import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import java.util.Queue;

@@ -6,7 +6,6 @@ import java.net.URI;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -30,6 +29,8 @@ public interface WebSocketClient {
   boolean alive();
 
   List<String> getSubscribedTopics();
+
+  List<String> getChannelRegisteredTopics();
 
   default void subscribeTopic(String topic) {
     subscribeTopics(Collections.singletonList(topic));

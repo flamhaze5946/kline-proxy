@@ -1,6 +1,5 @@
 package com.zx.quant.klineproxy.manager;
 
-import com.google.common.util.concurrent.RateLimiter;
 
 public interface RateLimitManager {
   void registerRateLimiter(String limiterName, long limitPerSecond);

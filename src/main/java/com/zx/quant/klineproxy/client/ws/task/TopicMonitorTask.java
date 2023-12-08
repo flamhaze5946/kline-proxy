@@ -11,7 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TopicMonitorTask extends MonitorTask implements Runnable {
 
-  private static final long CHECK_INTERVAL_MILLS = 30000L;
+  private static final long CHECK_INTERVAL_MILLS = 1000L * 60 * 2;
 
   private final String topic;
 
@@ -37,6 +37,9 @@ public class TopicMonitorTask extends MonitorTask implements Runnable {
       return;
     }
     try {
+      if (client.getChannelRegisteredTopics().contains(topic)) {
+        return;
+      }
       log.info("{}ms not received messages from client {} for topic: {}, resubscribe.", getCheckDurationMills(), client.clientName(), topic);
       client.subscribeTopic(topic);
     } catch (Exception e) {

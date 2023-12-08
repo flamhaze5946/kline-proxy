@@ -256,10 +256,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return message -> {
       CombineKlineEvent combineKlineEvent = convertToCombineKlineEvent(message);
       if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
-        WebsocketResponse websocketResponse = serializer.fromJsonString(message, WebsocketResponse.class);
-        if (websocketResponse == null) {
-          log.info("not handlable message received: {}", message);
-        }
         return false;
       }
       EventKlineEvent klineEvent = combineKlineEvent.getData();
@@ -270,6 +266,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected Function<String, Boolean> getKlineEventMessageHandler() {
     return message -> {
       EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
+      if (eventKlineEvent == null) {
+        return false;
+      }
       return doForKlineEvent(eventKlineEvent, message);
     };
   }

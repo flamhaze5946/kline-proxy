@@ -10,6 +10,7 @@ import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.ListTopicsEvent;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -18,6 +19,7 @@ import com.zx.quant.klineproxy.util.queue.HashSetQueue;
 import com.zx.quant.klineproxy.util.queue.SetQueue;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoopGroup;
@@ -30,9 +32,11 @@ import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.handler.stream.ChunkedWriteHandler;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -54,7 +58,6 @@ import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
@@ -100,7 +103,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Map<String, TopicMonitorTask> topicMonitorTaskMap;
 
+  protected WebSocketChannelInboundHandler inboundHandler;
+
   protected final Set<String> registeredTopics;
+
+  protected final Set<String> channelRegisteredTopics;
 
   protected final int clientNumber;
 
@@ -141,6 +148,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.clientNumber = clientNumber;
     this.handlerSupplier = handlerSupplier;
     this.registeredTopics = new ConcurrentSkipListSet<>();
+    this.channelRegisteredTopics = new ConcurrentSkipListSet<>();
     this.messageHandlers = new ArrayList<>();
     this.messageTopicExtractors = new ArrayList<>();
     this.candidateSubscribeTopics = new HashSetQueue<>();
@@ -162,6 +170,16 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       }
       log.info("websocket client: {} subscribe topics: {} message sent.", clientName(), topics);
     };
+    sendData(frame, afterSendFunc);
+  }
+
+  private void executeListTopicsTask() {
+    if (!alive()) {
+      log.warn("websocket client: {} not alive when unsubscribe topics", clientName());
+      throw new RuntimeException("websocket client not alive when unsubscribe topics");
+    }
+    WebSocketFrame frame = buildListTopicsFrame();
+    Runnable afterSendFunc = () -> log.info("websocket client: {} list topics message sent.", clientName());
     sendData(frame, afterSendFunc);
   }
 
@@ -199,6 +217,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       this.candidateUnsubscribeTopics.clear();
       this.topicMonitorTaskMap.clear();
       this.registeredTopics.clear();
+      this.channelRegisteredTopics.clear();
 
       this.connect();
 
@@ -211,6 +230,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
           new SwitchableRunnable(clientMonitorTask), 1000 * 5, 1000, TimeUnit.MILLISECONDS);
       monitorScheduler.scheduleWithFixedDelay(
           new SwitchableRunnable(pingTask), 1000 * 30, 1000 * 60, TimeUnit.MILLISECONDS);
+      monitorScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(this::executeListTopicsTask), 1000 * 10, 1000 * 30, TimeUnit.MILLISECONDS);
 
       FrameSendTask frameSendTask = new FrameSendTask(this::sendData0, this.candidateFrameWrappers, commonScheduler);
       long millsIntervalForFrameSend = 1000 / getMaxFramesPerSecond();
@@ -251,6 +272,15 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         return;
       }
 
+      ListTopicsEvent listTopicsEvent = serializer.fromJsonString(message, ListTopicsEvent.class);
+      if (listTopicsEvent != null && listTopicsEvent.getResult() != null) {
+        synchronized (channelRegisteredTopics) {
+          channelRegisteredTopics.clear();
+          channelRegisteredTopics.addAll(listTopicsEvent.getResult());
+        }
+        return;
+      }
+
       for (Function<String, Boolean> messageHandler : messageHandlers) {
         boolean handled = messageHandler.apply(message);
         if (handled) {
@@ -279,6 +309,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   protected abstract WebSocketFrame buildUnsubscribeFrame(Collection<String> topics);
 
+  protected abstract WebSocketFrame buildListTopicsFrame();
+
   protected abstract int getMaxTopicsPerTime();
 
   protected abstract int getMaxFramesPerSecond();
@@ -292,6 +324,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   @Override
   public List<String> getSubscribedTopics() {
     return List.copyOf(registeredTopics);
+  }
+
+  @Override
+  public List<String> getChannelRegisteredTopics() {
+    return List.copyOf(channelRegisteredTopics);
   }
 
   @Override
@@ -311,12 +348,12 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     synchronized (launching) {
       try {
         subId = generateSubId();
-        WebSocketChannelInboundHandler handler = handlerSupplier.get();
-        handler.init(this);
+        inboundHandler = handlerSupplier.get();
+        inboundHandler.init(this);
 
-        connectWebSocket(uri(), handler);
+        connectWebSocket();
         if (alive()) {
-          handler.getHandshakeFuture().sync();
+          inboundHandler.getHandshakeFuture().sync();
           this.subscribeTopics(registeredTopics);
         } else {
           log.warn("websocket client: {} not alived when connect.", clientName());
@@ -427,15 +464,16 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   protected abstract T generateId();
 
-  protected void connectWebSocket(URI uri, WebSocketChannelInboundHandler handler) {
+  protected void connectWebSocket() {
     try {
-      String protocol = uri.getScheme();
+      URI realUri = uri();
+      String protocol = realUri.getScheme();
       ProtocolEnum protocolEnum = CommonUtil.getEnumByCode(protocol, ProtocolEnum.class);
       if (protocolEnum == null) {
         throw new RuntimeException("protocol not supported.");
       }
 
-      String host = uri.getHost();
+      String host = realUri.getHost();
       int port = protocolEnum.getPort();
       boolean ssl = protocolEnum.isSsl();
       final SslContext sslCtx;
@@ -451,17 +489,31 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       bootstrap
           .group(group)
           .channel(NioSocketChannel.class)
-          .handler(new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(SocketChannel ch) throws Exception {
-              ChannelPipeline pipeline = ch.pipeline();
-              if (sslCtx != null) {
-                pipeline.addLast(sslCtx.newHandler(ch.alloc(), host, port));
-              }
-              pipeline.addLast(new HttpClientCodec(), new HttpObjectAggregator(8192), handler);
+          .handler(
+              new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) throws Exception {
+                  ChannelPipeline pipeline = ch.pipeline();
+                  if (sslCtx != null) {
+                    pipeline.addLast(sslCtx.newHandler(ch.alloc(), host, port));
+                  }
+                  pipeline.addLast(
+                      new HttpClientCodec(),
+                      new ChunkedWriteHandler(),
+                      new HttpObjectAggregator(8192),
+                      new WebSocketServerCompressionHandler(),
+                      inboundHandler);
+                }
+              });
+      channel = bootstrap.connect(host, port)
+          .addListener(f -> {
+            ChannelFuture cf = (ChannelFuture) f;
+            if (!cf.isSuccess()) {
+              long nextRetryDelay = 1000L;
+              cf.channel().eventLoop().schedule(this::connect, nextRetryDelay, TimeUnit.MILLISECONDS);
             }
-          });
-      channel = bootstrap.connect(host, port).sync().channel();
+          })
+          .sync().channel();
     } catch (Exception e) {
       log.error(" websocket client: {} start error.", clientName(), e);
       shutdownGroup("start error");

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 
 /**
  * binance websocket client
@@ -33,16 +34,26 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
   }
 
   protected WebSocketFrame buildSubscribeFrame(Collection<String> topics) {
-    return buildSubscribeFrame(topics, SubscribeBody.SUBSCRIBE_METHOD);
+    return buildSubscribeFrame(topics, MessageBody.SUBSCRIBE_METHOD);
   }
 
   protected WebSocketFrame buildUnsubscribeFrame(Collection<String> topics) {
-    return buildSubscribeFrame(topics, SubscribeBody.UNSUBSCRIBE_METHOD);
+    return buildSubscribeFrame(topics, MessageBody.UNSUBSCRIBE_METHOD);
+  }
+
+  protected WebSocketFrame buildListTopicsFrame() {
+    return buildMessageFrame(null, MessageBody.LIST_SUBSCRIPTIONS_METHOD);
   }
 
   protected WebSocketFrame buildSubscribeFrame(Collection<String> topics, String subscribeMethod) {
-    SubscribeBody body = new SubscribeBody(subscribeMethod);
-    body.setParams(new ArrayList<>(topics));
+    return buildMessageFrame(topics, subscribeMethod);
+  }
+
+  protected WebSocketFrame buildMessageFrame(Collection<String> params, String method) {
+    MessageBody body = new MessageBody(method);
+    if (CollectionUtils.isNotEmpty(params)) {
+      body.setParams(new ArrayList<>(params));
+    }
     body.setId(generateId());
 
     String dataJson = serializer.toJsonString(body);
@@ -60,16 +71,19 @@ public abstract class BinanceWebSocketClient extends AbstractWebSocketClient<Int
   }
 
   @Data
-  static class SubscribeBody {
+  static class MessageBody {
 
     private static final String SUBSCRIBE_METHOD = "SUBSCRIBE";
+
     private static final String UNSUBSCRIBE_METHOD = "UNSUBSCRIBE";
 
-    public SubscribeBody() {
+    private static final String LIST_SUBSCRIPTIONS_METHOD = "LIST_SUBSCRIPTIONS";
+
+    public MessageBody() {
       this(SUBSCRIBE_METHOD);
     }
 
-    public SubscribeBody(String method) {
+    public MessageBody(String method) {
       this.method = method;
     }
 
