@@ -62,13 +62,10 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
 
   @Override
   public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-    final EventLoop eventLoop = ctx.channel().eventLoop();
-    eventLoop.schedule(() -> {
-      log.warn("websocket client: {} disconnected, reconnect.", webSocketClient.clientName());
-      webSocketClient.reconnect();
-    }, 5L, TimeUnit.SECONDS);
+    submitReconnect(ctx, "disconnected");
     super.channelInactive(ctx);
   }
+
   @Override
   public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
     log.warn("websocket client: {} exception occur.", webSocketClient.clientName(), cause);
@@ -81,33 +78,45 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
   @Override
   protected void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
     Channel channel = ctx.channel();
-    if (!handShaker.isHandshakeComplete()) {
-      handShaker.finishHandshake(channel, (FullHttpResponse) msg);
-      handshakeFuture.setSuccess();
-      return;
-    }
-
-    WebSocketFrame frame = (WebSocketFrame) msg;
-    if (frame instanceof BinaryWebSocketFrame binaryWebSocketFrame) {
-      webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()));
-    } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
-      webSocketClient.onReceive(textWebSocketFrame.text());
-    } else if (frame instanceof PingWebSocketFrame) {
-      webSocketClient.onReceiveNoHandle();
-      webSocketClient.sendData(new PongWebSocketFrame(frame.content().retain()));
-    } else if (frame instanceof PongWebSocketFrame) {
-      webSocketClient.onReceiveNoHandle();
-      if (log.isDebugEnabled()) {
-        log.debug("websocket client: {} receive pong!", webSocketClient.clientName());
+    if (msg instanceof FullHttpResponse fullHttpMsg) {
+      if (!handShaker.isHandshakeComplete()) {
+          try {
+            handShaker.finishHandshake(channel, fullHttpMsg);
+            handshakeFuture.setSuccess();
+          } catch (Exception e) {
+            submitReconnect(ctx, "handshake failed");
+          }
       }
-    } else if (frame instanceof CloseWebSocketFrame) {
-      webSocketClient.onReceiveNoHandle();
-      log.info("websocket client: {} receive close.", webSocketClient.clientName());
-      channel.close();
-    } else {
-      webSocketClient.onReceiveNoHandle();
-      log.debug("websocket client: {} receive unknown message: {}!", webSocketClient.clientName(), frame.content().toString());
+    } else if (msg instanceof WebSocketFrame frame) {
+      if (frame instanceof BinaryWebSocketFrame binaryWebSocketFrame) {
+        webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()));
+      } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
+        webSocketClient.onReceive(textWebSocketFrame.text());
+      } else if (frame instanceof PingWebSocketFrame) {
+        webSocketClient.onReceiveNoHandle();
+        webSocketClient.sendData(new PongWebSocketFrame(frame.content().retain()));
+      } else if (frame instanceof PongWebSocketFrame) {
+        webSocketClient.onReceiveNoHandle();
+        if (log.isDebugEnabled()) {
+          log.debug("websocket client: {} receive pong!", webSocketClient.clientName());
+        }
+      } else if (frame instanceof CloseWebSocketFrame) {
+        webSocketClient.onReceiveNoHandle();
+        log.info("websocket client: {} receive close.", webSocketClient.clientName());
+        channel.close();
+      } else {
+        webSocketClient.onReceiveNoHandle();
+        log.debug("websocket client: {} receive unknown message: {}!", webSocketClient.clientName(), frame.content().toString());
+      }
     }
+  }
+
+  private void submitReconnect(ChannelHandlerContext ctx, String reason) {
+    final EventLoop eventLoop = ctx.channel().eventLoop();
+    eventLoop.schedule(() -> {
+      log.warn("websocket client: {} {}, reconnect.", reason, webSocketClient.clientName());
+      webSocketClient.reconnect();
+    }, 5L, TimeUnit.SECONDS);
   }
 
   private String decodeByteBuf(ByteBuf buf) throws Exception {
