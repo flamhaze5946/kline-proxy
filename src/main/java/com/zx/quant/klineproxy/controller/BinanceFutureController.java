@@ -1,9 +1,11 @@
 package com.zx.quant.klineproxy.controller;
 
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
+import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.service.ExchangeService;
+import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import java.util.ArrayList;
@@ -30,11 +32,16 @@ public class BinanceFutureController {
   private KlineService klineService;
 
   @Autowired
-  private ExchangeService<BinanceFutureExchange> exchangeService;
+  private FutureExchangeService<BinanceFutureExchange> exchangeService;
 
   @GetMapping("exchangeInfo")
   public BinanceFutureExchange queryExchange() {
     return exchangeService.queryExchange();
+  }
+
+  @GetMapping("fundingRate")
+  public List<FutureFundingRate> queryFundingRate() {
+    return exchangeService.queryFundingRates();
   }
 
   @GetMapping("ticker/price")

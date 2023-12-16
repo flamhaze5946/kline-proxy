@@ -6,8 +6,9 @@ import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.constant.Constants;
-import com.zx.quant.klineproxy.service.ExchangeService;
+import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -25,11 +26,13 @@ import retrofit2.Call;
  * @author flamhaze5946
  */
 @Service("binanceFutureExchangeService")
-public class BinanceFutureExchangeServiceImpl implements ExchangeService<BinanceFutureExchange> {
+public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<BinanceFutureExchange> {
 
   private static final String VALID_SYMBOL_STATUS = "TRADING";
 
   private final LoadingCache<String, BinanceFutureExchange> exchangeCache = buildExchangeCache();
+
+  private final LoadingCache<String, List<FutureFundingRate>> fundingRatesCache = buildFundingRatesCache();
 
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
 
@@ -57,6 +60,11 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
   }
 
   @Override
+  public List<FutureFundingRate> queryFundingRates() {
+    return fundingRatesCache.get(StringUtils.EMPTY);
+  }
+
+  @Override
   public List<String> querySymbols() {
     return queryExchange().getSymbols().stream()
         .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
@@ -78,6 +86,18 @@ public class BinanceFutureExchangeServiceImpl implements ExchangeService<Binance
             serverTimeDelta.set(deltaMills);
           }
           return exchange;
+        });
+  }
+
+  private LoadingCache<String, List<FutureFundingRate>> buildFundingRatesCache() {
+    return Caffeine.newBuilder()
+        .maximumSize(1)
+        .expireAfterWrite(Duration.of(10, ChronoUnit.MINUTES))
+        .refreshAfterWrite(5, TimeUnit.MINUTES)
+        .build(s -> {
+          Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates();
+          return ClientUtil.getResponseBody(ratesCall,
+              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
         });
   }
 }
