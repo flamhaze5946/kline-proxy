@@ -10,7 +10,7 @@ public enum ProtocolEnum implements BaseEnum {
 
   WS("ws", 80, false, "ws protocol"),
 
-  WSS("wss", 443, true, "ws protocol"),
+  WSS("wss", 443, true, "wss protocol"),
   ;
 
   private final String code;
