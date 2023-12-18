@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.client;
 
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
+import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import java.util.List;
 import retrofit2.Call;
 import retrofit2.http.GET;
@@ -14,6 +15,9 @@ public interface BinanceFutureClient {
 
   @GET("fapi/v1/fundingRate")
   Call<List<FutureFundingRate>> getFundingRates();
+
+  @GET("fapi/v1/premiumIndex")
+  Call<List<FuturePremiumIndex>> getSymbolPremiumIndices();
 
   @GET("fapi/v1/klines")
   Call<List<Object[]>> getKlines(

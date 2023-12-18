@@ -2,19 +2,23 @@ package com.zx.quant.klineproxy.service.impl;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
+import com.google.common.collect.Lists;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
+import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +37,8 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   private final LoadingCache<String, BinanceFutureExchange> exchangeCache = buildExchangeCache();
 
   private final LoadingCache<String, List<FutureFundingRate>> fundingRatesCache = buildFundingRatesCache();
+
+  private final LoadingCache<String, Map<String, FuturePremiumIndex>> premiumIndicesCache = buildPremiumIndicesCache();
 
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
 
@@ -62,6 +68,16 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   @Override
   public List<FutureFundingRate> queryFundingRates() {
     return fundingRatesCache.get(StringUtils.EMPTY);
+  }
+
+  @Override
+  public List<FuturePremiumIndex> queryPremiumIndices() {
+    return Lists.newArrayList(premiumIndicesCache.get(StringUtils.EMPTY).values());
+  }
+
+  @Override
+  public FuturePremiumIndex queryPremiumIndex(String symbol) {
+    return premiumIndicesCache.get(StringUtils.EMPTY).get(symbol);
   }
 
   @Override
@@ -98,6 +114,20 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
           Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates();
           return ClientUtil.getResponseBody(ratesCall,
               () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+        });
+  }
+
+  private LoadingCache<String, Map<String, FuturePremiumIndex>> buildPremiumIndicesCache() {
+    return Caffeine.newBuilder()
+        .maximumSize(1)
+        .expireAfterWrite(Duration.of(20, ChronoUnit.MINUTES))
+        .refreshAfterWrite(10, TimeUnit.MINUTES)
+        .build(s -> {
+          Call<List<FuturePremiumIndex>> indicesCall = binanceFutureClient.getSymbolPremiumIndices();
+          List<FuturePremiumIndex> indices = ClientUtil.getResponseBody(indicesCall,
+              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+          return indices.stream()
+              .collect(Collectors.toMap(FuturePremiumIndex::getSymbol, Function.identity()));
         });
   }
 }
