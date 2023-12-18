@@ -174,9 +174,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
     }
-    int realLimit = calculateRealLimit(limit);
-    long klinesDuration = calculateKlinesDuration(intervalEnum, realLimit);
-    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, realLimit);
+    long klinesDuration = calculateKlinesDuration(intervalEnum, limit);
+    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, limit);
     Long realStartTime = realTimePair.getLeft();
     Long realEndTime = realTimePair.getRight();
 
@@ -205,10 +204,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           .subMap(realStartTime, realEndTime);
     }
 
-    if (savedKlineMap.size() < realLimit && startTime == null && endTime == null) {
+    if (savedKlineMap.size() < limit && startTime == null && endTime == null) {
       Kline lastKline = klineSet.getKlineMap().lastEntry().getValue();
       long lastKlineOpenTime = lastKline.getOpenTime();
-      long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (realLimit - 1));
+      long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (limit - 1));
       savedKlineMap = klineSet.getKlineMap()
           .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
     }
@@ -327,8 +326,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
 
   private List<ImmutablePair<Long, Long>> buildMakeUpTimeRanges(String symbol, Long startTime, Long endTime, IntervalEnum intervalEnum, Integer limit, boolean useSetCache) {
-    int realLimit = calculateRealLimit(limit);
-    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, realLimit);
+    ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, limit);
     long intervalMills = intervalEnum.getMills();
     Long realStartTime = realTimePair.getLeft();
     Long realEndTime = realTimePair.getRight();
@@ -355,13 +353,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         for (Long needMakeUpOpenTime : needMakeUpOpenTimes) {
           if (makeStartTime == null) {
             makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((getMakeUpKlinesLimit() - 1) * intervalMills);
+            makeEndTime = makeStartTime + ((calculateRealLimit(getMakeUpKlinesLimit()) - 1) * intervalMills);
             makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
             continue;
           }
           if (needMakeUpOpenTime > makeEndTime) {
             makeStartTime = needMakeUpOpenTime;
-            makeEndTime = makeStartTime + ((getMakeUpKlinesLimit() - 1) * intervalMills);
+            makeEndTime = makeStartTime + ((calculateRealLimit(getMakeUpKlinesLimit()) - 1) * intervalMills);
             makeUpTimeRanges.add(ImmutablePair.of(makeStartTime, makeEndTime));
           }
         }
