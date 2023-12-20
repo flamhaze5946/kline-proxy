@@ -6,14 +6,19 @@ import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.CombineKlineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
+import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
+import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
+import com.zx.quant.klineproxy.model.Kline.DoubleKline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
+import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -56,6 +61,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * abstract kline service
@@ -97,6 +103,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
 
+  @Value("${number.type:bigDecimal}")
+  private String numberType;
+
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
   private final LoadingCache<String, Optional<CombineKlineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
@@ -104,10 +113,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .maximumSize(10240)
       .build(message -> Optional.ofNullable(serializer.fromJsonString(message, CombineKlineEvent.class)));
 
-  private final LoadingCache<String, Optional<EventKlineEvent>> messageEventLruCache = Caffeine.newBuilder()
+  private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
       .maximumSize(10240)
-      .build(message -> Optional.ofNullable(serializer.fromJsonString(message, EventKlineEvent.class)));
+      .build(message -> {
+        NumberTypeEnum numberTypeEnum = getNumberType();
+        EventKlineEvent<?, ?> eventKlineEvent = serializer.fromJsonString(message, numberTypeEnum.eventKlineEventClass());
+        return Optional.ofNullable(eventKlineEvent);
+      });
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
 
@@ -120,7 +133,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    * @param limit     limit
    * @return klines
    */
-  protected abstract List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
+  protected abstract List<Kline<?>> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
 
   protected abstract String getRateLimiterName();
 
@@ -137,7 +150,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public List<Ticker> queryTickers(Collection<String> symbols) {
+  public List<Ticker<?>> queryTickers(Collection<String> symbols) {
     IntervalEnum intervalEnum = DEFAULT_TICKER_INTERVAL;
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     if (CollectionUtils.isNotEmpty(subscribeIntervals)) {
@@ -145,7 +158,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     String interval = intervalEnum.code();
     long serverTime = getServerTime();
-    List<Ticker> tickers = new ArrayList<>();
+    List<Ticker<?>> tickers = new ArrayList<>();
     Collection<String> realSymbols;
     if (CollectionUtils.isNotEmpty(symbols)) {
       realSymbols = symbols;
@@ -159,17 +172,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     for (String symbol : realSymbols) {
       KlineSetKey key = new KlineSetKey(symbol, interval);
       KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-      NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+      NavigableMap<Long, Kline<?>> klineMap = klineSet.getKlineMap();
       if (MapUtils.isNotEmpty(klineMap)) {
-        Kline kline = klineMap.lastEntry().getValue();
-        tickers.add(new Ticker(symbol, kline.getClosePrice(), serverTime));
+        Kline<?> kline = klineMap.lastEntry().getValue();
+        Ticker<?> ticker = Ticker.create(symbol, kline, serverTime);
+        tickers.add(ticker);
       }
     }
     return tickers;
   }
 
   @Override
-  public List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
@@ -181,7 +195,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
     KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
     KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-    Map<Long, Kline> savedKlineMap;
+    Map<Long, Kline<?>> savedKlineMap;
 
     List<ImmutablePair<Long, Long>> makeUpTimeRanges =
         buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
@@ -205,7 +219,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
 
     if (savedKlineMap.size() < limit && startTime == null && endTime == null) {
-      Kline lastKline = klineSet.getKlineMap().lastEntry().getValue();
+      Kline<?> lastKline = klineSet.getKlineMap().lastEntry().getValue();
       long lastKlineOpenTime = lastKline.getOpenTime();
       long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (limit - 1));
       savedKlineMap = klineSet.getKlineMap()
@@ -219,15 +233,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public void updateKlines(String symbol, String interval, List<Kline> klines) {
+  public void updateKlines(String symbol, String interval, List<Kline<?>> klines) {
     if (CollectionUtils.isEmpty(klines) || StringUtils.isBlank(symbol) || StringUtils.isBlank(interval)) {
       return;
     }
     KlineSetKey klineSetKey = new KlineSetKey(symbol, interval);
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
-    NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-    for (Kline kline : klines) {
-      Kline existKline = klineMap.get(kline.getOpenTime());
+    NavigableMap<Long, Kline<?>> klineMap = klineSet.getKlineMap();
+    for (Kline<?> kline : klines) {
+      Kline<?> existKline = klineMap.get(kline.getOpenTime());
       if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
         klineMap.put(kline.getOpenTime(), kline);
       }
@@ -257,14 +271,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
         return false;
       }
-      EventKlineEvent klineEvent = combineKlineEvent.getData();
+      EventKlineEvent<?, ?> klineEvent = combineKlineEvent.getData();
       return doForKlineEvent(klineEvent, message);
     };
   }
 
   protected Function<String, Boolean> getKlineEventMessageHandler() {
     return message -> {
-      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
+      EventKlineEvent<?, ?> eventKlineEvent = convertToEventKlineEvent(message);
       if (eventKlineEvent == null) {
         return false;
       }
@@ -272,7 +286,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     };
   }
 
-  protected boolean doForKlineEvent(EventKlineEvent eventKlineEvent, String originalMessage) {
+  protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent, String originalMessage) {
     if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
       WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
       if (websocketResponse == null) {
@@ -280,7 +294,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
       return false;
     }
-    Kline kline = convertToKline(eventKlineEvent);
+    Kline<?> kline = convertToKline(eventKlineEvent);
     updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
     return true;
   }
@@ -297,11 +311,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Function<String, String> getKlineEventMessageTopicExtractor() {
     return message -> {
-      EventKlineEvent eventKlineEvent = convertToEventKlineEvent(message);
+      EventKlineEvent<?, ?> eventKlineEvent = convertToEventKlineEvent(message);
       if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
         return null;
       }
-      EventKline eventKline = eventKlineEvent.getEventKline();
+      EventKline<?> eventKline = eventKlineEvent.getEventKline();
       String symbol = eventKlineEvent.getSymbol();
       String interval = eventKline.getInterval();
       return buildSymbolUpdateTopic(symbol, interval);
@@ -340,7 +354,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
     if (useSetCache) {
       KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-      Map<Long, Kline> savedKlineMap = klineSet.getKlineMap()
+      Map<Long, Kline<?>> savedKlineMap = klineSet.getKlineMap()
           .subMap(realStartTime, true, realEndTime, true);
       needMakeUpOpenTimes.removeAll(savedKlineMap.keySet());
     }
@@ -455,25 +469,75 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     clientIndexTopicsMap.forEach((clientIndex, subTopics) -> topicsConsumer.accept(clients.get(clientIndex), subTopics));
   }
 
-  protected Kline serverKlineToKline(Object[] serverKline) {
+  private Double toDouble(Object doubleObj) {
+    if (doubleObj == null) {
+      return null;
+    }
+    if (doubleObj instanceof Double doubleValue) {
+      return doubleValue;
+    } else if (doubleObj instanceof String doubleStr) {
+      return Double.valueOf(doubleStr);
+    } else {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  private BigDecimal toBigDecimal(Object bigDecimalObj) {
+    if (bigDecimalObj == null) {
+      return null;
+    }
+    if (bigDecimalObj instanceof BigDecimal bigDecimalValue) {
+      return bigDecimalValue;
+    } else if (bigDecimalObj instanceof String bigDecimalStr) {
+      return new BigDecimal(bigDecimalStr);
+    } else {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  protected Kline<?> serverKlineToKline(Object[] serverKline) {
     if (serverKline == null) {
       return null;
     }
 
-    Kline kline = new Kline();
-    kline.setOpenTime((Long) serverKline[0]);
-    kline.setOpenPrice(new BigDecimal((String) serverKline[1]));
-    kline.setHighPrice(new BigDecimal((String) serverKline[2]));
-    kline.setLowPrice(new BigDecimal((String) serverKline[3]));
-    kline.setClosePrice(new BigDecimal((String) serverKline[4]));
-    kline.setVolume(new BigDecimal((String) serverKline[5]));
-    kline.setCloseTime((Long) serverKline[6]);
-    kline.setQuoteVolume(new BigDecimal((String) serverKline[7]));
-    kline.setTradeNum((Integer) serverKline[8]);
-    kline.setActiveBuyVolume(new BigDecimal((String) serverKline[9]));
-    kline.setActiveBuyQuoteVolume(new BigDecimal((String) serverKline[10]));
-    kline.setIgnore((String) serverKline[11]);
-    return kline;
+    NumberTypeEnum numberTypeEnum = getNumberType();
+    switch (numberTypeEnum) {
+      case DOUBLE -> {
+        DoubleKline kline = new DoubleKline();
+        kline.setOpenTime((Long) serverKline[0]);
+        kline.setOpenPrice(toDouble(serverKline[1]));
+        kline.setHighPrice(toDouble(serverKline[2]));
+        kline.setLowPrice(toDouble(serverKline[3]));
+        kline.setClosePrice(toDouble(serverKline[4]));
+        kline.setVolume(toDouble(serverKline[5]));
+        kline.setCloseTime((Long) serverKline[6]);
+        kline.setQuoteVolume(toDouble(serverKline[7]));
+        kline.setTradeNum((Integer) serverKline[8]);
+        kline.setActiveBuyVolume(toDouble(serverKline[9]));
+        kline.setActiveBuyQuoteVolume(toDouble(serverKline[10]));
+        kline.setIgnore((String) serverKline[11]);
+        return kline;
+      }
+      case BIG_DECIMAL -> {
+        BigDecimalKline kline = new BigDecimalKline();
+        kline.setOpenTime((Long) serverKline[0]);
+        kline.setOpenPrice(toBigDecimal(serverKline[1]));
+        kline.setHighPrice(toBigDecimal(serverKline[2]));
+        kline.setLowPrice(toBigDecimal(serverKline[3]));
+        kline.setClosePrice(toBigDecimal(serverKline[4]));
+        kline.setVolume(toBigDecimal(serverKline[5]));
+        kline.setCloseTime((Long) serverKline[6]);
+        kline.setQuoteVolume(toBigDecimal(serverKline[7]));
+        kline.setTradeNum((Integer) serverKline[8]);
+        kline.setActiveBuyVolume(toBigDecimal(serverKline[9]));
+        kline.setActiveBuyQuoteVolume(toBigDecimal(serverKline[10]));
+        kline.setIgnore((String) serverKline[11]);
+        return kline;
+      }
+      default -> {
+        throw new UnsupportedOperationException();
+      }
+    }
   }
 
   protected int getLimit(Integer originalLimit) {
@@ -487,7 +551,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @SuppressWarnings("unchecked")
-  private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  private List<Kline<?>> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(symbol, startTime,
         endTime, intervalEnum, limit, false);
@@ -495,14 +559,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return Collections.emptyList();
     }
 
-    CompletableFuture<List<Kline>>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
+    CompletableFuture<List<Kline<?>>>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
     for(int i = 0; i < makeUpTimeRanges.size(); i++) {
       ImmutablePair<Long, Long> rangePair = makeUpTimeRanges.get(i);
-      CompletableFuture<List<Kline>> future = CompletableFuture.supplyAsync(() -> {
+      CompletableFuture<List<Kline<?>>> future = CompletableFuture.supplyAsync(() -> {
         rateLimitManager.acquire(getRateLimiterName(), getMakeUpKlinesWeight());
-        List<Kline> subKlines = queryKlines0(symbol, interval,
+        List<Kline<?>> subKlines = queryKlines0(symbol, interval,
             rangePair.getLeft(), rangePair.getRight(), getMakeUpKlinesLimit());
-        for (Kline makeUpKline : subKlines) {
+        for (Kline<?> makeUpKline : subKlines) {
           updateKline(symbol, interval, makeUpKline);
         }
         return subKlines;
@@ -549,7 +613,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         () -> {
           for (KlineSet klineSet : klineSetMap.values()) {
-            NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+            NavigableMap<Long, Kline<?>> klineMap = klineSet.getKlineMap();
             if (klineMap.size() > getSyncConfig().getMinMaintainCount() * 1.2) {
               while (klineMap.size() > getSyncConfig().getMinMaintainCount()) {
                 klineMap.pollFirstEntry();
@@ -617,26 +681,44 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return webSocketClients.subList(0, connectionCount.get());
   }
 
-  private Kline convertToKline(EventKlineEvent event) {
+  private Kline<?> convertToKline(EventKlineEvent<?, ?> event) {
     if (event == null || event.getEventKline() == null) {
       return null;
     }
-    EventKline eventKline = event.getEventKline();
-    Kline kline = new Kline();
-    kline.setOpenTime(eventKline.getOpenTime());
-    kline.setCloseTime(eventKline.getCloseTime());
-    kline.setOpenPrice(eventKline.getOpenPrice());
-    kline.setHighPrice(eventKline.getHighPrice());
-    kline.setLowPrice(eventKline.getLowPrice());
-    kline.setClosePrice(eventKline.getClosePrice());
-    kline.setVolume(eventKline.getVolume());
-    kline.setQuoteVolume(eventKline.getQuoteVolume());
-    kline.setTradeNum(eventKline.getTradeNum());
-    kline.setActiveBuyVolume(eventKline.getActiveBuyVolume());
-    kline.setActiveBuyQuoteVolume(eventKline.getActiveBuyQuoteVolume());
-    kline.setIgnore(eventKline.getIgnore());
-
-    return kline;
+    EventKline<?> eventKline = event.getEventKline();
+    if (eventKline instanceof DoubleEventKline doubleEventKline) {
+      DoubleKline doubleKline = new DoubleKline();
+      doubleKline.setOpenTime(doubleEventKline.getOpenTime());
+      doubleKline.setCloseTime(doubleEventKline.getCloseTime());
+      doubleKline.setOpenPrice(toDouble(doubleEventKline.getOpenPrice()));
+      doubleKline.setHighPrice(toDouble(doubleEventKline.getHighPrice()));
+      doubleKline.setLowPrice(toDouble(doubleEventKline.getLowPrice()));
+      doubleKline.setClosePrice(toDouble(doubleEventKline.getClosePrice()));
+      doubleKline.setVolume(toDouble(doubleEventKline.getVolume()));
+      doubleKline.setQuoteVolume(toDouble(doubleEventKline.getQuoteVolume()));
+      doubleKline.setTradeNum(doubleEventKline.getTradeNum());
+      doubleKline.setActiveBuyVolume(toDouble(doubleEventKline.getActiveBuyVolume()));
+      doubleKline.setActiveBuyQuoteVolume(toDouble(doubleEventKline.getActiveBuyQuoteVolume()));
+      doubleKline.setIgnore(doubleEventKline.getIgnore());
+      return doubleKline;
+    } else if(eventKline instanceof BigDecimalEventKline bigDecimalEventKline){
+      BigDecimalKline bigDecimalKline = new BigDecimalKline();
+      bigDecimalKline.setOpenTime(bigDecimalEventKline.getOpenTime());
+      bigDecimalKline.setCloseTime(bigDecimalEventKline.getCloseTime());
+      bigDecimalKline.setOpenPrice(toBigDecimal(bigDecimalEventKline.getOpenPrice()));
+      bigDecimalKline.setHighPrice(toBigDecimal(bigDecimalEventKline.getHighPrice()));
+      bigDecimalKline.setLowPrice(toBigDecimal(bigDecimalEventKline.getLowPrice()));
+      bigDecimalKline.setClosePrice(toBigDecimal(bigDecimalEventKline.getClosePrice()));
+      bigDecimalKline.setVolume(toBigDecimal(bigDecimalEventKline.getVolume()));
+      bigDecimalKline.setQuoteVolume(toBigDecimal(bigDecimalEventKline.getQuoteVolume()));
+      bigDecimalKline.setTradeNum(bigDecimalEventKline.getTradeNum());
+      bigDecimalKline.setActiveBuyVolume(toBigDecimal(bigDecimalEventKline.getActiveBuyVolume()));
+      bigDecimalKline.setActiveBuyQuoteVolume(toBigDecimal(bigDecimalEventKline.getActiveBuyQuoteVolume()));
+      bigDecimalKline.setIgnore(bigDecimalEventKline.getIgnore());
+      return bigDecimalKline;
+    } else {
+      throw new UnsupportedOperationException();
+    }
   }
 
   private CombineKlineEvent convertToCombineKlineEvent(String message) {
@@ -644,8 +726,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return eventOptional.orElse(null);
   }
 
-  private EventKlineEvent convertToEventKlineEvent(String message) {
-    Optional<EventKlineEvent> eventOptional = messageEventLruCache.get(message);
+  private EventKlineEvent<?, ?> convertToEventKlineEvent(String message) {
+    Optional<EventKlineEvent<?, ?>> eventOptional = messageEventLruCache.get(message);
     return eventOptional.orElse(null);
   }
 
@@ -668,5 +750,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         new ArrayBlockingQueue<>(1024),
         namedThreadFactory,
         new AbortPolicy());
+  }
+
+  private NumberTypeEnum getNumberType() {
+    return CommonUtil.getEnumByCode(numberType, NumberTypeEnum.class);
   }
 }

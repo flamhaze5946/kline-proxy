@@ -1,5 +1,7 @@
 server:
   port: 1888
+number:
+  type: double
 kline:
   binance:
     spot:

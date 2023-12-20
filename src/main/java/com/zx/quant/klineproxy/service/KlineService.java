@@ -18,7 +18,7 @@ public interface KlineService {
    * @param symbols symbols, not required
    * @return tickers
    */
-  List<Ticker> queryTickers(Collection<String> symbols);
+  List<Ticker<?>> queryTickers(Collection<String> symbols);
 
   /**
    * query klines
@@ -29,7 +29,7 @@ public interface KlineService {
    * @param limit     limit
    * @return klines
    */
-  List<Kline> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit);
+  List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit);
 
   /**
    * update klines
@@ -37,12 +37,12 @@ public interface KlineService {
    * @param interval  interval
    * @param klines    klines
    */
-  void updateKlines(String symbol, String interval, List<Kline> klines);
+  void updateKlines(String symbol, String interval, List<Kline<?>> klines);
 
   /**
    * @see KlineService#updateKlines(String, String, List)
    */
-  default void updateKline(String symbol, String interval, Kline kline) {
+  default void updateKline(String symbol, String interval, Kline<?> kline) {
     updateKlines(symbol, interval, Collections.singletonList(kline));
   }
 }

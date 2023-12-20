@@ -2,35 +2,51 @@ package com.zx.quant.klineproxy.model;
 
 import java.math.BigDecimal;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
 
 /**
  * kline
  * @author flamhaze5946
  */
 @Data
-public class Kline {
+public abstract class Kline<N> {
 
   protected Long openTime;
 
   protected Long closeTime;
 
-  protected BigDecimal openPrice;
+  protected N openPrice;
 
-  protected BigDecimal highPrice;
+  protected N highPrice;
 
-  protected BigDecimal lowPrice;
+  protected N lowPrice;
 
-  protected BigDecimal closePrice;
+  protected N closePrice;
 
-  protected BigDecimal volume;
+  protected N volume;
 
-  protected BigDecimal quoteVolume;
+  protected N quoteVolume;
 
   protected Integer tradeNum;
 
-  protected BigDecimal activeBuyVolume;
+  protected N activeBuyVolume;
 
-  protected BigDecimal activeBuyQuoteVolume;
+  protected N activeBuyQuoteVolume;
 
   protected String ignore;
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class DoubleKline extends Kline<Double> {
+  }
+
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class BigDecimalKline extends Kline<BigDecimal> {
+  }
+
 }

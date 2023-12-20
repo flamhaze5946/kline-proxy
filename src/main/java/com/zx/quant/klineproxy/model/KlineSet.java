@@ -13,7 +13,7 @@ public class KlineSet {
 
   private final KlineSetKey key;
 
-  private NavigableMap<Long, Kline> klineMap = new ConcurrentSkipListMap<>();
+  private NavigableMap<Long, Kline<?>> klineMap = new ConcurrentSkipListMap<>();
 
   public KlineSet(KlineSetKey key) {
     this.key = key;

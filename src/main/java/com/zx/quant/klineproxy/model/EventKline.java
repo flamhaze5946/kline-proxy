@@ -3,45 +3,59 @@ package com.zx.quant.klineproxy.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
 
 /**
  * event kline
  * @author flamhaze5946
  */
 @Data
-public class EventKline {
+public abstract class EventKline<N> {
   @JsonProperty("t")
-  private Long openTime;
+  protected Long openTime;
   @JsonProperty("T")
-  private Long closeTime;
+  protected Long closeTime;
   @JsonProperty("s")
-  private String symbol;
+  protected String symbol;
   @JsonProperty("i")
-  private String interval;
+  protected String interval;
   @JsonProperty("f")
-  private Long openMatchId;
+  protected Long openMatchId;
   @JsonProperty("L")
-  private Long closeMatchId;
+  protected Long closeMatchId;
   @JsonProperty("o")
-  private BigDecimal openPrice;
+  protected N openPrice;
   @JsonProperty("c")
-  private BigDecimal closePrice;
+  protected N closePrice;
   @JsonProperty("h")
-  private BigDecimal highPrice;
+  protected N highPrice;
   @JsonProperty("l")
-  private BigDecimal lowPrice;
+  protected N lowPrice;
   @JsonProperty("v")
-  private BigDecimal volume;
+  protected N volume;
   @JsonProperty("n")
-  private Integer tradeNum;
+  protected Integer tradeNum;
   @JsonProperty("x")
-  private Boolean closed;
+  protected Boolean closed;
   @JsonProperty("q")
-  private BigDecimal quoteVolume;
+  protected N quoteVolume;
   @JsonProperty("V")
-  private BigDecimal activeBuyVolume;
+  protected N activeBuyVolume;
   @JsonProperty("Q")
-  private BigDecimal activeBuyQuoteVolume;
+  protected N activeBuyQuoteVolume;
   @JsonProperty("B")
-  private String ignore;
+  protected String ignore;
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class DoubleEventKline extends EventKline<Double> {
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class BigDecimalEventKline extends EventKline<BigDecimal> {
+  }
 }

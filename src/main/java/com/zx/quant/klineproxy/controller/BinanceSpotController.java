@@ -53,7 +53,7 @@ public class BinanceSpotController {
     realSymbols = realSymbols.stream()
         .distinct()
         .toList();
-    List<Ticker> tickers = klineService.queryTickers(realSymbols);
+    List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
     return ConvertUtil.convertToDisplayTicker(tickers);
   }
 
@@ -65,7 +65,7 @@ public class BinanceSpotController {
       @RequestParam(value = "endTime", required = false) Long endTime,
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
-    List<Kline> klines = klineService.queryKlines(symbol, interval, startTime, endTime, limit);
+    List<Kline<?>> klines = klineService.queryKlines(symbol, interval, startTime, endTime, limit);
     return klines.stream().map(ConvertUtil::convertToDisplayKline).collect(Collectors.toList());
   }
 }
