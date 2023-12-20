@@ -183,7 +183,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit, boolean makeUp) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
@@ -195,34 +195,44 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
     KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
     KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
+    NavigableMap<Long, Kline<?>> klineSetMap = klineSet.getKlineMap();
     Map<Long, Kline<?>> savedKlineMap;
 
-    List<ImmutablePair<Long, Long>> makeUpTimeRanges =
-        buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
+    if (makeUp) {
+      List<ImmutablePair<Long, Long>> makeUpTimeRanges =
+          buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
 
-    if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
-      savedKlineMap = klineSet.getKlineMap()
-          .subMap(realStartTime, true, realEndTime, true);
-    } else {
-      CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
-      for(int i = 0; i < makeUpTimeRanges.size(); i++) {
-        ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
-        CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
-                safeQueryKlines(symbol, interval,
-                    makeUpRange.getLeft(), makeUpRange.getRight(), getMakeUpKlinesLimit())
-            , MANAGE_EXECUTOR);
-        futures[i] = makeUpFuture;
+      if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
+        savedKlineMap = klineSetMap
+            .subMap(realStartTime, true, realEndTime, true);
+      } else {
+        CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
+        for(int i = 0; i < makeUpTimeRanges.size(); i++) {
+          ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
+          CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
+                  safeQueryKlines(symbol, interval,
+                      makeUpRange.getLeft(), makeUpRange.getRight(), getMakeUpKlinesLimit())
+              , MANAGE_EXECUTOR);
+          futures[i] = makeUpFuture;
+        }
+        CompletableFuture.allOf(futures).join();
+        savedKlineMap = klineSetMap
+            .subMap(realStartTime, realEndTime);
       }
-      CompletableFuture.allOf(futures).join();
-      savedKlineMap = klineSet.getKlineMap()
-          .subMap(realStartTime, realEndTime);
+    } else {
+      savedKlineMap = klineSetMap
+          .subMap(realStartTime, true, realEndTime, true);
     }
 
     if (savedKlineMap.size() < limit && startTime == null && endTime == null) {
-      Kline<?> lastKline = klineSet.getKlineMap().lastEntry().getValue();
+      if (MapUtils.isEmpty(klineSetMap)) {
+        return Collections.emptyList();
+      }
+
+      Kline<?> lastKline = klineSetMap.lastEntry().getValue();
       long lastKlineOpenTime = lastKline.getOpenTime();
       long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (limit - 1));
-      savedKlineMap = klineSet.getKlineMap()
+      savedKlineMap = klineSetMap
           .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
     }
 

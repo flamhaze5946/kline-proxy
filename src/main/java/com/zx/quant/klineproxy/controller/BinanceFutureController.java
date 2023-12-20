@@ -4,7 +4,6 @@ import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
-import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;

@@ -1,11 +1,12 @@
 package com.zx.quant.klineproxy.util;
 
 import com.zx.quant.klineproxy.model.Kline;
-import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
-import com.zx.quant.klineproxy.model.Kline.DoubleKline;
 import com.zx.quant.klineproxy.model.Ticker;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import org.apache.commons.collections4.CollectionUtils;
 
 /**
@@ -19,10 +20,27 @@ public final class ConvertUtil {
       return Collections.emptyList();
     }
     if (tickers.size() == 1) {
-      return tickers.get(0);
+      return convertToDisplayTicker(tickers.get(0));
     } else {
-      return tickers;
+      return tickers.stream()
+          .map(ConvertUtil::convertToDisplayTicker)
+          .collect(Collectors.toList());
     }
+  }
+
+  public static Object convertToDisplayTicker(Ticker<?> ticker) {
+    if (ticker == null) {
+      return new Object[0];
+    }
+    DisplayTicker displayTicker = new DisplayTicker();
+    displayTicker.setSymbol(ticker.getSymbol());
+    displayTicker.setTime(ticker.getTime());
+    if (ticker instanceof Ticker.DoubleTicker doubleTicker) {
+      displayTicker.setPrice(String.valueOf(doubleTicker.getPrice()));
+    } else if(ticker instanceof Ticker.BigDecimalTicker bigDecimalTicker){
+      displayTicker.setPrice(bigDecimalTicker.getPrice().toPlainString());
+    }
+    return displayTicker;
   }
 
   public static Object[] convertToDisplayKline(Kline<?> kline) {
@@ -30,7 +48,22 @@ public final class ConvertUtil {
       return new Object[0];
     }
 
-    if (kline instanceof Kline.BigDecimalKline bigDecimalKline) {
+    if (kline instanceof Kline.DoubleKline doubleKline) {
+      return new Object[] {
+          doubleKline.getOpenTime(),
+          String.valueOf(doubleKline.getOpenPrice()),
+          String.valueOf(doubleKline.getHighPrice()),
+          String.valueOf(doubleKline.getLowPrice()),
+          String.valueOf(doubleKline.getClosePrice()),
+          String.valueOf(doubleKline.getVolume()),
+          doubleKline.getCloseTime(),
+          String.valueOf(doubleKline.getQuoteVolume()),
+          doubleKline.getTradeNum(),
+          String.valueOf(doubleKline.getActiveBuyVolume()),
+          String.valueOf(doubleKline.getActiveBuyQuoteVolume()),
+          doubleKline.getIgnore()
+      };
+    } else if(kline instanceof Kline.BigDecimalKline bigDecimalKline) {
       return new Object[] {
           bigDecimalKline.getOpenTime(),
           bigDecimalKline.getOpenPrice().toPlainString(),
@@ -41,27 +74,17 @@ public final class ConvertUtil {
           bigDecimalKline.getCloseTime(),
           bigDecimalKline.getQuoteVolume().toPlainString(),
           bigDecimalKline.getTradeNum(),
-          bigDecimalKline.getActiveBuyVolume(),
-          bigDecimalKline.getActiveBuyQuoteVolume(),
+          bigDecimalKline.getActiveBuyVolume().toPlainString(),
+          bigDecimalKline.getActiveBuyQuoteVolume().toPlainString(),
           bigDecimalKline.getIgnore()
-      };
-    } else if(kline instanceof Kline.DoubleKline doubleKline) {
-      return new Object[] {
-          doubleKline.getOpenTime(),
-          doubleKline.getOpenPrice(),
-          doubleKline.getHighPrice(),
-          doubleKline.getLowPrice(),
-          doubleKline.getClosePrice(),
-          doubleKline.getVolume(),
-          doubleKline.getCloseTime(),
-          doubleKline.getQuoteVolume(),
-          doubleKline.getTradeNum(),
-          doubleKline.getActiveBuyVolume(),
-          doubleKline.getActiveBuyQuoteVolume(),
-          doubleKline.getIgnore()
       };
     } else {
       throw new UnsupportedOperationException();
     }
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @Data
+  private static class DisplayTicker extends Ticker<String> {
   }
 }
