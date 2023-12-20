@@ -108,10 +108,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
-  private final LoadingCache<String, Optional<CombineKlineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
+  private final LoadingCache<String, Optional<CombineKlineEvent<?, ?>>> combineMessageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
       .maximumSize(10240)
-      .build(message -> Optional.ofNullable(serializer.fromJsonString(message, CombineKlineEvent.class)));
+      .build(message -> {
+        NumberTypeEnum numberTypeEnum = getNumberType();
+        CombineKlineEvent<?, ?> combineKlineEvent = serializer.fromJsonString(message,
+            numberTypeEnum.combineEventKlineClass());
+        return Optional.ofNullable(combineKlineEvent);
+      });
 
   private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
@@ -277,7 +282,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Function<String, Boolean> getCombineKlineEventMessageHandler() {
     return message -> {
-      CombineKlineEvent combineKlineEvent = convertToCombineKlineEvent(message);
+      CombineKlineEvent<?, ?> combineKlineEvent = convertToCombineKlineEvent(message);
       if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
         return false;
       }
@@ -311,7 +316,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Function<String, String> getCombineKlineEventMessageTopicExtractor() {
     return message -> {
-      CombineKlineEvent combineKlineEvent = convertToCombineKlineEvent(message);
+      CombineKlineEvent<?, ?> combineKlineEvent = convertToCombineKlineEvent(message);
       if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
         return null;
       }
@@ -731,8 +736,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
-  private CombineKlineEvent convertToCombineKlineEvent(String message) {
-    Optional<CombineKlineEvent> eventOptional = combineMessageEventLruCache.get(message);
+  private CombineKlineEvent<?, ?> convertToCombineKlineEvent(String message) {
+    Optional<CombineKlineEvent<?, ?>> eventOptional = combineMessageEventLruCache.get(message);
     return eventOptional.orElse(null);
   }
 
