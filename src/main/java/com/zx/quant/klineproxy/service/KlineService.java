@@ -21,9 +21,9 @@ public interface KlineService {
   List<Ticker<?>> queryTickers(Collection<String> symbols);
 
   /**
-   * @see KlineService#queryKlines(String, String, Long, Long, Integer, boolean)
+   * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
    */
-  default List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  default List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlines(symbol, interval, startTime, endTime, limit, false);
   }
 
@@ -38,7 +38,7 @@ public interface KlineService {
    * @param makeUp    make up klines
    * @return klines
    */
-  List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit, boolean makeUp);
+  List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
 
   /**
    * update klines

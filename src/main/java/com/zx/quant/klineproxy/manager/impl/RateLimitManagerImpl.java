@@ -41,7 +41,7 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   @Override
   public void acquire(String limiterName, int weight) {
     RateLimiterWrapper wrapper = getWrapper(limiterName);
-    while (wrapper.getStoper().get()) {
+    while (wrapper.getStopper().get()) {
       CommonUtil.sleep(50);
     }
     wrapper.getRateLimiter().acquire(weight);
@@ -50,8 +50,8 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   @Override
   public void stopAcquire(String limiterName, long mills) {
     RateLimiterWrapper wrapper = getWrapper(limiterName);
-    wrapper.getStoper().set(true);
-    timer.newTimeout(timeout -> wrapper.getStoper().set(false), mills, TimeUnit.MILLISECONDS);
+    wrapper.getStopper().set(true);
+    timer.newTimeout(timeout -> wrapper.getStopper().set(false), mills, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -85,7 +85,7 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
 
     private final RateLimiter rateLimiter;
 
-    private final AtomicBoolean stoper = new AtomicBoolean(false);
+    private final AtomicBoolean stopper = new AtomicBoolean(false);
 
     public RateLimiterWrapper(RateLimiter rateLimiter) {
       this.rateLimiter = rateLimiter;

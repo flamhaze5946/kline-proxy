@@ -27,6 +27,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("fapi/v1")
 public class BinanceFutureController {
 
+  private static final int DEFAULT_LIMIT = 100;
+
   @Autowired
   @Qualifier("binanceFutureKlineService")
   private KlineService klineService;
@@ -83,7 +85,8 @@ public class BinanceFutureController {
       @RequestParam(value = "endTime", required = false) Long endTime,
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
-    List<Kline<?>> klines = klineService.queryKlines(symbol, interval, startTime, endTime, limit);
+    int realLimit = limit != null ? limit : DEFAULT_LIMIT;
+    List<Kline<?>> klines = klineService.queryKlines(symbol, interval, startTime, endTime, realLimit);
     return klines.stream().map(ConvertUtil::convertToDisplayKline).collect(Collectors.toList());
   }
 }

@@ -188,7 +188,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit, boolean makeUp) {
+  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
