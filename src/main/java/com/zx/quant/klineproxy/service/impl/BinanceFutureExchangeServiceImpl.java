@@ -14,6 +14,7 @@ import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +32,8 @@ import retrofit2.Call;
  */
 @Service("binanceFutureExchangeService")
 public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<BinanceFutureExchange> {
+
+  private static final int MAX_FUNDING_RATE_LIMIT = 1000;
 
   private static final String VALID_SYMBOL_STATUS = "TRADING";
 
@@ -111,9 +114,23 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
         .expireAfterWrite(Duration.of(10, ChronoUnit.MINUTES))
         .refreshAfterWrite(5, TimeUnit.MINUTES)
         .build(s -> {
-          Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates();
-          return ClientUtil.getResponseBody(ratesCall,
+          Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates(MAX_FUNDING_RATE_LIMIT);
+          List<FutureFundingRate> rates = ClientUtil.getResponseBody(ratesCall,
               () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+          Map<String, FutureFundingRate> symbolRateMap = rates.stream()
+              .collect(Collectors.toMap(FutureFundingRate::getSymbol, Function.identity(), (o, n) -> {
+                if (o.getFundingTime() == null) {
+                  return n;
+                }
+                if (n.getFundingTime() == null) {
+                  return o;
+                }
+                if (o.getFundingTime() > n.getFundingTime()) {
+                  return o;
+                }
+                return n;
+              }));
+          return Collections.unmodifiableList(Lists.newArrayList(symbolRateMap.values()));
         });
   }
 

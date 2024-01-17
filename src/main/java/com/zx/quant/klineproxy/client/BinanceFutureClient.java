@@ -14,7 +14,9 @@ public interface BinanceFutureClient {
   Call<BinanceFutureExchange> getExchange();
 
   @GET("fapi/v1/fundingRate")
-  Call<List<FutureFundingRate>> getFundingRates();
+  Call<List<FutureFundingRate>> getFundingRates(
+      @Query("limit") Integer limit
+  );
 
   @GET("fapi/v1/premiumIndex")
   Call<List<FuturePremiumIndex>> getSymbolPremiumIndices();
