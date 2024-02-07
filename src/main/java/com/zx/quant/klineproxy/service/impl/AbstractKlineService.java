@@ -195,7 +195,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
     }
-    long klinesDuration = calculateKlinesDuration(intervalEnum, limit);
     ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, limit);
     Long realStartTime = realTimePair.getLeft();
     Long realEndTime = realTimePair.getRight();
@@ -209,10 +208,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       List<ImmutablePair<Long, Long>> makeUpTimeRanges =
           buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
 
-      if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
-        savedKlineMap = klineSetMap
-            .subMap(realStartTime, true, realEndTime, true);
-      } else {
+      if (CollectionUtils.isNotEmpty(makeUpTimeRanges)) {
         CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
         for(int i = 0; i < makeUpTimeRanges.size(); i++) {
           ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
@@ -223,27 +219,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           futures[i] = makeUpFuture;
         }
         CompletableFuture.allOf(futures).join();
-        savedKlineMap = klineSetMap
-            .subMap(realStartTime, realEndTime);
       }
-    } else {
-      savedKlineMap = klineSetMap
-          .subMap(realStartTime, true, realEndTime, true);
     }
 
     if (MapUtils.isEmpty(klineSetMap)) {
       return ImmutablePair.of(Collections.emptyList(), 0);
     }
 
+    savedKlineMap = klineSetMap
+        .subMap(realStartTime, true, realEndTime, true);
+
     int mapSize = getMapSize(savedKlineMap, intervalEnum);
     if (startTime == null && endTime == null && mapSize < limit) {
+      long klinesDuration = calculateKlinesDuration(intervalEnum, limit);
       Kline<?> lastKline = klineSetMap.lastEntry().getValue();
       long lastKlineOpenTime = lastKline.getOpenTime();
-      long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (limit - 1));
+      long startKlineOpenTime = lastKlineOpenTime - klinesDuration;
       savedKlineMap = klineSetMap
-          .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
+          .subMap(startKlineOpenTime, true, lastKlineOpenTime, true);
+      mapSize = getMapSize(savedKlineMap, intervalEnum);
     }
-    mapSize = getMapSize(savedKlineMap, intervalEnum);
 
     return ImmutablePair.of(savedKlineMap.values(), mapSize);
   }
