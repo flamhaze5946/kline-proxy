@@ -3,6 +3,7 @@ package com.zx.quant.klineproxy.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
+import com.zx.quant.klineproxy.model.EventKline.StringEventKline;
 import java.math.BigDecimal;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -22,6 +23,12 @@ public class EventKlineEvent<N, EKN extends EventKline<N>> {
   protected String symbol;
   @JsonProperty("k")
   protected EKN eventKline;
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class StringEventKlineEvent extends EventKlineEvent<String, StringEventKline> {
+  }
 
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor

@@ -19,7 +19,13 @@ public abstract class Ticker<N> {
   protected Long time;
 
   public static Ticker<?> create(String symbol, Kline<?> kline, Long time) {
-    if (kline instanceof Kline.DoubleKline doubleKline) {
+    if (kline instanceof Kline.StringKline stringKline) {
+      StringTicker stringTicker = new StringTicker();
+      stringTicker.setSymbol(symbol);
+      stringTicker.setPrice(stringKline.getClosePrice());
+      stringTicker.setTime(time);
+      return stringTicker;
+    } else if (kline instanceof Kline.DoubleKline doubleKline) {
       DoubleTicker doubleTicker = new DoubleTicker();
       doubleTicker.setSymbol(symbol);
       doubleTicker.setPrice(doubleKline.getClosePrice());
@@ -34,6 +40,12 @@ public abstract class Ticker<N> {
     } else {
       throw new UnsupportedOperationException();
     }
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class StringTicker extends Ticker<String> {
   }
 
   @EqualsAndHashCode(callSuper = true)

@@ -41,7 +41,9 @@ public final class ConvertUtil {
     DisplayTicker displayTicker = new DisplayTicker();
     displayTicker.setSymbol(ticker.getSymbol());
     displayTicker.setTime(ticker.getTime());
-    if (ticker instanceof Ticker.DoubleTicker doubleTicker) {
+    if (ticker instanceof Ticker.StringTicker stringTicker) {
+      displayTicker.setPrice(stringTicker.getPrice());
+    } else if (ticker instanceof Ticker.DoubleTicker doubleTicker) {
       displayTicker.setPrice(formatForDouble(doubleTicker.getPrice()));
     } else if(ticker instanceof Ticker.BigDecimalTicker bigDecimalTicker){
       displayTicker.setPrice(bigDecimalTicker.getPrice().toPlainString());
@@ -54,7 +56,22 @@ public final class ConvertUtil {
       return new Object[0];
     }
 
-    if (kline instanceof Kline.DoubleKline doubleKline) {
+    if (kline instanceof Kline.StringKline stringKline) {
+      return new Object[] {
+          stringKline.getOpenTime(),
+          stringKline.getOpenPrice(),
+          stringKline.getHighPrice(),
+          stringKline.getLowPrice(),
+          stringKline.getClosePrice(),
+          stringKline.getVolume(),
+          stringKline.getCloseTime(),
+          stringKline.getQuoteVolume(),
+          stringKline.getTradeNum(),
+          stringKline.getActiveBuyVolume(),
+          stringKline.getActiveBuyQuoteVolume(),
+          stringKline.getIgnore()
+          };
+    } else if (kline instanceof Kline.DoubleKline doubleKline) {
       return new Object[] {
           doubleKline.getOpenTime(),
           formatForDouble(doubleKline.getOpenPrice()),

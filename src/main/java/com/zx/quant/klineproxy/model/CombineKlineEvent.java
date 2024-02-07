@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.model;
 
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
+import com.zx.quant.klineproxy.model.EventKline.StringEventKline;
 import java.math.BigDecimal;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -13,6 +14,11 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 @Data
 public abstract class CombineKlineEvent<N, EKN extends EventKline<N>> extends CombineEvent<EventKlineEvent<N, EKN>> {
+
+  @EqualsAndHashCode(callSuper = true)
+  @Data
+  public static class StringCombineKlineEvent extends CombineKlineEvent<String, StringEventKline> {
+  }
 
   @EqualsAndHashCode(callSuper = true)
   @Data

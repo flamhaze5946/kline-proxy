@@ -39,6 +39,12 @@ public abstract class Kline<N> {
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
+  public static class StringKline extends Kline<String> {
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
   public static class DoubleKline extends Kline<Double> {
   }
 

@@ -3,18 +3,23 @@ package com.zx.quant.klineproxy.model.enums;
 import com.zx.quant.klineproxy.model.CombineKlineEvent;
 import com.zx.quant.klineproxy.model.CombineKlineEvent.BigDecimalCombineKlineEvent;
 import com.zx.quant.klineproxy.model.CombineKlineEvent.DoubleCombineKlineEvent;
+import com.zx.quant.klineproxy.model.CombineKlineEvent.StringCombineKlineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
+import com.zx.quant.klineproxy.model.EventKline.StringEventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.EventKlineEvent.BigDecimalEventKlineEvent;
 import com.zx.quant.klineproxy.model.EventKlineEvent.DoubleEventKlineEvent;
+import com.zx.quant.klineproxy.model.EventKlineEvent.StringEventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
 import com.zx.quant.klineproxy.model.Kline.DoubleKline;
+import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker;
 import com.zx.quant.klineproxy.model.Ticker.DoubleTicker;
+import com.zx.quant.klineproxy.model.Ticker.StringTicker;
 import com.zx.quant.klineproxy.util.BaseEnum;
 
 /**
@@ -23,9 +28,17 @@ import com.zx.quant.klineproxy.util.BaseEnum;
  */
 public enum NumberTypeEnum implements BaseEnum {
 
-  DOUBLE("double", DoubleKline.class, DoubleEventKline.class, DoubleCombineKlineEvent.class, DoubleEventKlineEvent.class, DoubleTicker.class, "DOUBLE"),
+  STRING("string", StringKline.class,
+      StringEventKline.class, StringCombineKlineEvent.class, StringEventKlineEvent.class,
+      StringTicker.class, "STRING"),
 
-  BIG_DECIMAL("bigDecimal", BigDecimalKline.class, BigDecimalEventKline.class, BigDecimalCombineKlineEvent.class, BigDecimalEventKlineEvent.class, BigDecimalTicker.class, "BIG_DECIMAL"),
+  DOUBLE("double", DoubleKline.class,
+      DoubleEventKline.class, DoubleCombineKlineEvent.class, DoubleEventKlineEvent.class,
+      DoubleTicker.class, "DOUBLE"),
+
+  BIG_DECIMAL("bigDecimal", BigDecimalKline.class,
+      BigDecimalEventKline.class, BigDecimalCombineKlineEvent.class, BigDecimalEventKlineEvent.class,
+      BigDecimalTicker.class, "BIG_DECIMAL"),
   ;
 
   private final String code;

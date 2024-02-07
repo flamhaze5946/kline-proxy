@@ -12,6 +12,7 @@ import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
 import com.zx.quant.klineproxy.model.Kline.DoubleKline;
+import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.Ticker;
@@ -36,7 +37,6 @@ import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -243,6 +243,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       savedKlineMap = klineSetMap
           .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
     }
+    mapSize = getMapSize(savedKlineMap, intervalEnum);
 
     return ImmutablePair.of(savedKlineMap.values(), mapSize);
   }
@@ -517,6 +518,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
     NumberTypeEnum numberTypeEnum = getNumberType();
     switch (numberTypeEnum) {
+      case STRING -> {
+        StringKline kline = new StringKline();
+        kline.setOpenTime((Long) serverKline[0]);
+        kline.setOpenPrice((String) serverKline[1]);
+        kline.setHighPrice((String) serverKline[2]);
+        kline.setLowPrice((String) serverKline[3]);
+        kline.setClosePrice((String) serverKline[4]);
+        kline.setVolume((String) serverKline[5]);
+        kline.setCloseTime((Long) serverKline[6]);
+        kline.setQuoteVolume((String) serverKline[7]);
+        kline.setTradeNum((Integer) serverKline[8]);
+        kline.setActiveBuyVolume((String) serverKline[9]);
+        kline.setActiveBuyQuoteVolume((String) serverKline[10]);
+        kline.setIgnore((String) serverKline[11]);
+        return kline;
+      }
       case DOUBLE -> {
         DoubleKline kline = new DoubleKline();
         kline.setOpenTime((Long) serverKline[0]);
@@ -629,7 +646,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         () -> {
           for (KlineSet klineSet : klineSetMap.values()) {
             NavigableMap<Long, Kline<?>> klineMap = klineSet.getKlineMap();
-            if (klineMap.size() > getSyncConfig().getMinMaintainCount() * 1.2) {
+            if (klineMap.size() > getSyncConfig().getMinMaintainCount() + 50) {
               while (klineMap.size() > getSyncConfig().getMinMaintainCount()) {
                 klineMap.pollFirstEntry();
               }
@@ -701,7 +718,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return null;
     }
     EventKline<?> eventKline = event.getEventKline();
-    if (eventKline instanceof DoubleEventKline doubleEventKline) {
+    if (eventKline instanceof EventKline.StringEventKline stringEventKline) {
+      StringKline stringKline = new StringKline();
+      stringKline.setOpenTime(stringEventKline.getOpenTime());
+      stringKline.setCloseTime(stringEventKline.getCloseTime());
+      stringKline.setOpenPrice(stringEventKline.getOpenPrice());
+      stringKline.setHighPrice(stringEventKline.getHighPrice());
+      stringKline.setLowPrice(stringEventKline.getLowPrice());
+      stringKline.setClosePrice(stringEventKline.getClosePrice());
+      stringKline.setVolume(stringEventKline.getVolume());
+      stringKline.setQuoteVolume(stringEventKline.getQuoteVolume());
+      stringKline.setTradeNum(stringEventKline.getTradeNum());
+      stringKline.setActiveBuyVolume(stringEventKline.getActiveBuyVolume());
+      stringKline.setActiveBuyQuoteVolume(stringEventKline.getActiveBuyQuoteVolume());
+      stringKline.setIgnore(stringEventKline.getIgnore());
+      return stringKline;
+    } else if (eventKline instanceof DoubleEventKline doubleEventKline) {
       DoubleKline doubleKline = new DoubleKline();
       doubleKline.setOpenTime(doubleEventKline.getOpenTime());
       doubleKline.setCloseTime(doubleEventKline.getCloseTime());
