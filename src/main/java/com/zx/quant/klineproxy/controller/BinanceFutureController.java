@@ -78,7 +78,7 @@ public class BinanceFutureController {
   }
 
   @GetMapping("klines")
-  public List<Object[]> queryKlines(
+  public Object[][] queryKlines(
       @RequestParam(value = "symbol") String symbol,
       @RequestParam(value = "interval") String interval,
       @RequestParam(value = "startTime", required = false) Long startTime,
@@ -86,8 +86,14 @@ public class BinanceFutureController {
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
-    List<Kline<?>> klines = klineService.queryKlines(symbol, interval, startTime, endTime, realLimit);
-    return klines.stream().map(ConvertUtil::convertToDisplayKline).collect(Collectors.toList());
+    Kline<?>[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
+    Object[][] displayKlines = new Object[klines.length][];
+    for(int i = 0; i < klines.length; i++) {
+      Kline<?> kline = klines[i];
+      Object[] displayKline = ConvertUtil.convertToDisplayKline(kline);
+      displayKlines[i] = displayKline;
+    }
+    return displayKlines;
   }
 }
 

@@ -2,9 +2,11 @@ package com.zx.quant.klineproxy.service;
 
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 
 /**
  * kline service
@@ -23,10 +25,46 @@ public interface KlineService {
   /**
    * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
    */
-  default List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit) {
+  default ImmutablePair<Collection<Kline<?>>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlines(symbol, interval, startTime, endTime, limit, false);
   }
 
+  /**
+   * @see KlineService#queryKlineList(String, String, Long, Long, int, boolean)
+   */
+  default List<Kline<?>> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit) {
+    return queryKlineList(symbol, interval, startTime, endTime, limit, false);
+  }
+
+  /**
+   * @see KlineService#queryKlineArray(String, String, Long, Long, int, boolean)
+   */
+  default Kline<?>[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit) {
+    return queryKlineArray(symbol, interval, startTime, endTime, limit, false);
+  }
+
+  /**
+   * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
+   */
+  default List<Kline<?>> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
+    ImmutablePair<Collection<Kline<?>>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
+    ArrayList<Kline<?>> klineList = new ArrayList<>(klinesPair.getRight());
+    klineList.addAll(klinesPair.getLeft());
+    return klineList;
+  }
+
+  /**
+   * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
+   */
+  default Kline<?>[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
+    ImmutablePair<Collection<Kline<?>>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
+    Kline<?>[] klineArray = new Kline[klinesPair.getRight()];
+    int index = 0;
+    for (Kline<?> kline : klinesPair.getLeft()) {
+      klineArray[index++] = kline;
+    }
+    return klineArray;
+  }
 
   /**
    * query klines
@@ -36,9 +74,9 @@ public interface KlineService {
    * @param endTime   endTime
    * @param limit     limit
    * @param makeUp    make up klines
-   * @return klines
+   * @return klines, klines size
    */
-  List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
+  ImmutablePair<Collection<Kline<?>>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
 
   /**
    * update klines

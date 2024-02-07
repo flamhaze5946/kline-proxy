@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.util;
 
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
+import java.text.DecimalFormat;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -15,7 +16,10 @@ import org.apache.commons.collections4.CollectionUtils;
  */
 public final class ConvertUtil {
 
-  private static final String DOUBLE_FORMAT = "%.8f";
+  private static final String DOUBLE_FORMAT = "#.########";
+
+  private static final ThreadLocal<DecimalFormat> DOUBLE_FORMATTER = ThreadLocal.withInitial(
+      () -> new DecimalFormat(DOUBLE_FORMAT));
 
   public static Object convertToDisplayTicker(List<Ticker<?>> tickers) {
     if (CollectionUtils.isEmpty(tickers)) {
@@ -89,7 +93,7 @@ public final class ConvertUtil {
     if (number == null) {
       return null;
     }
-    return String.format(DOUBLE_FORMAT, number);
+    return DOUBLE_FORMATTER.get().format(number);
   }
 
   @EqualsAndHashCode(callSuper = true)

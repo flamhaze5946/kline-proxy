@@ -36,10 +36,12 @@ import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -188,7 +190,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   @Override
-  public List<Kline<?>> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
+  public ImmutablePair<Collection<Kline<?>>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
       throw new RuntimeException("invalid interval");
@@ -200,8 +202,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
     KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
     KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-    NavigableMap<Long, Kline<?>> klineSetMap = klineSet.getKlineMap();
-    Map<Long, Kline<?>> savedKlineMap;
+    ConcurrentSkipListMap<Long, Kline<?>> klineSetMap = klineSet.getKlineMap();
+    NavigableMap<Long, Kline<?>> savedKlineMap;
 
     if (makeUp) {
       List<ImmutablePair<Long, Long>> makeUpTimeRanges =
@@ -229,11 +231,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           .subMap(realStartTime, true, realEndTime, true);
     }
 
-    if (savedKlineMap.size() < limit && startTime == null && endTime == null) {
-      if (MapUtils.isEmpty(klineSetMap)) {
-        return Collections.emptyList();
-      }
+    if (MapUtils.isEmpty(klineSetMap)) {
+      return ImmutablePair.of(Collections.emptyList(), 0);
+    }
 
+    int mapSize = getMapSize(savedKlineMap, intervalEnum);
+    if (startTime == null && endTime == null && mapSize < limit) {
       Kline<?> lastKline = klineSetMap.lastEntry().getValue();
       long lastKlineOpenTime = lastKline.getOpenTime();
       long startKlineOpenTime = lastKlineOpenTime - (klinesDuration * (limit - 1));
@@ -241,10 +244,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           .subMap(startKlineOpenTime, true, lastKlineOpenTime, true );
     }
 
-    return savedKlineMap.values()
-        .stream()
-        .sorted(Comparator.comparing(Kline::getOpenTime))
-        .toList();
+    return ImmutablePair.of(savedKlineMap.values(), mapSize);
   }
 
   @Override
@@ -769,5 +769,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private NumberTypeEnum getNumberType() {
     return CommonUtil.getEnumByCode(numberType, NumberTypeEnum.class);
+  }
+
+  private int getMapSize(NavigableMap<Long, ?> map, IntervalEnum interval) {
+    if (MapUtils.isEmpty(map)) {
+      return 0;
+    }
+    if (map.firstKey() == null || map.lastKey() == null) {
+      return 1;
+    }
+    return (int) (((map.lastKey() - map.firstKey()) / interval.getMills()) + 1);
   }
 }
