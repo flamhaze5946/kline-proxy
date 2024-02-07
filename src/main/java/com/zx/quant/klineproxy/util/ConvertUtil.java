@@ -15,6 +15,8 @@ import org.apache.commons.collections4.CollectionUtils;
  */
 public final class ConvertUtil {
 
+  private static final String DOUBLE_FORMAT = "%.8f";
+
   public static Object convertToDisplayTicker(List<Ticker<?>> tickers) {
     if (CollectionUtils.isEmpty(tickers)) {
       return Collections.emptyList();
@@ -36,7 +38,7 @@ public final class ConvertUtil {
     displayTicker.setSymbol(ticker.getSymbol());
     displayTicker.setTime(ticker.getTime());
     if (ticker instanceof Ticker.DoubleTicker doubleTicker) {
-      displayTicker.setPrice(String.valueOf(doubleTicker.getPrice()));
+      displayTicker.setPrice(formatForDouble(doubleTicker.getPrice()));
     } else if(ticker instanceof Ticker.BigDecimalTicker bigDecimalTicker){
       displayTicker.setPrice(bigDecimalTicker.getPrice().toPlainString());
     }
@@ -51,16 +53,16 @@ public final class ConvertUtil {
     if (kline instanceof Kline.DoubleKline doubleKline) {
       return new Object[] {
           doubleKline.getOpenTime(),
-          String.valueOf(doubleKline.getOpenPrice()),
-          String.valueOf(doubleKline.getHighPrice()),
-          String.valueOf(doubleKline.getLowPrice()),
-          String.valueOf(doubleKline.getClosePrice()),
-          String.valueOf(doubleKline.getVolume()),
+          formatForDouble(doubleKline.getOpenPrice()),
+          formatForDouble(doubleKline.getHighPrice()),
+          formatForDouble(doubleKline.getLowPrice()),
+          formatForDouble(doubleKline.getClosePrice()),
+          formatForDouble(doubleKline.getVolume()),
           doubleKline.getCloseTime(),
-          String.valueOf(doubleKline.getQuoteVolume()),
+          formatForDouble(doubleKline.getQuoteVolume()),
           doubleKline.getTradeNum(),
-          String.valueOf(doubleKline.getActiveBuyVolume()),
-          String.valueOf(doubleKline.getActiveBuyQuoteVolume()),
+          formatForDouble(doubleKline.getActiveBuyVolume()),
+          formatForDouble(doubleKline.getActiveBuyQuoteVolume()),
           doubleKline.getIgnore()
       };
     } else if(kline instanceof Kline.BigDecimalKline bigDecimalKline) {
@@ -81,6 +83,13 @@ public final class ConvertUtil {
     } else {
       throw new UnsupportedOperationException();
     }
+  }
+
+  private static String formatForDouble(Double number) {
+    if (number == null) {
+      return null;
+    }
+    return String.format(DOUBLE_FORMAT, number);
   }
 
   @EqualsAndHashCode(callSuper = true)

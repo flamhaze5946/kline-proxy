@@ -5,17 +5,15 @@ number:
 kline:
   binance:
     spot:
-      minMaintainCount: 2000
+      minMaintainCount: 5000
       listenIntervals:
         - 1h
-        - 1d
       listenSymbolPatterns:
         - .*?USDT
     future:
-      minMaintainCount: 2000
+      minMaintainCount: 5000
       listenIntervals:
         - 1h
-        - 1d
       listenSymbolPatterns:
         - .*?USDT
 
