@@ -1,11 +1,15 @@
 package com.zx.quant.klineproxy.manager.impl;
 
-import com.google.common.util.concurrent.RateLimiter;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
+import io.github.resilience4j.core.functions.CheckedRunnable;
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterConfig;
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.netty.util.HashedWheelTimer;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadFactory;
@@ -22,6 +26,8 @@ import org.springframework.stereotype.Service;
 @Service("rateLimitManager")
 public class RateLimitManagerImpl implements RateLimitManager, InitializingBean {
 
+  private static final CheckedRunnable DO_NOTHING = () -> {};
+
   private static final String RATE_LIMIT_TIMER_GROUP = "rate-limit-timer";
 
   private final Map<String, RateLimiterWrapper> wrapperMap = new ConcurrentHashMap<>();
@@ -29,11 +35,17 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   private final HashedWheelTimer timer = buildTimer();
 
   @Override
-  public synchronized void registerRateLimiter(String limiterName, long limitPerSecond) {
+  public synchronized void registerRateLimiter(String limiterName, int limitPerSecond) {
     if (wrapperMap.containsKey(limiterName)) {
       throw new RuntimeException("rate limiter has already registered.");
     }
-    RateLimiter limiter = RateLimiter.create(limitPerSecond);
+    RateLimiterConfig config = RateLimiterConfig.custom()
+        .limitRefreshPeriod(Duration.ofSeconds(1))
+        .limitForPeriod(limitPerSecond)
+        .timeoutDuration(Duration.ofHours(1))
+        .build();
+    RateLimiterRegistry registry = RateLimiterRegistry.of(config);
+    RateLimiter limiter = registry.rateLimiter(limiterName);
     RateLimiterWrapper wrapper = new RateLimiterWrapper(limiter);
     wrapperMap.put(limiterName, wrapper);
   }
@@ -44,7 +56,8 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
     while (wrapper.getStopper().get()) {
       CommonUtil.sleep(50);
     }
-    wrapper.getRateLimiter().acquire(weight);
+    CheckedRunnable checkedRunnable = RateLimiter.decorateCheckedRunnable(wrapper.getRateLimiter(), weight, DO_NOTHING);
+    checkedRunnable.unchecked().run();
   }
 
   @Override

@@ -2,7 +2,7 @@ package com.zx.quant.klineproxy.manager;
 
 
 public interface RateLimitManager {
-  void registerRateLimiter(String limiterName, long limitPerSecond);
+  void registerRateLimiter(String limiterName, int limitPerSecond);
 
   default void acquire(String limiterName) {
     acquire(limiterName, 1);
