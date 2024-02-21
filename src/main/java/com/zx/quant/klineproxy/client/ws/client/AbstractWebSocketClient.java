@@ -13,6 +13,7 @@ import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.ListTopicsEvent;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
+import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import com.zx.quant.klineproxy.util.queue.HashSetQueue;
@@ -644,7 +645,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     private final Runnable target;
 
     private SwitchableRunnable(Runnable target) {
-      this.target = target;
+      this.target = new ExceptionSafeRunnable(target);
     }
 
     @Override

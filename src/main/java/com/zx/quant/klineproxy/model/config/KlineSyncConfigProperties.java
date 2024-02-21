@@ -17,6 +17,8 @@ public class KlineSyncConfigProperties {
 
   private Integer minMaintainCount = 1000;
 
+  private Integer rpcRefreshCount = 99;
+
   private List<String> listenIntervals = Lists.newArrayList(
       IntervalEnum.ONE_HOUR.code()
   );
