@@ -110,6 +110,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final AtomicInteger connectionCount = new AtomicInteger(0);
 
+  private final Map<String, Long> symbolOnboardTimeMap = new ConcurrentHashMap<>();
+
   private final LoadingCache<String, Optional<CombineKlineEvent<?, ?>>> combineMessageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
       .maximumSize(10240)
@@ -347,6 +349,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     int topicCount = symbols.size() * subscribeIntervals.size();
     startKlineWebSocketUpdater(topicCount);
     startKlineRpcUpdater();
+    startSymbolOfflineCleaner();
   }
 
 
@@ -577,11 +580,38 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return limit;
   }
 
+  private Long querySymbolOnboardTime(String symbol) {
+    return symbolOnboardTimeMap.computeIfAbsent(symbol, var -> {
+      Kline<?> kline = querySymbolFirstKline(symbol, IntervalEnum.ONE_MINUTE.code());
+      if (kline == null) {
+        return -1L;
+      }
+      return kline.getOpenTime();
+    });
+  }
+
+  private Kline<?> querySymbolFirstKline(String symbol, String interval) {
+    rateLimitManager.acquire(getRateLimiterName(), getMakeUpKlinesWeight());
+    List<Kline<?>> subKlines = queryKlines0(symbol, interval,
+        0L, null, 1);
+    if (CollectionUtils.isEmpty(subKlines)) {
+      return null;
+    }
+    return subKlines.get(0);
+  }
+
   @SuppressWarnings("unchecked")
   private List<Kline<?>> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(symbol, startTime,
         endTime, intervalEnum, limit, false);
+    Long symbolOnboardTime = querySymbolOnboardTime(symbol);
+    if (symbolOnboardTime >= 0) {
+      makeUpTimeRanges = makeUpTimeRanges.stream()
+          .filter(range -> range.getRight() >= symbolOnboardTime)
+          .collect(Collectors.toList());
+    }
+
     if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
       return Collections.emptyList();
     }
@@ -606,6 +636,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         .flatMap(Collection::stream)
         .sorted(Comparator.comparing(Kline::getOpenTime))
         .toList();
+  }
+
+  private void startSymbolOfflineCleaner() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(() -> {
+          Set<String> tradingSymbols = new HashSet<>(getSymbols());
+      List<KlineSetKey> offlineKlineSetKeys = klineSetMap.keySet().stream()
+          .filter(klineSetKey -> !tradingSymbols.contains(klineSetKey.getSymbol()))
+          .toList();
+      if (CollectionUtils.isEmpty(offlineKlineSetKeys)) {
+        return;
+      }
+      for (KlineSetKey klineSetKey : offlineKlineSetKeys) {
+        klineSetMap.remove(klineSetKey);
+        log.info("symbol: {} offline, kline set of interval: {} removed", klineSetKey.getSymbol(), klineSetKey.getInterval());
+      }
+    }, 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
   }
 
   private void startKlineRpcUpdater() {
