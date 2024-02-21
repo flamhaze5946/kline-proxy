@@ -54,18 +54,13 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   @Override
   public BinanceFutureExchange queryExchange() {
     BinanceFutureExchange exchange = exchangeCache.get(StringUtils.EMPTY);
-    long serverTime = System.currentTimeMillis() - serverTimeDelta.get();
-    exchange.setServerTime(serverTime);
+    exchange.setServerTime(queryServerTime());
     return exchange;
   }
 
   @Override
   public long queryServerTime() {
-    Long serverTime = queryExchange().getServerTime();
-    if (serverTime != null) {
-      return serverTime;
-    }
-    return System.currentTimeMillis();
+    return System.currentTimeMillis() - serverTimeDelta.get();
   }
 
   @Override
