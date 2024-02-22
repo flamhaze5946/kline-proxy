@@ -4,6 +4,7 @@ import com.zx.quant.klineproxy.client.BinanceSpotClient;
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.client.ws.client.BinanceSpotWebSocketClient;
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.BinanceSpotKlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.constant.Constants;
@@ -34,6 +35,8 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
 
   private static final int MAKE_UP_KLINE_COUNT = 1000;
 
+  private static final int TICKER_24HR_WEIGHT = 80;
+
   @Autowired
   private BinanceSpotKlineSyncConfigProperties klineSyncConfigProperties;
 
@@ -51,6 +54,13 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
     return Objects.requireNonNull(responseBody).stream()
         .map(this::serverKlineToKline)
         .collect(Collectors.toList());
+  }
+
+  @Override
+  protected List<Ticker24Hr> queryTicker24Hrs0() {
+    Call<List<Ticker24Hr>> ticker24hrCall = binanceSpotClient.getTicker24hr();
+    return ClientUtil.getResponseBody(ticker24hrCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
   }
 
   @Override
@@ -81,5 +91,10 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   @Override
   protected int getMakeUpKlinesWeight() {
     return MAKE_UP_KLINE_WEIGHT;
+  }
+
+  @Override
+  protected int getTicker24HrsWeight() {
+    return TICKER_24HR_WEIGHT;
   }
 }

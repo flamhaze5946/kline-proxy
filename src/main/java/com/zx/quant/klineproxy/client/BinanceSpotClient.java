@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.client;
 
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import java.util.List;
 import retrofit2.Call;
 import retrofit2.http.GET;
@@ -19,4 +20,7 @@ public interface BinanceSpotClient {
       @Query("endTime") Long endTime,
       @Query("limit") Integer limit
   );
+
+  @GET("api/v3/ticker/24hr")
+  Call<List<Ticker24Hr>> getTicker24hr();
 }

@@ -16,6 +16,7 @@ import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
@@ -31,11 +32,14 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -86,16 +90,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final int SYMBOLS_PER_CONNECTION = 150;
 
-  private static final String SYNC_SYMBOLS_GROUP = "symbols-sync";
+  private static final String KLINE_SCHEDULER_GROUP = "symbols-sync";
 
   private static final ScheduledExecutorService SCHEDULE_EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(4,
-      ThreadFactoryUtil.getNamedThreadFactory(SYNC_SYMBOLS_GROUP));
+      ThreadFactoryUtil.getNamedThreadFactory(KLINE_SCHEDULER_GROUP));
 
   protected static final Integer DEFAULT_LIMIT = 500;
 
   protected static final Integer MIN_LIMIT = 1;
 
   protected static final Integer MAX_LIMIT = 1000;
+
+  private final AtomicInteger connectionCount = new AtomicInteger(0);
+
+  private final Map<String, Long> symbolOnboardTimeMap = new ConcurrentHashMap<>();
+
+  private Map<String, Ticker24Hr> ticker24HrCache = new HashMap<>();
 
   @Autowired
   protected RateLimitManager rateLimitManager;
@@ -108,10 +118,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Value("${number.type:bigDecimal}")
   private String numberType;
-
-  private final AtomicInteger connectionCount = new AtomicInteger(0);
-
-  private final Map<String, Long> symbolOnboardTimeMap = new ConcurrentHashMap<>();
 
   private final LoadingCache<String, Optional<CombineKlineEvent<?, ?>>> combineMessageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
@@ -145,6 +151,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    */
   protected abstract List<Kline<?>> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit);
 
+  /**
+   * query ticker 24 hrs
+   * @return ticker 24hrs
+   */
+  protected abstract List<Ticker24Hr> queryTicker24Hrs0();
+
   protected abstract String getRateLimiterName();
 
   protected abstract List<String> getSymbols();
@@ -154,6 +166,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected abstract int getMakeUpKlinesLimit();
 
   protected abstract int getMakeUpKlinesWeight();
+
+  protected abstract int getTicker24HrsWeight();
 
   protected long getServerTime() {
     return System.currentTimeMillis();
@@ -190,6 +204,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
     return tickers;
+  }
+
+  @Override
+  public List<Ticker24Hr> queryTicker24hrs(Collection<String> symbols) {
+    if (CollectionUtils.isEmpty(symbols)) {
+      return ticker24HrCache.values().stream()
+          .toList();
+    }
+    return symbols.stream()
+        .map(symbol -> ticker24HrCache.get(symbol))
+        .filter(Objects::nonNull)
+        .collect(Collectors.toList());
   }
 
   @Override
@@ -350,6 +376,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     int topicCount = symbols.size() * subscribeIntervals.size();
     startKlineWebSocketUpdater(topicCount);
     startKlineRpcUpdater();
+    startTicker24HrRpcUpdater();
     startSymbolOfflineCleaner();
   }
 
@@ -601,6 +628,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return subKlines.get(0);
   }
 
+  public List<Ticker24Hr> queryTicker24Hrs() {
+    rateLimitManager.acquire(getRateLimiterName(), getTicker24HrsWeight());
+    return queryTicker24Hrs0();
+  }
+
   @SuppressWarnings("unchecked")
   private List<Kline<?>> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
@@ -654,6 +686,20 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
             log.info("symbol: {} offline, kline set of interval: {} removed", klineSetKey.getSymbol(), klineSetKey.getInterval());
           }
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+  }
+
+  private void startTicker24HrRpcUpdater() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        new ExceptionSafeRunnable(() -> {
+          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+          if (CollectionUtils.isEmpty(ticker24Hrs)) {
+            return;
+          }
+
+          ticker24HrCache = ticker24Hrs.stream()
+              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
+        }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
+    );
   }
 
   private void startKlineRpcUpdater() {

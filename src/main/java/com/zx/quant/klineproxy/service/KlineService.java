@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.service;
 
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -21,6 +22,13 @@ public interface KlineService {
    * @return tickers
    */
   List<Ticker<?>> queryTickers(Collection<String> symbols);
+
+  /**
+   * query ticker 24hrs
+   * @param symbols symbols, not required
+   * @return ticker 24hrs
+   */
+  List<Ticker24Hr> queryTicker24hrs(Collection<String> symbols);
 
   /**
    * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)

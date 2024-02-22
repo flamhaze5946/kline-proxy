@@ -5,6 +5,7 @@ import com.zx.quant.klineproxy.client.model.BinanceFutureServerTime;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("fapi/v1")
-public class BinanceFutureController {
+public class BinanceFutureController extends GenericController {
 
   private static final int DEFAULT_LIMIT = 100;
 
@@ -62,22 +63,22 @@ public class BinanceFutureController {
     }
   }
 
+  @GetMapping("ticker/24hr")
+  public Object queryTicker24Hr(
+      @RequestParam(value = "symbol", required = false) String symbol,
+      @RequestParam(value = "symbols", required = false) List<String> symbols
+  ) {
+    List<String> realSymbols = getRealSymbols(symbol, symbols);
+    List<Ticker24Hr> ticker24Hrs = klineService.queryTicker24hrs(realSymbols);
+    return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs);
+  }
+
   @GetMapping("ticker/price")
   public Object queryTicker(
       @RequestParam(value = "symbol", required = false) String symbol,
       @RequestParam(value = "symbols", required = false) List<String> symbols
   ) {
-    List<String> realSymbols = new ArrayList<>();
-    if (CollectionUtils.isNotEmpty(symbols)) {
-      realSymbols.addAll(symbols);
-    }
-    if (symbol != null) {
-      realSymbols.add(symbol);
-    }
-
-    realSymbols = realSymbols.stream()
-        .distinct()
-        .toList();
+    List<String> realSymbols = getRealSymbols(symbol, symbols);
     List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
     return ConvertUtil.convertToDisplayTicker(tickers);
   }

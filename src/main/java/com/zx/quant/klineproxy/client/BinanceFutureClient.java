@@ -3,6 +3,7 @@ package com.zx.quant.klineproxy.client;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.FuturePremiumIndex;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import java.util.List;
 import retrofit2.Call;
 import retrofit2.http.GET;
@@ -29,4 +30,7 @@ public interface BinanceFutureClient {
       @Query("endTime") Long endTime,
       @Query("limit") Integer limit
   );
+
+  @GET("fapi/v1/ticker/24hr")
+  Call<List<Ticker24Hr>> getTicker24hr();
 }

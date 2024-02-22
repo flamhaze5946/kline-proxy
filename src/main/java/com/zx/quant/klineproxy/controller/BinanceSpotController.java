@@ -4,6 +4,7 @@ import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.client.model.BinanceSpotServerTime;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("api/v3")
-public class BinanceSpotController {
+public class BinanceSpotController extends GenericController {
 
   private static final int DEFAULT_LIMIT = 100;
 
@@ -44,22 +45,22 @@ public class BinanceSpotController {
     return new BinanceSpotServerTime(exchangeService.queryServerTime());
   }
 
+  @GetMapping("ticker/24hr")
+  public Object queryTicker24Hr(
+      @RequestParam(value = "symbol", required = false) String symbol,
+      @RequestParam(value = "symbols", required = false) List<String> symbols
+  ) {
+    List<String> realSymbols = getRealSymbols(symbol, symbols);
+    List<Ticker24Hr> ticker24Hrs = klineService.queryTicker24hrs(realSymbols);
+    return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs);
+  }
 
   @GetMapping("ticker/price")
   public Object queryTicker(
       @RequestParam(value = "symbol", required = false) String symbol,
       @RequestParam(value = "symbols", required = false) List<String> symbols
   ) {
-    List<String> realSymbols = new ArrayList<>();
-    if (symbol != null) {
-      realSymbols.add(symbol);
-    }
-    if (CollectionUtils.isNotEmpty(symbols)) {
-      realSymbols.addAll(symbols);
-    }
-    realSymbols = realSymbols.stream()
-        .distinct()
-        .toList();
+    List<String> realSymbols = getRealSymbols(symbol, symbols);
     List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
     return ConvertUtil.convertToDisplayTicker(tickers);
   }
