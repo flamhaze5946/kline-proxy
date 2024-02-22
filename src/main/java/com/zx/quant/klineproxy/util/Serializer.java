@@ -24,6 +24,14 @@ public class Serializer {
   }
 
   public <T> T fromJsonString(String jsonString, Class<T> clazz) {
+    if (CommonUtil.isArrayMessage(jsonString) && !clazz.isArray()) {
+      return null;
+    }
+
+    if (!CommonUtil.isArrayMessage(jsonString) && clazz.isArray()) {
+      return null;
+    }
+
     try {
       return objectMapper.readValue(jsonString, clazz);
     } catch (JsonProcessingException e) {

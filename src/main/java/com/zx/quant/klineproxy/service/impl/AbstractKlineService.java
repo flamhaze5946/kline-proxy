@@ -1,14 +1,18 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.CombineEvent;
 import com.zx.quant.klineproxy.model.CombineKlineEvent;
+import com.zx.quant.klineproxy.model.CombineTicker24HrEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
+import com.zx.quant.klineproxy.model.EventTicker24HrEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
 import com.zx.quant.klineproxy.model.Kline.DoubleKline;
@@ -27,16 +31,15 @@ import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Objects;
@@ -88,6 +91,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final String KLINE_EVENT = "kline";
 
+  private static final String TICKER_24HR_EVENT = "24hrTicker";
+
+  private static final String TICKER_24HR_TOPIC = "!ticker@arr";
+
   private static final int SYMBOLS_PER_CONNECTION = 150;
 
   private static final String KLINE_SCHEDULER_GROUP = "symbols-sync";
@@ -105,7 +112,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final Map<String, Long> symbolOnboardTimeMap = new ConcurrentHashMap<>();
 
-  private Map<String, Ticker24Hr> ticker24HrCache = new HashMap<>();
+  private final Set<String> extraSubscribeTopics = new HashSet<>();
+
+  private final Cache<String, Ticker24Hr> ticker24HrCache = Caffeine.newBuilder()
+      .expireAfterWrite(Duration.ofDays(1))
+      .build();
 
   @Autowired
   protected RateLimitManager rateLimitManager;
@@ -119,7 +130,24 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Value("${number.type:bigDecimal}")
   private String numberType;
 
-  private final LoadingCache<String, Optional<CombineKlineEvent<?, ?>>> combineMessageEventLruCache = Caffeine.newBuilder()
+  private final LoadingCache<String, Optional<List<CombineEvent<?>>>> combineMessageEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> {
+        List<CombineEvent<?>> combineEvents = new ArrayList<>();
+        if (StringUtils.isNotBlank(message)) {
+          CombineEvent<?>[] combineEventArray = serializer.fromJsonString(message, CombineEvent[].class);
+          if (combineEventArray != null && combineEventArray.length > 0) {
+            combineEvents.addAll(List.of(combineEventArray));
+          }
+        } else {
+          CombineEvent<?> combineEvent = serializer.fromJsonString(message, CombineEvent.class);
+          combineEvents.add(combineEvent);
+        }
+        return Optional.of(combineEvents);
+      });
+
+  private final LoadingCache<String, Optional<CombineKlineEvent<?, ?>>> combineKlineMessageEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
       .maximumSize(10240)
       .build(message -> {
@@ -129,13 +157,36 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         return Optional.ofNullable(combineKlineEvent);
       });
 
-  private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageEventLruCache = Caffeine.newBuilder()
+  private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageKlineEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
       .maximumSize(10240)
       .build(message -> {
         NumberTypeEnum numberTypeEnum = getNumberType();
         EventKlineEvent<?, ?> eventKlineEvent = serializer.fromJsonString(message, numberTypeEnum.eventKlineEventClass());
         return Optional.ofNullable(eventKlineEvent);
+      });
+
+  private final LoadingCache<String, Optional<List<CombineTicker24HrEvent>>> combineMessageTicker24HrEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> {
+        CombineTicker24HrEvent[] combineTicker24HrEventArray = serializer.fromJsonString(message,
+            CombineTicker24HrEvent[].class);
+        List<CombineTicker24HrEvent> combineTicker24HrEvents = Arrays.stream(combineTicker24HrEventArray)
+            .toList();
+        return Optional.of(combineTicker24HrEvents);
+      });
+
+  private final LoadingCache<String, Optional<List<EventTicker24HrEvent>>> messageTicker24HrEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> {
+        EventTicker24HrEvent[] eventTicker24HrEventArray = serializer.fromJsonString(message, EventTicker24HrEvent[].class);
+        if (eventTicker24HrEventArray == null || eventTicker24HrEventArray.length <= 0) {
+          return Optional.empty();
+        }
+        List<EventTicker24HrEvent> eventTicker24HrEvents = new ArrayList<>(List.of(eventTicker24HrEventArray));
+        return Optional.of(eventTicker24HrEvents);
       });
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
@@ -209,11 +260,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Override
   public List<Ticker24Hr> queryTicker24hrs(Collection<String> symbols) {
     if (CollectionUtils.isEmpty(symbols)) {
-      return ticker24HrCache.values().stream()
+      return ticker24HrCache.asMap().values().stream()
           .toList();
     }
     return symbols.stream()
-        .map(symbol -> ticker24HrCache.get(symbol))
+        .map(ticker24HrCache::getIfPresent)
         .filter(Objects::nonNull)
         .collect(Collectors.toList());
   }
@@ -326,6 +377,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     };
   }
 
+  protected Function<String, Boolean> getTicker24HrEventMessageHandler() {
+    return message -> {
+      List<EventTicker24HrEvent> eventTicker24HrEvents = convertToEventTicker24HrEvent(message);
+      if (CollectionUtils.isEmpty(eventTicker24HrEvents)) {
+        return false;
+      }
+      return doForTicker24HrEvents(eventTicker24HrEvents, message);
+    };
+  }
+
   protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent, String originalMessage) {
     if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
       WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
@@ -339,13 +400,60 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return true;
   }
 
-  protected Function<String, String> getCombineKlineEventMessageTopicExtractor() {
+  protected boolean doForTicker24HrEvents(List<EventTicker24HrEvent> eventTicker24HrEvents, String originalMessage) {
+    if (CollectionUtils.isNotEmpty(eventTicker24HrEvents)) {
+      Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
+          .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
+          .findAny();
+      if (invalidEventOptional.isPresent()) {
+        WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
+        if (websocketResponse == null) {
+          log.info("not handlable message received: {}", originalMessage);
+        }
+        return false;
+      }
+    }
+    eventTicker24HrEvents.forEach(this::doForTicker24HrEvent);
+    return true;
+  }
+
+  protected void doForTicker24HrEvent(EventTicker24HrEvent eventTicker24HrEvent) {
+    Ticker24Hr ticker24Hr = new Ticker24Hr();
+    ticker24Hr.setSymbol(eventTicker24HrEvent.getSymbol());
+    ticker24Hr.setPriceChange(eventTicker24HrEvent.getPriceChange());
+    ticker24Hr.setPriceChangePercent(eventTicker24HrEvent.getPriceChangePercent());
+    ticker24Hr.setWeightedAvgPrice(eventTicker24HrEvent.getWeightedAvgPrice());
+    ticker24Hr.setPrevClosePrice(eventTicker24HrEvent.getPrevClosePrice());
+    ticker24Hr.setLastPrice(eventTicker24HrEvent.getLastPrice());
+    ticker24Hr.setLastQty(eventTicker24HrEvent.getLastQty());
+    ticker24Hr.setBidPrice(eventTicker24HrEvent.getBidPrice());
+    ticker24Hr.setBidQty(eventTicker24HrEvent.getBidQty());
+    ticker24Hr.setAskPrice(eventTicker24HrEvent.getAskPrice());
+    ticker24Hr.setAskQty(eventTicker24HrEvent.getAskQty());
+    ticker24Hr.setOpenPrice(eventTicker24HrEvent.getOpenPrice());
+    ticker24Hr.setHighPrice(eventTicker24HrEvent.getHighPrice());
+    ticker24Hr.setLowPrice(eventTicker24HrEvent.getLowPrice());
+    ticker24Hr.setVolume(eventTicker24HrEvent.getVolume());
+    ticker24Hr.setQuoteVolume(eventTicker24HrEvent.getQuoteVolume());
+    ticker24Hr.setOpenTime(eventTicker24HrEvent.getOpenTime());
+    ticker24Hr.setCloseTime(eventTicker24HrEvent.getCloseTime());
+    ticker24Hr.setFirstId(eventTicker24HrEvent.getFirstId());
+    ticker24Hr.setLastId(eventTicker24HrEvent.getLastId());
+    ticker24Hr.setCount(eventTicker24HrEvent.getCount());
+
+    ticker24HrCache.put(ticker24Hr.getSymbol(), ticker24Hr);
+  }
+
+  protected Function<String, String> getCombineEventMessageTopicExtractor() {
     return message -> {
-      CombineKlineEvent<?, ?> combineKlineEvent = convertToCombineKlineEvent(message);
-      if (combineKlineEvent == null || StringUtils.isBlank(combineKlineEvent.getStream())) {
+      List<CombineEvent<?>> combineEvents = convertToCombineEvents(message);
+      if (CollectionUtils.isEmpty(combineEvents)) {
         return null;
       }
-      return combineKlineEvent.getStream();
+      Optional<CombineEvent<?>> hasStreamEvent = combineEvents.stream()
+          .filter(event -> StringUtils.isNotBlank(event.getStream()))
+          .findAny();
+      return hasStreamEvent.map(CombineEvent::getStream).orElse(null);
     };
   }
 
@@ -362,6 +470,21 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     };
   }
 
+  protected Function<String, String> getTicker24HrEventMessageTopicExtractor() {
+    return message -> {
+      List<EventTicker24HrEvent> eventTicker24HrEvents = convertToEventTicker24HrEvent(message);
+      if (CollectionUtils.isNotEmpty(eventTicker24HrEvents)) {
+        Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
+            .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
+            .findAny();
+        if (invalidEventOptional.isPresent()) {
+          return null;
+        }
+      }
+      return TICKER_24HR_TOPIC;
+    };
+  }
+
   protected String buildSymbolUpdateTopic(String symbol, String interval) {
     return StringUtils.lowerCase(symbol) + "@kline_" + interval;
   }
@@ -374,12 +497,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     List<String> symbols = getSubscribeSymbols();
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     int topicCount = symbols.size() * subscribeIntervals.size();
+    registerExtraTopic(TICKER_24HR_TOPIC);
     startKlineWebSocketUpdater(topicCount);
     startKlineRpcUpdater();
-    startTicker24HrRpcUpdater();
     startSymbolOfflineCleaner();
   }
 
+  protected void registerExtraTopic(String topic) {
+    this.extraSubscribeTopics.add(topic);
+  }
+
+  protected void unregisterExtraTopic(String topic) {
+    this.extraSubscribeTopics.remove(topic);
+  }
 
   private List<ImmutablePair<Long, Long>> buildMakeUpTimeRanges(String symbol, Long startTime, Long endTime, IntervalEnum intervalEnum, Integer limit, boolean useSetCache) {
     ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, limit);
@@ -483,8 +613,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       T webSocketClient = webSocketClients.get(i);
       webSocketClient.addMessageHandler(getCombineKlineEventMessageHandler());
       webSocketClient.addMessageHandler(getKlineEventMessageHandler());
-      webSocketClient.addMessageTopicExtractorHandler(getCombineKlineEventMessageTopicExtractor());
+      webSocketClient.addMessageHandler(getTicker24HrEventMessageHandler());
+      webSocketClient.addMessageTopicExtractorHandler(getCombineEventMessageTopicExtractor());
       webSocketClient.addMessageTopicExtractorHandler(getKlineEventMessageTopicExtractor());
+      webSocketClient.addMessageTopicExtractorHandler(getTicker24HrEventMessageTopicExtractor());
       webSocketClient.start();
     }
     adjustSubscribeTopics();
@@ -688,19 +820,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
   }
 
-  private void startTicker24HrRpcUpdater() {
-    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
-        new ExceptionSafeRunnable(() -> {
-          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
-          if (CollectionUtils.isEmpty(ticker24Hrs)) {
-            return;
-          }
-
-          ticker24HrCache = ticker24Hrs.stream()
-              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
-        }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
-    );
-  }
+//  private void startTicker24HrRpcUpdater() {
+//    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+//        new ExceptionSafeRunnable(() -> {
+//          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+//          if (CollectionUtils.isEmpty(ticker24Hrs)) {
+//            return;
+//          }
+//
+//          ticker24HrCache = ticker24Hrs.stream()
+//              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
+//        }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
+//    );
+//  }
 
   private void startKlineRpcUpdater() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
@@ -752,7 +884,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }), 1000, 5000, TimeUnit.MILLISECONDS);
   }
 
-  private Set<String> buildNeedSubscribeTopics(Collection<String> needSubscribeSymbols, Collection<String> needSubscribeIntervals) {
+  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeSymbols, Collection<String> needSubscribeIntervals) {
     if (CollectionUtils.isEmpty(needSubscribeSymbols) || CollectionUtils.isEmpty(needSubscribeIntervals)) {
       return Collections.emptySet();
     }
@@ -771,19 +903,23 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         new ExceptionSafeRunnable(() -> {
           synchronized (this) {
             Set<String> exchangeSymbols = new HashSet<>(getSubscribeSymbols());
-            Set<String> needSubscribeSymbols = new HashSet<>(exchangeSymbols);
-            Set<String> needSubscribeIntervals =
+            Set<String> needSubscribeKlineSymbols = new HashSet<>(exchangeSymbols);
+            Set<String> needSubscribeKlineIntervals =
                 getSubscribeIntervals().stream()
                     .map(IntervalEnum::code)
                     .collect(Collectors.toSet());
-            Set<String> needSubscribeTopics =
-                buildNeedSubscribeTopics(needSubscribeSymbols, needSubscribeIntervals);
-            Set<String> needNewSubscribeTopics = new HashSet<>(needSubscribeTopics);
+            Set<String> needSubscribeKlineTopics =
+                buildNeedSubscribeKlineUpdateTopics(needSubscribeKlineSymbols, needSubscribeKlineIntervals);
+            Set<String> needNewSubscribeTopics = new HashSet<>(needSubscribeKlineTopics);
+            if (CollectionUtils.isNotEmpty(extraSubscribeTopics)) {
+              needNewSubscribeTopics.addAll(extraSubscribeTopics);
+            }
+
             Set<String> subscribedTopics = getSubscribedTopics();
             needNewSubscribeTopics.removeAll(subscribedTopics);
 
             Set<String> needUnsubscribeTopics = new HashSet<>(subscribedTopics);
-            needUnsubscribeTopics.removeAll(needSubscribeTopics);
+            needUnsubscribeTopics.removeAll(needSubscribeKlineTopics);
 
             if (CollectionUtils.isNotEmpty(needNewSubscribeTopics)) {
               subscribe(needNewSubscribeTopics);
@@ -862,13 +998,28 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
+  private List<CombineEvent<?>> convertToCombineEvents(String message) {
+    Optional<List<CombineEvent<?>>> eventOptional = combineMessageEventLruCache.get(message);
+    return eventOptional.orElse(null);
+  }
+
   private CombineKlineEvent<?, ?> convertToCombineKlineEvent(String message) {
-    Optional<CombineKlineEvent<?, ?>> eventOptional = combineMessageEventLruCache.get(message);
+    Optional<CombineKlineEvent<?, ?>> eventOptional = combineKlineMessageEventLruCache.get(message);
     return eventOptional.orElse(null);
   }
 
   private EventKlineEvent<?, ?> convertToEventKlineEvent(String message) {
-    Optional<EventKlineEvent<?, ?>> eventOptional = messageEventLruCache.get(message);
+    Optional<EventKlineEvent<?, ?>> eventOptional = messageKlineEventLruCache.get(message);
+    return eventOptional.orElse(null);
+  }
+
+  private List<CombineTicker24HrEvent> convertToCombineTicker24HrEvent(String message) {
+    Optional<List<CombineTicker24HrEvent>> eventOptional = combineMessageTicker24HrEventLruCache.get(message);
+    return eventOptional.orElse(null);
+  }
+
+  private List<EventTicker24HrEvent> convertToEventTicker24HrEvent(String message) {
+    Optional<List<EventTicker24HrEvent>> eventOptional = messageTicker24HrEventLruCache.get(message);
     return eventOptional.orElse(null);
   }
 

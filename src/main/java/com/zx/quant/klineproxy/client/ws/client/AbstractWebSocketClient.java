@@ -501,7 +501,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
                   pipeline.addLast(
                       new HttpClientCodec(),
                       new ChunkedWriteHandler(),
-                      new HttpObjectAggregator(8192),
+                      new HttpObjectAggregator(819200),
                       new WebSocketServerCompressionHandler(),
                       inboundHandler);
                 }

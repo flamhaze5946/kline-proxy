@@ -15,6 +15,9 @@ import org.apache.commons.lang3.StringUtils;
  */
 public final class CommonUtil {
 
+  private static final Character ARRAY_MESSAGE_PREFIX = '[';
+
+
   private static final Map<Class<? extends BaseEnum>, Map<String, BaseEnum>> ENUM_MAP = new ConcurrentHashMap<>();
 
   public static final int BUFFER = 1024;
@@ -78,5 +81,12 @@ public final class CommonUtil {
     });
 
     return (T) targetEnumMap.get(code);
+  }
+
+  public static boolean isArrayMessage(String message) {
+    if (StringUtils.isBlank(message)) {
+      return false;
+    }
+    return message.charAt(0) == ARRAY_MESSAGE_PREFIX;
   }
 }
