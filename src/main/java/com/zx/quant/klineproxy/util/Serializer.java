@@ -9,10 +9,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public class Serializer {
 
+  private static Serializer defaultSerializer;
+
   private final ObjectMapper objectMapper;
 
   public Serializer(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
+  }
+
+  public static Serializer getDefault() {
+    return defaultSerializer;
+  }
+
+  public static void setDefault(Serializer serializer) {
+    defaultSerializer = serializer;
   }
 
   public String toJsonString(Object obj) {

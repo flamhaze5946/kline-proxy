@@ -24,6 +24,8 @@ public class SerializeConfig {
 
   @Bean
   public Serializer serializer(ObjectMapper objectMapper) {
-    return new Serializer(objectMapper);
+    Serializer serializer = new Serializer(objectMapper);
+    Serializer.setDefault(serializer);
+    return serializer;
   }
 }

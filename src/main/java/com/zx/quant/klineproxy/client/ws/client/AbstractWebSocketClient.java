@@ -1,5 +1,7 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.collect.Sets;
 import com.zx.quant.klineproxy.client.ws.enums.ProtocolEnum;
 import com.zx.quant.klineproxy.client.ws.handler.WebSocketChannelInboundHandler;
@@ -10,6 +12,7 @@ import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.CombineEvent;
 import com.zx.quant.klineproxy.model.ListTopicsEvent;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
@@ -44,6 +47,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -59,6 +63,7 @@ import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
@@ -136,6 +141,14 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private String clientName;
 
+  private final LoadingCache<String, Optional<CombineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
+      .expireAfterWrite(1, TimeUnit.MINUTES)
+      .maximumSize(10240)
+      .build(message -> {
+        CombineEvent combineEvent = serializer.fromJsonString(message, CombineEvent.class);
+        return Optional.ofNullable(combineEvent);
+      });
+
   public AbstractWebSocketClient() {
     this(1);
   }
@@ -180,8 +193,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       throw new RuntimeException("websocket client not alive when unsubscribe topics");
     }
     WebSocketFrame frame = buildListTopicsFrame();
-    Runnable afterSendFunc = () -> log.info("websocket client: {} list topics message sent.", clientName());
-    sendData(frame, afterSendFunc);
+    sendData(frame, null);
   }
 
   private void executeUnsubscribeTask(Collection<String> topics) {
@@ -264,31 +276,41 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   public void onReceive(String message) {
     clientMonitorTask.heartbeat();
     heartbeatTopic(message);
-    CompletableFuture.runAsync(() -> {
-      if (StringUtils.contains(message, PING)) {
-        this.sendMessage(message.replace(PING, PONG));
-        return;
-      }
-      if (StringUtils.contains(message, PONG)) {
-        return;
-      }
+    CompletableFuture.runAsync(
+        () -> {
+          AtomicReference<String> realMessage = new AtomicReference<>();
+          realMessage.set(message);
+          if (StringUtils.contains(realMessage.get(), PING)) {
+            this.sendMessage(realMessage.get().replace(PING, PONG));
+            return;
+          }
+          if (StringUtils.contains(realMessage.get(), PONG)) {
+            return;
+          }
 
-      ListTopicsEvent listTopicsEvent = serializer.fromJsonString(message, ListTopicsEvent.class);
-      if (listTopicsEvent != null && listTopicsEvent.getResult() != null) {
-        synchronized (channelRegisteredTopics) {
-          channelRegisteredTopics.clear();
-          channelRegisteredTopics.addAll(listTopicsEvent.getResult());
-        }
-        return;
-      }
+          CombineEvent combineEvent = convertToCombineEvents(realMessage.get());
+          if (combineEvent != null && StringUtils.isNotBlank(combineEvent.getStream())) {
+            realMessage.set(serializer.toJsonString(combineEvent.getData()));
+          }
 
-      for (Function<String, Boolean> messageHandler : messageHandlers) {
-        boolean handled = messageHandler.apply(message);
-        if (handled) {
-          return;
-        }
-      }
-    }, MESSAGE_EXECUTOR);
+          ListTopicsEvent listTopicsEvent =
+              serializer.fromJsonString(realMessage.get(), ListTopicsEvent.class);
+          if (listTopicsEvent != null && listTopicsEvent.getResult() != null) {
+            synchronized (channelRegisteredTopics) {
+              channelRegisteredTopics.clear();
+              channelRegisteredTopics.addAll(listTopicsEvent.getResult());
+            }
+            return;
+          }
+
+          for (Function<String, Boolean> messageHandler : messageHandlers) {
+            boolean handled = messageHandler.apply(realMessage.get());
+            if (handled) {
+              return;
+            }
+          }
+        },
+        MESSAGE_EXECUTOR);
   }
 
   @Override
@@ -501,7 +523,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
                   pipeline.addLast(
                       new HttpClientCodec(),
                       new ChunkedWriteHandler(),
-                      new HttpObjectAggregator(819200),
+                      new HttpObjectAggregator(8192),
                       new WebSocketServerCompressionHandler(),
                       inboundHandler);
                 }
@@ -527,6 +549,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     } catch (URISyntaxException e) {
       throw new RuntimeException(e);
     }
+  }
+
+  private CombineEvent convertToCombineEvents(String message) {
+    Optional<CombineEvent> eventOptional = combineMessageEventLruCache.get(message);
+    return eventOptional.orElse(null);
   }
 
   private void shutdownGroup(String causeBy) {
@@ -618,6 +645,11 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   private String extractTopicFromMessage(String message) {
+    CombineEvent combineEvent = convertToCombineEvents(message);
+    if (combineEvent != null && StringUtils.isNotBlank(combineEvent.getStream())) {
+      return combineEvent.getStream();
+    }
+
     for (Function<String, String> topicExtractor : messageTopicExtractors) {
       String extractTopic = topicExtractor.apply(message);
       if (StringUtils.isNotBlank(extractTopic)) {

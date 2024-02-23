@@ -7,9 +7,9 @@ import lombok.Data;
  * @author flamhaze5946
  */
 @Data
-public class CombineEvent<T> {
+public class CombineEvent {
 
   private String stream;
 
-  private T data;
+  private Object data;
 }

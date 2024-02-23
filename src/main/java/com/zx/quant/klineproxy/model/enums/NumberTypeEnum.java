@@ -1,9 +1,5 @@
 package com.zx.quant.klineproxy.model.enums;
 
-import com.zx.quant.klineproxy.model.CombineKlineEvent;
-import com.zx.quant.klineproxy.model.CombineKlineEvent.BigDecimalCombineKlineEvent;
-import com.zx.quant.klineproxy.model.CombineKlineEvent.DoubleCombineKlineEvent;
-import com.zx.quant.klineproxy.model.CombineKlineEvent.StringCombineKlineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
@@ -29,15 +25,15 @@ import com.zx.quant.klineproxy.util.BaseEnum;
 public enum NumberTypeEnum implements BaseEnum {
 
   STRING("string", StringKline.class,
-      StringEventKline.class, StringCombineKlineEvent.class, StringEventKlineEvent.class,
+      StringEventKline.class, StringEventKlineEvent.class,
       StringTicker.class, "STRING"),
 
   DOUBLE("double", DoubleKline.class,
-      DoubleEventKline.class, DoubleCombineKlineEvent.class, DoubleEventKlineEvent.class,
+      DoubleEventKline.class, DoubleEventKlineEvent.class,
       DoubleTicker.class, "DOUBLE"),
 
   BIG_DECIMAL("bigDecimal", BigDecimalKline.class,
-      BigDecimalEventKline.class, BigDecimalCombineKlineEvent.class, BigDecimalEventKlineEvent.class,
+      BigDecimalEventKline.class, BigDecimalEventKlineEvent.class,
       BigDecimalTicker.class, "BIG_DECIMAL"),
   ;
 
@@ -47,19 +43,16 @@ public enum NumberTypeEnum implements BaseEnum {
 
   private final Class<? extends EventKline<?>> eventKlineClass;
 
-  private final Class<? extends CombineKlineEvent<?, ?>> combineEventKlineClass;
-
   private final Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass;
 
   private final Class<? extends Ticker<?>> tickerClass;
 
   private final String description;
 
-  NumberTypeEnum(String code, Class<? extends Kline<?>> klineClass, Class<? extends EventKline<?>> eventKlineClass, Class<? extends CombineKlineEvent<?, ?>> combineEventKlineClass, Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass, Class<? extends Ticker<?>> tickerClass, String description) {
+  NumberTypeEnum(String code, Class<? extends Kline<?>> klineClass, Class<? extends EventKline<?>> eventKlineClass, Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass, Class<? extends Ticker<?>> tickerClass, String description) {
     this.code = code;
     this.klineClass = klineClass;
     this.eventKlineClass = eventKlineClass;
-    this.combineEventKlineClass = combineEventKlineClass;
     this.eventKlineEventClass = eventKlineEventClass;
     this.tickerClass = tickerClass;
     this.description = description;
@@ -76,10 +69,6 @@ public enum NumberTypeEnum implements BaseEnum {
 
   public Class<? extends EventKline<?>> eventKlineClass() {
     return eventKlineClass;
-  }
-
-  public Class<? extends CombineKlineEvent<?, ?>> combineEventKlineClass() {
-    return combineEventKlineClass;
   }
 
   public Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass() {

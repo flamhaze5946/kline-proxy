@@ -41,7 +41,7 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
   public void init(WebSocketClient webSocketClient) {
     URI uri = webSocketClient.uri();
     WebSocketClientHandshaker handShaker = WebSocketClientHandshakerFactory
-        .newHandshaker(uri, WebSocketVersion.V13, null, false, new DefaultHttpHeaders());
+        .newHandshaker(uri, WebSocketVersion.V13, null, false, new DefaultHttpHeaders(), 655360);
     this.webSocketClient = webSocketClient;
     this.handShaker = handShaker;
   }

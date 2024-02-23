@@ -15,7 +15,7 @@ kline:
       listenIntervals:
         - 1h
       listenSymbolPatterns:
-        - .*?USDT
+        - 123
 
 client:
   binanceSpot:
