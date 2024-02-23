@@ -8,6 +8,8 @@ import com.zx.quant.klineproxy.util.BaseEnum;
  */
 public enum IntervalEnum implements BaseEnum {
 
+  ONE_SECOND("1s", 0, 1000, "1 second"),
+
   ONE_MINUTE("1m", 1, 1000 * 60, "1 minute"),
 
   THREE_MINUTE("3m", 2, 1000 * 60 * 3, "3 minute"),
