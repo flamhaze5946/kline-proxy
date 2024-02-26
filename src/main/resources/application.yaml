@@ -1,5 +1,16 @@
+spring:
+  application:
+    name: kline-proxy
 server:
   port: 1888
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus,health,info
+  metrics:
+    tags:
+      application: ${spring.application.name}
 number:
   type: string
 kline:
