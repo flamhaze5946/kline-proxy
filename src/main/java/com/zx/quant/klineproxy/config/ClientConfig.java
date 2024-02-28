@@ -1,7 +1,10 @@
 package com.zx.quant.klineproxy.config;
 
+import com.zx.quant.klineproxy.client.BinanceCompositeClient;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.BinanceSpotClient;
+import com.zx.quant.klineproxy.util.RetrofitFixHeadersInterceptorFactory;
+import okhttp3.OkHttpClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +23,9 @@ public class ClientConfig {
 
   @Value("${client.binanceFuture.api.rootUrl:https://fapi.binance.com}")
   private String binanceFutureApiRootUrl;
+
+  @Value("${client.binanceComposite.api.rootUrl:https://www.binance.com}")
+  private String binanceCompositeRootUrl;
 
   /**
    * create binance spot clients
@@ -47,5 +53,20 @@ public class ClientConfig {
         .build();
 
     return retrofit.create(BinanceFutureClient.class);
+  }
+
+  @Bean
+  public BinanceCompositeClient binanceCompositeClient() {
+    OkHttpClient client = new OkHttpClient().newBuilder()
+        .addInterceptor(RetrofitFixHeadersInterceptorFactory.createMockBrowserInterceptor())
+        .build();
+
+    Retrofit retrofit = new Retrofit.Builder()
+        .addConverterFactory(JacksonConverterFactory.create())
+        .baseUrl(binanceCompositeRootUrl)
+        .client(client)
+        .build();
+
+    return retrofit.create(BinanceCompositeClient.class);
   }
 }
