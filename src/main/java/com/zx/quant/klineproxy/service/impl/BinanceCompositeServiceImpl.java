@@ -11,6 +11,7 @@ import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -46,6 +47,7 @@ public class BinanceCompositeServiceImpl implements CompositeService {
 
   @Getter
   @AllArgsConstructor
+  @EqualsAndHashCode
   private static class CmsArticlesKey {
 
     private String catalogId;
