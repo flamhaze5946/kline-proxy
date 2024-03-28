@@ -1,6 +1,5 @@
 package com.zx.quant.klineproxy.service.impl;
 
-import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.BinanceCompositeClient;
@@ -11,11 +10,9 @@ import com.zx.quant.klineproxy.service.CompositeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.time.Duration;
 import lombok.AllArgsConstructor;
-import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

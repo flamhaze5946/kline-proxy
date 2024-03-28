@@ -11,7 +11,6 @@ import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ClientUtil;
-import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
