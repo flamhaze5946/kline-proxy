@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zx.quant.klineproxy.client.BinanceCompositeClient;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.BinanceSpotClient;
@@ -56,13 +57,13 @@ public class ClientConfig {
   }
 
   @Bean
-  public BinanceCompositeClient binanceCompositeClient() {
+  public BinanceCompositeClient binanceCompositeClient(ObjectMapper objectMapper) {
     OkHttpClient client = new OkHttpClient().newBuilder()
         .addInterceptor(RetrofitFixHeadersInterceptorFactory.createMockBrowserInterceptor())
         .build();
 
     Retrofit retrofit = new Retrofit.Builder()
-        .addConverterFactory(JacksonConverterFactory.create())
+        .addConverterFactory(JacksonConverterFactory.create(objectMapper))
         .baseUrl(binanceCompositeRootUrl)
         .client(client)
         .build();

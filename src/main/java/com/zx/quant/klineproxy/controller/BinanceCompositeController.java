@@ -22,12 +22,22 @@ public class BinanceCompositeController extends GenericController {
   private CompositeService compositeService;
 
   @GetMapping("v1/public/cms/article/catalog/list/query")
-  public CompositeResponse<?> queryCmsArticles(
+  public CompositeResponse<?> queryCmsArticleCatalogs(
       @RequestParam("catalogId") String catalogId,
       @RequestParam("pageNo") Integer pageNo,
       @RequestParam("pageSize") Integer pageSize
   ) {
-    return compositeService.queryCmsArticles(catalogId, pageNo, pageSize);
+    return compositeService.queryCmsArticleCatalogs(catalogId, pageNo, pageSize);
+  }
+
+  @GetMapping("v1/public/cms/article/list/query")
+  public CompositeResponse<?> queryCmsArticles(
+      @RequestParam("catalogId") String catalogId,
+      @RequestParam("type") Integer type,
+      @RequestParam("pageNo") Integer pageNo,
+      @RequestParam("pageSize") Integer pageSize
+  ) {
+    return compositeService.queryCmsArticles(catalogId, type, pageNo, pageSize);
   }
 }
 

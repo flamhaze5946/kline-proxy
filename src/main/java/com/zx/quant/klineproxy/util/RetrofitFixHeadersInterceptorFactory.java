@@ -8,7 +8,6 @@ import okhttp3.Interceptor;
 import okhttp3.Request;
 import okhttp3.Request.Builder;
 import okhttp3.Response;
-import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.jetbrains.annotations.NotNull;
 

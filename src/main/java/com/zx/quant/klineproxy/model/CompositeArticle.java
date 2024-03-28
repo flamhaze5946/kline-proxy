@@ -30,4 +30,6 @@ public class CompositeArticle {
   private Object publishDate;
 
   private Object footer;
+
+  private Long releaseDate;
 }
