@@ -33,9 +33,9 @@ public class ClientConfig {
    * @return binance spot clients
    */
   @Bean
-  public BinanceSpotClient binanceSpotClient() {
+  public BinanceSpotClient binanceSpotClient(ObjectMapper objectMapper) {
     Retrofit retrofit = new Retrofit.Builder()
-        .addConverterFactory(JacksonConverterFactory.create())
+        .addConverterFactory(JacksonConverterFactory.create(objectMapper))
         .baseUrl(binanceSpotApiRootUrl)
         .build();
 
@@ -47,9 +47,9 @@ public class ClientConfig {
    * @return binance future clients
    */
   @Bean
-  public BinanceFutureClient binanceFutureClient() {
+  public BinanceFutureClient binanceFutureClient(ObjectMapper objectMapper) {
     Retrofit retrofit = new Retrofit.Builder()
-        .addConverterFactory(JacksonConverterFactory.create())
+        .addConverterFactory(JacksonConverterFactory.create(objectMapper))
         .baseUrl(binanceFutureApiRootUrl)
         .build();
 
