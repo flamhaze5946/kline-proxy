@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.client;
 
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
+import com.zx.quant.klineproxy.client.model.BinanceServerTime;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
@@ -10,6 +11,9 @@ import retrofit2.http.GET;
 import retrofit2.http.Query;
 
 public interface BinanceFutureClient {
+
+  @GET("fapi/v1/time")
+  Call<BinanceServerTime> getServerTime();
 
   @GET("fapi/v1/exchangeInfo")
   Call<BinanceFutureExchange> getExchange();
