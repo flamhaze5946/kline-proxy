@@ -47,7 +47,7 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   private BinanceSpotClient binanceSpotClient;
 
   @Override
-  public List<Kline<?>> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
     Call<List<Object[]>> klinesCall = binanceSpotClient.getKlines(symbol, interval, startTime, endTime, getLimit(limit));
     List<Object[]> responseBody = ClientUtil.getResponseBody(klinesCall,
         () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));

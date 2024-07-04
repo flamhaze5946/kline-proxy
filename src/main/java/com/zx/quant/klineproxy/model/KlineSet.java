@@ -12,7 +12,7 @@ public class KlineSet {
 
   private final KlineSetKey key;
 
-  private ConcurrentSkipListMap<Long, Kline<?>> klineMap = new ConcurrentSkipListMap<>();
+  private ConcurrentSkipListMap<Long, Kline> klineMap = new ConcurrentSkipListMap<>();
 
   public KlineSet(KlineSetKey key) {
     this.key = key;

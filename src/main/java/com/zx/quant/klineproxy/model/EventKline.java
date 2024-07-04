@@ -13,17 +13,17 @@ import lombok.NoArgsConstructor;
 @Data
 public abstract class EventKline<N> {
   @JsonProperty("t")
-  protected Long openTime;
+  protected long openTime;
   @JsonProperty("T")
-  protected Long closeTime;
+  protected long closeTime;
   @JsonProperty("s")
   protected String symbol;
   @JsonProperty("i")
   protected String interval;
   @JsonProperty("f")
-  protected Long openMatchId;
+  protected long openMatchId;
   @JsonProperty("L")
-  protected Long closeMatchId;
+  protected long closeMatchId;
   @JsonProperty("o")
   protected N openPrice;
   @JsonProperty("c")
@@ -35,9 +35,9 @@ public abstract class EventKline<N> {
   @JsonProperty("v")
   protected N volume;
   @JsonProperty("n")
-  protected Integer tradeNum;
+  protected int tradeNum;
   @JsonProperty("x")
-  protected Boolean closed;
+  protected boolean closed;
   @JsonProperty("q")
   protected N quoteVolume;
   @JsonProperty("V")

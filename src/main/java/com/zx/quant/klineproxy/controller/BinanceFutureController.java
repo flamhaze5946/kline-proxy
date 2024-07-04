@@ -90,10 +90,10 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
-    Kline<?>[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
+    Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
     Object[][] displayKlines = new Object[klines.length][];
     for(int i = 0; i < klines.length; i++) {
-      Kline<?> kline = klines[i];
+      Kline kline = klines[i];
       Object[] displayKline = ConvertUtil.convertToDisplayKline(kline);
       displayKlines[i] = displayKline;
     }

@@ -10,12 +10,16 @@ import lombok.NoArgsConstructor;
  * @author flamhaze5946
  */
 @Data
-public abstract class Kline<N> {
+public abstract class Kline {
 
-  protected Long openTime;
+  protected long openTime;
 
-  protected Long closeTime;
+  protected long closeTime;
 
+  protected int tradeNum;
+
+  /*
+  not use generic type to save memory
   protected N openPrice;
 
   protected N highPrice;
@@ -28,37 +32,102 @@ public abstract class Kline<N> {
 
   protected N quoteVolume;
 
-  protected Integer tradeNum;
-
   protected N activeBuyVolume;
 
   protected N activeBuyQuoteVolume;
+  */
 
+  /*
+  always 0
   protected String ignore;
+  */
 
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
-  public static class StringKline extends Kline<String> {
+  public static class StringKline extends Kline {
+
+    protected String openPrice;
+
+    protected String highPrice;
+
+    protected String lowPrice;
+
+    protected String closePrice;
+
+    protected String volume;
+
+    protected String quoteVolume;
+
+    protected String activeBuyVolume;
+
+    protected String activeBuyQuoteVolume;
   }
 
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
-  public static class FloatKline extends Kline<Float> {
+  public static class FloatKline extends Kline {
+
+    protected float openPrice;
+
+    protected float highPrice;
+
+    protected float lowPrice;
+
+    protected float closePrice;
+
+    protected float volume;
+
+    protected float quoteVolume;
+
+    protected float activeBuyVolume;
+
+    protected float activeBuyQuoteVolume;
   }
 
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
-  public static class DoubleKline extends Kline<Double> {
+  public static class DoubleKline extends Kline {
+
+    protected double openPrice;
+
+    protected double highPrice;
+
+    protected double lowPrice;
+
+    protected double closePrice;
+
+    protected double volume;
+
+    protected double quoteVolume;
+
+    protected double activeBuyVolume;
+
+    protected double activeBuyQuoteVolume;
   }
 
 
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
-  public static class BigDecimalKline extends Kline<BigDecimal> {
-  }
+  public static class BigDecimalKline extends Kline {
 
+    protected BigDecimal openPrice;
+
+    protected BigDecimal highPrice;
+
+    protected BigDecimal lowPrice;
+
+    protected BigDecimal closePrice;
+
+    protected BigDecimal volume;
+
+    protected BigDecimal quoteVolume;
+
+    protected BigDecimal activeBuyVolume;
+
+    protected BigDecimal activeBuyQuoteVolume;
+  }
 }

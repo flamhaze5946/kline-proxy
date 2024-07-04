@@ -33,30 +33,30 @@ public interface KlineService {
   /**
    * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
    */
-  default ImmutablePair<Collection<Kline<?>>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit) {
+  default ImmutablePair<Collection<Kline>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlines(symbol, interval, startTime, endTime, limit, false);
   }
 
   /**
    * @see KlineService#queryKlineList(String, String, Long, Long, int, boolean)
    */
-  default List<Kline<?>> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit) {
+  default List<Kline> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlineList(symbol, interval, startTime, endTime, limit, false);
   }
 
   /**
    * @see KlineService#queryKlineArray(String, String, Long, Long, int, boolean)
    */
-  default Kline<?>[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit) {
+  default Kline[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlineArray(symbol, interval, startTime, endTime, limit, false);
   }
 
   /**
    * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
    */
-  default List<Kline<?>> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
-    ImmutablePair<Collection<Kline<?>>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
-    ArrayList<Kline<?>> klineList = new ArrayList<>(klinesPair.getRight());
+  default List<Kline> queryKlineList(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
+    ImmutablePair<Collection<Kline>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
+    ArrayList<Kline> klineList = new ArrayList<>(klinesPair.getRight());
     klineList.addAll(klinesPair.getLeft());
     return klineList;
   }
@@ -64,11 +64,11 @@ public interface KlineService {
   /**
    * @see KlineService#queryKlines(String, String, Long, Long, int, boolean)
    */
-  default Kline<?>[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
-    ImmutablePair<Collection<Kline<?>>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
-    Kline<?>[] klineArray = new Kline[klinesPair.getRight()];
+  default Kline[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
+    ImmutablePair<Collection<Kline>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
+    Kline[] klineArray = new Kline[klinesPair.getRight()];
     int index = 0;
-    for (Kline<?> kline : klinesPair.getLeft()) {
+    for (Kline kline : klinesPair.getLeft()) {
       klineArray[index++] = kline;
     }
     return klineArray;
@@ -84,7 +84,7 @@ public interface KlineService {
    * @param makeUp    make up klines
    * @return klines, klines size
    */
-  ImmutablePair<Collection<Kline<?>>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
+  ImmutablePair<Collection<Kline>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
 
   /**
    * update klines
@@ -92,12 +92,12 @@ public interface KlineService {
    * @param interval  interval
    * @param klines    klines
    */
-  void updateKlines(String symbol, String interval, List<Kline<?>> klines);
+  void updateKlines(String symbol, String interval, List<Kline> klines);
 
   /**
    * @see KlineService#updateKlines(String, String, List)
    */
-  default void updateKline(String symbol, String interval, Kline<?> kline) {
+  default void updateKline(String symbol, String interval, Kline kline) {
     updateKlines(symbol, interval, Collections.singletonList(kline));
   }
 }

@@ -16,9 +16,9 @@ public abstract class Ticker<N> {
 
   protected N price;
 
-  protected Long time;
+  protected long time;
 
-  public static Ticker<?> create(String symbol, Kline<?> kline, Long time) {
+  public static Ticker<?> create(String symbol, Kline kline, Long time) {
     if (kline instanceof Kline.StringKline stringKline) {
       StringTicker stringTicker = new StringTicker();
       stringTicker.setSymbol(symbol);

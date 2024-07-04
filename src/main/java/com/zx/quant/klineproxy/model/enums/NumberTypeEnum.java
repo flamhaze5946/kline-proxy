@@ -47,9 +47,9 @@ public enum NumberTypeEnum implements BaseEnum {
 
   private final String code;
 
-  private final Class<? extends Kline<?>> klineClass;
+  private final Class<? extends Kline> klineClass;
 
-  private final Class<? extends EventKline<?>> eventKlineClass;
+  private final Class<? extends EventKline> eventKlineClass;
 
   private final Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass;
 
@@ -57,7 +57,7 @@ public enum NumberTypeEnum implements BaseEnum {
 
   private final String description;
 
-  NumberTypeEnum(String code, Class<? extends Kline<?>> klineClass, Class<? extends EventKline<?>> eventKlineClass, Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass, Class<? extends Ticker<?>> tickerClass, String description) {
+  NumberTypeEnum(String code, Class<? extends Kline> klineClass, Class<? extends EventKline> eventKlineClass, Class<? extends EventKlineEvent<?, ?>> eventKlineEventClass, Class<? extends Ticker<?>> tickerClass, String description) {
     this.code = code;
     this.klineClass = klineClass;
     this.eventKlineClass = eventKlineClass;
@@ -71,11 +71,11 @@ public enum NumberTypeEnum implements BaseEnum {
     return code;
   }
 
-  public Class<? extends Kline<?>> klineClass() {
+  public Class<? extends Kline> klineClass() {
     return klineClass;
   }
 
-  public Class<? extends EventKline<?>> eventKlineClass() {
+  public Class<? extends EventKline> eventKlineClass() {
     return eventKlineClass;
   }
 

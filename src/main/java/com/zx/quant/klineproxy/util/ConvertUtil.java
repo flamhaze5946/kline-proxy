@@ -19,12 +19,14 @@ import org.apache.commons.collections4.CollectionUtils;
  */
 public final class ConvertUtil {
 
+  private static final String IGNORE_VALUE = "0";
+
   private static final String FLOAT_FORMAT = "#.########";
 
   private static final String DOUBLE_FORMAT = "#.########";
 
   private static final ThreadLocal<DecimalFormat> FLOAT_FORMATTER = ThreadLocal.withInitial(
-      () -> new DecimalFormat(DOUBLE_FORMAT));
+      () -> new DecimalFormat(FLOAT_FORMAT));
 
   private static final ThreadLocal<DecimalFormat> DOUBLE_FORMATTER = ThreadLocal.withInitial(
       () -> new DecimalFormat(DOUBLE_FORMAT));
@@ -104,7 +106,7 @@ public final class ConvertUtil {
     return displayTicker24Hr;
   }
 
-  public static Object[] convertToDisplayKline(Kline<?> kline) {
+  public static Object[] convertToDisplayKline(Kline kline) {
     if (kline == null) {
       return new Object[0];
     }
@@ -122,7 +124,7 @@ public final class ConvertUtil {
           stringKline.getTradeNum(),
           stringKline.getActiveBuyVolume(),
           stringKline.getActiveBuyQuoteVolume(),
-          stringKline.getIgnore()
+          IGNORE_VALUE
           };
     } else if (kline instanceof Kline.FloatKline floatKline) {
       return new Object[] {
@@ -137,7 +139,7 @@ public final class ConvertUtil {
           floatKline.getTradeNum(),
           floatToString(floatKline.getActiveBuyVolume()),
           floatToString(floatKline.getActiveBuyQuoteVolume()),
-          floatKline.getIgnore()
+          IGNORE_VALUE
           };
     } else if (kline instanceof Kline.DoubleKline doubleKline) {
       return new Object[] {
@@ -152,7 +154,7 @@ public final class ConvertUtil {
           doubleKline.getTradeNum(),
           doubleToString(doubleKline.getActiveBuyVolume()),
           doubleToString(doubleKline.getActiveBuyQuoteVolume()),
-          doubleKline.getIgnore()
+          IGNORE_VALUE
       };
     } else if(kline instanceof Kline.BigDecimalKline bigDecimalKline) {
       return new Object[] {
@@ -167,7 +169,7 @@ public final class ConvertUtil {
           bigDecimalKline.getTradeNum(),
           bigDecimalKline.getActiveBuyVolume().toPlainString(),
           bigDecimalKline.getActiveBuyQuoteVolume().toPlainString(),
-          bigDecimalKline.getIgnore()
+          IGNORE_VALUE
       };
     } else {
       throw new UnsupportedOperationException();
