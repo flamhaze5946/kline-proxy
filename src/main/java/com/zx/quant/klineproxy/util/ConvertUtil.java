@@ -19,7 +19,12 @@ import org.apache.commons.collections4.CollectionUtils;
  */
 public final class ConvertUtil {
 
+  private static final String FLOAT_FORMAT = "#.########";
+
   private static final String DOUBLE_FORMAT = "#.########";
+
+  private static final ThreadLocal<DecimalFormat> FLOAT_FORMATTER = ThreadLocal.withInitial(
+      () -> new DecimalFormat(DOUBLE_FORMAT));
 
   private static final ThreadLocal<DecimalFormat> DOUBLE_FORMATTER = ThreadLocal.withInitial(
       () -> new DecimalFormat(DOUBLE_FORMAT));
@@ -59,6 +64,8 @@ public final class ConvertUtil {
     displayTicker.setTime(ticker.getTime());
     if (ticker instanceof Ticker.StringTicker stringTicker) {
       displayTicker.setPrice(stringTicker.getPrice());
+    } else if (ticker instanceof Ticker.FloatTicker floatTicker) {
+      displayTicker.setPrice(floatToString(floatTicker.getPrice()));
     } else if (ticker instanceof Ticker.DoubleTicker doubleTicker) {
       displayTicker.setPrice(doubleToString(doubleTicker.getPrice()));
     } else if(ticker instanceof Ticker.BigDecimalTicker bigDecimalTicker){
@@ -117,6 +124,21 @@ public final class ConvertUtil {
           stringKline.getActiveBuyQuoteVolume(),
           stringKline.getIgnore()
           };
+    } else if (kline instanceof Kline.FloatKline floatKline) {
+      return new Object[] {
+          floatKline.getOpenTime(),
+          floatToString(floatKline.getOpenPrice()),
+          floatToString(floatKline.getHighPrice()),
+          floatToString(floatKline.getLowPrice()),
+          floatToString(floatKline.getClosePrice()),
+          floatToString(floatKline.getVolume()),
+          floatKline.getCloseTime(),
+          floatToString(floatKline.getQuoteVolume()),
+          floatKline.getTradeNum(),
+          floatToString(floatKline.getActiveBuyVolume()),
+          floatToString(floatKline.getActiveBuyQuoteVolume()),
+          floatKline.getIgnore()
+          };
     } else if (kline instanceof Kline.DoubleKline doubleKline) {
       return new Object[] {
           doubleKline.getOpenTime(),
@@ -150,6 +172,10 @@ public final class ConvertUtil {
     } else {
       throw new UnsupportedOperationException();
     }
+  }
+
+  private static String floatToString(Float number) {
+    return nullOrValue(number, num -> FLOAT_FORMATTER.get().format(num));
   }
 
   private static String doubleToString(Double number) {

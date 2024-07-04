@@ -56,6 +56,12 @@ public abstract class EventKline<N> {
   @EqualsAndHashCode(callSuper = true)
   @NoArgsConstructor
   @Data
+  public static class FloatEventKline extends EventKline<Float> {
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
   public static class DoubleEventKline extends EventKline<Double> {
   }
 

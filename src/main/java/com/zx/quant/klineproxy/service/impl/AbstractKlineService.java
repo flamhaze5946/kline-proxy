@@ -9,11 +9,14 @@ import com.zx.quant.klineproxy.model.CombineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
+import com.zx.quant.klineproxy.model.EventKline.FloatEventKline;
+import com.zx.quant.klineproxy.model.EventKline.StringEventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
 import com.zx.quant.klineproxy.model.EventTicker24HrEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
 import com.zx.quant.klineproxy.model.Kline.DoubleKline;
+import com.zx.quant.klineproxy.model.Kline.FloatKline;
 import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
@@ -586,6 +589,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     clientIndexTopicsMap.forEach((clientIndex, subTopics) -> topicsConsumer.accept(clients.get(clientIndex), subTopics));
   }
 
+  private Float toFloat(Object floatObj) {
+    if (floatObj == null) {
+      return null;
+    }
+    if (floatObj instanceof Float floatValue) {
+      return floatValue;
+    } else if (floatObj instanceof String doubleStr) {
+      return Float.valueOf(doubleStr);
+    } else {
+      throw new UnsupportedOperationException();
+    }
+  }
+
   private Double toDouble(Object doubleObj) {
     if (doubleObj == null) {
       return null;
@@ -632,6 +648,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         kline.setTradeNum((Integer) serverKline[8]);
         kline.setActiveBuyVolume((String) serverKline[9]);
         kline.setActiveBuyQuoteVolume((String) serverKline[10]);
+        kline.setIgnore((String) serverKline[11]);
+        return kline;
+      }
+      case FLOAT -> {
+        FloatKline kline = new FloatKline();
+        kline.setOpenTime((Long) serverKline[0]);
+        kline.setOpenPrice(toFloat(serverKline[1]));
+        kline.setHighPrice(toFloat(serverKline[2]));
+        kline.setLowPrice(toFloat(serverKline[3]));
+        kline.setClosePrice(toFloat(serverKline[4]));
+        kline.setVolume(toFloat(serverKline[5]));
+        kline.setCloseTime((Long) serverKline[6]);
+        kline.setQuoteVolume(toFloat(serverKline[7]));
+        kline.setTradeNum((Integer) serverKline[8]);
+        kline.setActiveBuyVolume(toFloat(serverKline[9]));
+        kline.setActiveBuyQuoteVolume(toFloat(serverKline[10]));
         kline.setIgnore((String) serverKline[11]);
         return kline;
       }
@@ -891,7 +923,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return null;
     }
     EventKline<?> eventKline = event.getEventKline();
-    if (eventKline instanceof EventKline.StringEventKline stringEventKline) {
+    if (eventKline instanceof StringEventKline stringEventKline) {
       StringKline stringKline = new StringKline();
       stringKline.setOpenTime(stringEventKline.getOpenTime());
       stringKline.setCloseTime(stringEventKline.getCloseTime());
@@ -906,6 +938,21 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       stringKline.setActiveBuyQuoteVolume(stringEventKline.getActiveBuyQuoteVolume());
       stringKline.setIgnore(stringEventKline.getIgnore());
       return stringKline;
+    } else if (eventKline instanceof FloatEventKline floatEventKline) {
+      FloatKline floatKline = new FloatKline();
+      floatKline.setOpenTime(floatEventKline.getOpenTime());
+      floatKline.setCloseTime(floatEventKline.getCloseTime());
+      floatKline.setOpenPrice(toFloat(floatEventKline.getOpenPrice()));
+      floatKline.setHighPrice(toFloat(floatEventKline.getHighPrice()));
+      floatKline.setLowPrice(toFloat(floatEventKline.getLowPrice()));
+      floatKline.setClosePrice(toFloat(floatEventKline.getClosePrice()));
+      floatKline.setVolume(toFloat(floatEventKline.getVolume()));
+      floatKline.setQuoteVolume(toFloat(floatEventKline.getQuoteVolume()));
+      floatKline.setTradeNum(floatEventKline.getTradeNum());
+      floatKline.setActiveBuyVolume(toFloat(floatEventKline.getActiveBuyVolume()));
+      floatKline.setActiveBuyQuoteVolume(toFloat(floatEventKline.getActiveBuyQuoteVolume()));
+      floatKline.setIgnore(floatEventKline.getIgnore());
+      return floatKline;
     } else if (eventKline instanceof DoubleEventKline doubleEventKline) {
       DoubleKline doubleKline = new DoubleKline();
       doubleKline.setOpenTime(doubleEventKline.getOpenTime());

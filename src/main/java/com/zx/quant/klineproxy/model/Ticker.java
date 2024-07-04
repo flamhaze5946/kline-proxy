@@ -25,6 +25,12 @@ public abstract class Ticker<N> {
       stringTicker.setPrice(stringKline.getClosePrice());
       stringTicker.setTime(time);
       return stringTicker;
+    } else if (kline instanceof Kline.FloatKline floatKline) {
+      FloatTicker floatTicker = new FloatTicker();
+      floatTicker.setSymbol(symbol);
+      floatTicker.setPrice(floatKline.getClosePrice());
+      floatTicker.setTime(time);
+      return floatTicker;
     } else if (kline instanceof Kline.DoubleKline doubleKline) {
       DoubleTicker doubleTicker = new DoubleTicker();
       doubleTicker.setSymbol(symbol);
@@ -46,6 +52,12 @@ public abstract class Ticker<N> {
   @NoArgsConstructor
   @Data
   public static class StringTicker extends Ticker<String> {
+  }
+
+  @EqualsAndHashCode(callSuper = true)
+  @NoArgsConstructor
+  @Data
+  public static class FloatTicker extends Ticker<Float> {
   }
 
   @EqualsAndHashCode(callSuper = true)

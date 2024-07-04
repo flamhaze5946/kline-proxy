@@ -12,19 +12,19 @@ management:
     tags:
       application: ${spring.application.name}
 number:
-  type: string
+  type: float
 kline:
   binance:
     spot:
       minMaintainCount: 5000
       listenIntervals:
-        - 1h
+        - "1h"
       listenSymbolPatterns:
         - .*?USDT
     future:
       minMaintainCount: 5000
       listenIntervals:
-        - 1h
+        - "1h"
       listenSymbolPatterns:
         - .*?USDT
 
