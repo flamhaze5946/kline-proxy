@@ -449,6 +449,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     registerExtraTopic(TICKER_24HR_TOPIC);
     startKlineWebSocketUpdater(topicCount);
     startKlineRpcUpdater();
+    startTicker24HrRpcUpdater();
     startSymbolOfflineCleaner();
   }
 
@@ -804,19 +805,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
   }
 
-//  private void startTicker24HrRpcUpdater() {
-//    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
-//        new ExceptionSafeRunnable(() -> {
-//          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
-//          if (CollectionUtils.isEmpty(ticker24Hrs)) {
-//            return;
-//          }
-//
-//          ticker24HrCache = ticker24Hrs.stream()
-//              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
-//        }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
-//    );
-//  }
+  private void startTicker24HrRpcUpdater() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        new ExceptionSafeRunnable(() -> {
+          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+          if (CollectionUtils.isEmpty(ticker24Hrs)) {
+            return;
+          }
+
+          Map<String, Ticker24Hr> ticker24HrMap = ticker24Hrs.stream()
+              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
+          Set<String> needRemoveKeys = ticker24HrCache.asMap().keySet().stream()
+                  .filter(existKey -> !ticker24HrMap.containsKey(existKey))
+                  .collect(Collectors.toSet());
+          ticker24HrCache.putAll(ticker24HrMap);
+          if (CollectionUtils.isNotEmpty(needRemoveKeys)) {
+            ticker24HrCache.invalidateAll(needRemoveKeys);
+          }
+        }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
+    );
+  }
 
   private void startKlineRpcUpdater() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
