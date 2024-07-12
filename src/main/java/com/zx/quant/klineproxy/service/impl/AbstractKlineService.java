@@ -25,11 +25,13 @@ import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
+import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
+import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -81,16 +83,6 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 public abstract class AbstractKlineService<T extends WebSocketClient> implements KlineService, InitializingBean {
 
-  private static final String KLINE_COUNTER_NAME = "kline_counter";
-
-  private static final String TICKER_COUNTER_NAME = "ticker_counter";
-
-  private static final String MONITOR_SERVICE_TYPE_LABEL = "service_type";
-
-  private static final String MONITOR_KLINE_INTERVAL_LABEL = "interval";
-
-  private static final String MONITOR_SYMBOL_LABEL = "symbol";
-
   private static final String MANAGE_EXECUTOR_GROUP = "kline-manage";
   
   private static final String KLINE_FETCH_EXECUTOR_GROUP = "kline-fetch";
@@ -130,20 +122,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .expireAfterWrite(Duration.ofDays(1))
       .build();
 
-  private final Counter klineCounter = Counter.build()
-      .labelNames(MONITOR_SERVICE_TYPE_LABEL, MONITOR_KLINE_INTERVAL_LABEL, MONITOR_SYMBOL_LABEL)
-      .name(KLINE_COUNTER_NAME)
-      .help(KLINE_COUNTER_NAME)
-      .create();
-
-  private final Counter tickerCounter = Counter.build()
-      .labelNames(MONITOR_SERVICE_TYPE_LABEL)
-      .name(TICKER_COUNTER_NAME)
-      .help(TICKER_COUNTER_NAME)
-      .create();
-
   @Autowired
   protected RateLimitManager rateLimitManager;
+
+  @Autowired
+  protected MonitorManager monitorManager;
 
   @Autowired
   protected Serializer serializer;
@@ -377,7 +360,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     String symbol = eventKlineEvent.getSymbol();
     String interval = eventKlineEvent.getEventKline().getInterval();
     updateKline(symbol, interval, kline);
-    klineCounter.labels(getServiceType(), interval, symbol).inc();
+    monitorManager.incReceivedKlineMessage(getServiceType(), interval, symbol);
     return true;
   }
 
@@ -423,7 +406,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     ticker24Hr.setCount(eventTicker24HrEvent.getCount());
 
     ticker24HrCache.put(ticker24Hr.getSymbol(), ticker24Hr);
-    tickerCounter.labels(getServiceType()).inc();
+    monitorManager.incReceivedTickerMessage(getServiceType());
   }
 
   protected Function<String, String> getKlineEventMessageTopicExtractor() {
