@@ -5,7 +5,6 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
-import com.zx.quant.klineproxy.model.CombineEvent;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
@@ -31,6 +30,7 @@ import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
+import io.prometheus.client.Counter;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -81,6 +81,16 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 public abstract class AbstractKlineService<T extends WebSocketClient> implements KlineService, InitializingBean {
 
+  private static final String KLINE_COUNTER_NAME = "kline_counter";
+
+  private static final String TICKER_COUNTER_NAME = "ticker_counter";
+
+  private static final String MONITOR_SERVICE_TYPE_LABEL = "service_type";
+
+  private static final String MONITOR_KLINE_INTERVAL_LABEL = "interval";
+
+  private static final String MONITOR_SYMBOL_LABEL = "symbol";
+
   private static final String MANAGE_EXECUTOR_GROUP = "kline-manage";
   
   private static final String KLINE_FETCH_EXECUTOR_GROUP = "kline-fetch";
@@ -120,6 +130,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .expireAfterWrite(Duration.ofDays(1))
       .build();
 
+  private final Counter klineCounter = Counter.build()
+      .labelNames(MONITOR_SERVICE_TYPE_LABEL, MONITOR_KLINE_INTERVAL_LABEL, MONITOR_SYMBOL_LABEL)
+      .name(KLINE_COUNTER_NAME)
+      .help(KLINE_COUNTER_NAME)
+      .create();
+
+  private final Counter tickerCounter = Counter.build()
+      .labelNames(MONITOR_SERVICE_TYPE_LABEL)
+      .name(TICKER_COUNTER_NAME)
+      .help(TICKER_COUNTER_NAME)
+      .create();
+
   @Autowired
   protected RateLimitManager rateLimitManager;
 
@@ -131,14 +153,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Value("${number.type:bigDecimal}")
   private String numberType;
-
-  private final LoadingCache<String, Optional<CombineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
-      .expireAfterWrite(1, TimeUnit.MINUTES)
-      .maximumSize(10240)
-      .build(message -> {
-        CombineEvent combineEvent = serializer.fromJsonString(message, CombineEvent.class);
-        return Optional.ofNullable(combineEvent);
-      });
 
   private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageKlineEventLruCache = Caffeine.newBuilder()
       .expireAfterWrite(1, TimeUnit.MINUTES)
@@ -162,6 +176,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       });
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
+
 
   /**
    * query kline by rpc, no cache
@@ -191,6 +206,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected abstract int getMakeUpKlinesWeight();
 
   protected abstract int getTicker24HrsWeight();
+
+  protected abstract String getServiceType();
 
   protected long getServerTime() {
     return System.currentTimeMillis();
@@ -357,7 +374,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return false;
     }
     Kline kline = convertToKline(eventKlineEvent);
-    updateKline(eventKlineEvent.getSymbol(), eventKlineEvent.getEventKline().getInterval(), kline);
+    String symbol = eventKlineEvent.getSymbol();
+    String interval = eventKlineEvent.getEventKline().getInterval();
+    updateKline(symbol, interval, kline);
+    klineCounter.labels(getServiceType(), interval, symbol).inc();
     return true;
   }
 
@@ -403,6 +423,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     ticker24Hr.setCount(eventTicker24HrEvent.getCount());
 
     ticker24HrCache.put(ticker24Hr.getSymbol(), ticker24Hr);
+    tickerCounter.labels(getServiceType()).inc();
   }
 
   protected Function<String, String> getKlineEventMessageTopicExtractor() {

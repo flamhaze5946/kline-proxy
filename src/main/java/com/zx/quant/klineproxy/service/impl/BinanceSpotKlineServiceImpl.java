@@ -31,6 +31,8 @@ import retrofit2.Call;
 public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpotWebSocketClient>
     implements KlineService, InitializingBean {
 
+  private static final String SERVICE_TYPE = "binanceSpot";
+
   private static final int MAKE_UP_KLINE_WEIGHT = 2;
 
   private static final int MAKE_UP_KLINE_COUNT = 1000;
@@ -96,5 +98,10 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   @Override
   protected int getTicker24HrsWeight() {
     return TICKER_24HR_WEIGHT;
+  }
+
+  @Override
+  protected String getServiceType() {
+    return SERVICE_TYPE;
   }
 }

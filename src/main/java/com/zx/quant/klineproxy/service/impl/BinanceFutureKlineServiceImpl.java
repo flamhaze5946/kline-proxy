@@ -31,6 +31,8 @@ import retrofit2.Call;
 public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceFutureWebSocketClient>
     implements KlineService, InitializingBean {
 
+  private static final String SERVICE_TYPE = "binanceFuture";
+
   private static final int MAKE_UP_KLINE_COUNT = 499;
 
   private static final int MAKE_UP_KLINE_WEIGHT = 2;
@@ -45,6 +47,7 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
 
   @Autowired
   private BinanceFutureClient binanceFutureClient;
+
 
   @Override
   public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
@@ -96,5 +99,10 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   @Override
   protected int getTicker24HrsWeight() {
     return TICKER_24HR_WEIGHT;
+  }
+
+  @Override
+  protected String getServiceType() {
+    return SERVICE_TYPE;
   }
 }
