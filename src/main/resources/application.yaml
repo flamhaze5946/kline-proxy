@@ -15,7 +15,7 @@ management:
     tags:
       application: ${spring.application.name}
 number:
-  type: float
+  type: double
 kline:
   binance:
     spot:
