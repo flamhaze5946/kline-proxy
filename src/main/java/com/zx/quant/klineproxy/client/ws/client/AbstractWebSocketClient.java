@@ -501,7 +501,10 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       boolean ssl = protocolEnum.isSsl();
       final SslContext sslCtx;
       if (ssl) {
-        sslCtx = SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+        sslCtx = SslContextBuilder
+            .forClient()
+            .trustManager(InsecureTrustManagerFactory.INSTANCE)
+            .build();
       } else {
         sslCtx = null;
       }
