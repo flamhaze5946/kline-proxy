@@ -317,13 +317,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected List<IntervalEnum> getSubscribeIntervals() {
-    return getSyncConfig().getListenIntervals().stream()
+    return getSyncConfig().getIntervalSyncConfigs().keySet().stream()
         .map(interval -> CommonUtil.getEnumByCode(interval, IntervalEnum.class))
         .toList();
   }
 
-  protected List<Pattern> getSubscribeSymbolPatterns() {
-    return getSyncConfig().getListenSymbolPatterns().stream()
+  protected List<Pattern> getSubscribeSymbolPatterns(IntervalEnum intervalEnum) {
+    return getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code()).getListenSymbolPatterns().stream()
         .map(Pattern::compile)
         .toList();
   }
@@ -447,11 +447,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       log.info("kline service {} disabled.", getClass().getSimpleName());
       return;
     }
-    List<String> symbols = getSubscribeSymbols();
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-    int topicCount = symbols.size() * subscribeIntervals.size();
+    List<String> subscribeIntervalSymbols = subscribeIntervals.stream()
+        .map(this::getSubscribeSymbols)
+        .flatMap(Collection::stream)
+        .toList();
     registerExtraTopic(TICKER_24HR_TOPIC);
-    startKlineWebSocketUpdater(topicCount);
+    startKlineWebSocketUpdater(subscribeIntervalSymbols.size());
     startKlineRpcUpdater();
     startTicker24HrRpcUpdater();
     startSymbolOfflineCleaner();
@@ -545,8 +547,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return ImmutablePair.of(realStartTime, realEndTime);
   }
 
-  private List<String> getSubscribeSymbols() {
-    List<Pattern> subscribeSymbolPatterns = getSubscribeSymbolPatterns();
+  private List<String> getSubscribeSymbols(IntervalEnum interval) {
+    List<Pattern> subscribeSymbolPatterns = getSubscribeSymbolPatterns(interval);
     List<String> symbols = getSymbols();
     return symbols.stream()
         .filter(symbol -> {
@@ -834,10 +836,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-          List<String> subscribeSymbols = getSubscribeSymbols();
           List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
-          for (String symbol : subscribeSymbols) {
-            for (IntervalEnum interval : subscribeIntervals) {
+          for (IntervalEnum interval : subscribeIntervals) {
+            List<String> subscribeSymbols = getSubscribeSymbols(interval);
+            for (String symbol : subscribeSymbols) {
               symbolIntervals.add(ImmutablePair.of(symbol, interval));
             }
           }
@@ -848,7 +850,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
               String symbol = symbolInterval.getLeft();
               IntervalEnum interval = symbolInterval.getRight();
               CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() -> {
-                int refreshKlineCount = getSyncConfig().getMinMaintainCount();
+                int refreshKlineCount = getSyncConfig().getIntervalSyncConfigs().get(interval.code()).getMinMaintainCount();
                 KlineSetKey key = new KlineSetKey(symbol, interval.code());
                 KlineSet klineSet = klineSetMap.get(key);
                 if (klineSet != null && getMapSize(klineSet.getKlineMap(), interval) >= getSyncConfig().getRpcRefreshCount()) {
@@ -870,9 +872,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           for (KlineSet klineSet : klineSetMap.values()) {
+            String interval = klineSet.getKey().getInterval();
+            Integer minMaintainCount = getSyncConfig().getIntervalSyncConfigs().get(interval).getMinMaintainCount();
             NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-            if (klineMap.size() > getSyncConfig().getMinMaintainCount() + 50) {
-              while (klineMap.size() > getSyncConfig().getMinMaintainCount()) {
+            if (klineMap.size() > minMaintainCount + 50) {
+              while (klineMap.size() > minMaintainCount) {
                 klineMap.pollFirstEntry();
               }
             }
@@ -880,13 +884,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }), 1000, 5000, TimeUnit.MILLISECONDS);
   }
 
-  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeSymbols, Collection<String> needSubscribeIntervals) {
-    if (CollectionUtils.isEmpty(needSubscribeSymbols) || CollectionUtils.isEmpty(needSubscribeIntervals)) {
+  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals) {
+    if (CollectionUtils.isEmpty(needSubscribeIntervals)) {
       return Collections.emptySet();
     }
-    Set<String> topics = new HashSet<>(needSubscribeSymbols.size() * needSubscribeIntervals.size());
-    for (String symbol : needSubscribeSymbols) {
-      for (String interval : needSubscribeIntervals) {
+    Set<String> topics = new HashSet<>(needSubscribeIntervals.size());
+    for (String interval : needSubscribeIntervals) {
+      List<String> subscribeSymbols = getSubscribeSymbols(
+          CommonUtil.getEnumByCode(interval, IntervalEnum.class));
+      for (String symbol : subscribeSymbols) {
         String topic = buildSymbolUpdateTopic(symbol, interval);
         topics.add(topic);
       }
@@ -898,8 +904,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           synchronized (this) {
-            Set<String> exchangeSymbols = new HashSet<>(getSubscribeSymbols());
-            Set<String> needSubscribeKlineSymbols = new HashSet<>(exchangeSymbols);
             Set<String> needSubscribeKlineIntervals =
                 getSubscribeIntervals().stream()
                     .map(IntervalEnum::code)
@@ -908,7 +912,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
             Set<String> subscribedTopics = getSubscribedTopics();
 
             Set<String> needSubscribeKlineTopics =
-                buildNeedSubscribeKlineUpdateTopics(needSubscribeKlineSymbols, needSubscribeKlineIntervals);
+                buildNeedSubscribeKlineUpdateTopics(needSubscribeKlineIntervals);
             expectTopics.addAll(needSubscribeKlineTopics);
 
             Set<String> needNewSubscribeTopics = new HashSet<>(expectTopics);

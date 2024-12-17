@@ -2,12 +2,20 @@ package com.zx.quant.klineproxy.util;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.GZIPInputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartUtils;
+import org.jfree.chart.JFreeChart;
+import org.jfree.chart.plot.CategoryPlot;
+import org.jfree.data.category.DefaultCategoryDataset;
 
 /**
  * common util
@@ -88,5 +96,32 @@ public final class CommonUtil {
       return false;
     }
     return message.charAt(0) == ARRAY_MESSAGE_PREFIX;
+  }
+
+  public static byte[] saveArrayToPng(String title, Map<String, Float> xy) throws IOException {
+    DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+    xy.forEach((x, y) -> dataset.addValue(y, "Series1", x));
+
+    JFreeChart lineChart = ChartFactory.createLineChart(
+        title,
+        "Index",
+        "Value",
+        dataset
+    );
+
+    CategoryPlot plot = (CategoryPlot) lineChart.getPlot();
+    plot.setDomainGridlinesVisible(true);
+
+    int width = 1024;
+    int height = 768;
+    File tempFile = File.createTempFile("arraypng", ".png");
+    try {
+      ChartUtils.saveChartAsPNG(tempFile, lineChart, width, height);
+      byte[] bytes = Files.readAllBytes(tempFile.toPath());
+      tempFile.delete();
+      return bytes;
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 }

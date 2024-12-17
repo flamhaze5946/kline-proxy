@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zx.quant.klineproxy.client.BinanceCompositeClient;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.BinanceSpotClient;
+import com.zx.quant.klineproxy.client.BlockChainCenterClient;
 import com.zx.quant.klineproxy.util.RetrofitFixHeadersInterceptorFactory;
 import okhttp3.OkHttpClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,19 @@ public class ClientConfig {
 
   @Value("${client.binanceComposite.api.rootUrl:https://www.binance.com}")
   private String binanceCompositeRootUrl;
+
+  @Value("${client.blockChainCenter.api.rootUrl:https://www.blockchaincenter.net}")
+  private String blockChainCenterRootUrl;
+
+  @Bean
+  public BlockChainCenterClient blockChainCenterClient(ObjectMapper objectMapper) {
+    Retrofit retrofit = new Retrofit.Builder()
+        .addConverterFactory(JacksonConverterFactory.create(objectMapper))
+        .baseUrl(blockChainCenterRootUrl)
+        .build();
+
+    return retrofit.create(BlockChainCenterClient.class);
+  }
 
   /**
    * create binance spot clients

@@ -19,17 +19,22 @@ number:
 kline:
   binance:
     spot:
-      minMaintainCount: 5000
-      listenIntervals:
-        - "1h"
-      listenSymbolPatterns:
-        - .*?USDT
+      intervalSyncConfigs:
+        "1h":
+          minMaintainCount: 5000
+          listenSymbolPatterns:
+            - .*?USDT
+        "1d":
+          minMaintainCount: 1000
+          listenSymbolPatterns:
+            - .*?USDT
+      enabled: false
     future:
-      minMaintainCount: 5000
-      listenIntervals:
-        - "1h"
-      listenSymbolPatterns:
-        - .*?USDT
+      intervalSyncConfigs:
+        "1d":
+          minMaintainCount: 1000
+          listenSymbolPatterns:
+            - .*?USDT
 
 client:
   binanceSpot:

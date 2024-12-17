@@ -1,8 +1,7 @@
 package com.zx.quant.klineproxy.model.config;
 
-import com.google.common.collect.Lists;
-import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import java.util.List;
+import java.util.Map;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -15,17 +14,9 @@ public class KlineSyncConfigProperties {
 
   private Boolean enabled = true;
 
-  private Integer minMaintainCount = 1000;
-
   private Integer rpcRefreshCount = 99;
 
-  private List<String> listenIntervals = Lists.newArrayList(
-      IntervalEnum.ONE_HOUR.code()
-  );
-
-  private List<String> listenSymbolPatterns = Lists.newArrayList(
-      ".*"
-  );
+  private Map<String, IntervalSyncConfig> intervalSyncConfigs;
 
   @ConfigurationProperties(prefix = "kline.binance.spot")
   public static class BinanceSpotKlineSyncConfigProperties extends KlineSyncConfigProperties {
@@ -33,5 +24,13 @@ public class KlineSyncConfigProperties {
 
   @ConfigurationProperties(prefix = "kline.binance.future")
   public static class BinanceFutureKlineSyncConfigProperties extends KlineSyncConfigProperties {
+  }
+
+  @Data
+  public static class IntervalSyncConfig {
+
+    private Integer minMaintainCount = 1000;
+
+    private List<String> listenSymbolPatterns;
   }
 }
