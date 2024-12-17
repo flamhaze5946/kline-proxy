@@ -28,9 +28,12 @@ kline:
           minMaintainCount: 1000
           listenSymbolPatterns:
             - .*?USDT
-      enabled: false
     future:
       intervalSyncConfigs:
+        "1h":
+          minMaintainCount: 5000
+          listenSymbolPatterns:
+            - .*?USDT
         "1d":
           minMaintainCount: 1000
           listenSymbolPatterns:
