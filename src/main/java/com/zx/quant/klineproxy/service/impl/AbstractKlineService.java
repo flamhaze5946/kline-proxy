@@ -873,7 +873,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         new ExceptionSafeRunnable(() -> {
           for (KlineSet klineSet : klineSetMap.values()) {
             String interval = klineSet.getKey().getInterval();
-            Integer minMaintainCount = getSyncConfig().getIntervalSyncConfigs().get(interval).getMinMaintainCount();
+            KlineSyncConfigProperties.IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(interval);
+            int minMaintainCount = Optional.ofNullable(intervalSyncConfig)
+                    .map(KlineSyncConfigProperties.IntervalSyncConfig::getMinMaintainCount)
+                    .orElse(1000);
             NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
             if (klineMap.size() > minMaintainCount + 50) {
               while (klineMap.size() > minMaintainCount) {
