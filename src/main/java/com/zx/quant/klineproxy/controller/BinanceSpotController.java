@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("api/v3")
 public class BinanceSpotController extends GenericController {
 
-  private static final int DEFAULT_LIMIT = 100;
+  private static final int DEFAULT_LIMIT = 500;
 
   @Autowired
   @Qualifier("binanceSpotKlineService")
