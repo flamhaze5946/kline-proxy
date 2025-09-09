@@ -23,11 +23,13 @@ import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
+import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
+import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
@@ -43,6 +45,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Objects;
@@ -300,15 +303,98 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (CollectionUtils.isEmpty(klines) || StringUtils.isBlank(symbol) || StringUtils.isBlank(interval)) {
       return;
     }
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     KlineSetKey klineSetKey = new KlineSetKey(symbol, interval);
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-    for (Kline kline : klines) {
+    Entry<Long, Kline> existLastEntry = klineMap.lastEntry();
+    List<Kline> klinesToUpdate = new ArrayList<>();
+    if (existLastEntry != null) {
+      klinesToUpdate.add(existLastEntry.getValue());
+    }
+    klinesToUpdate.addAll(klines);
+    klinesToUpdate = fillKlines(klinesToUpdate, intervalEnum);
+    for (Kline kline : klinesToUpdate) {
       Kline existKline = klineMap.get(kline.getOpenTime());
       if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
         klineMap.put(kline.getOpenTime(), kline);
       }
     }
+  }
+
+  private List<Kline> fillKlines(List<Kline> klines, IntervalEnum intervalEnum) {
+    if (CollectionUtils.isEmpty(klines) || klines.size() == 1) {
+      return klines;
+    }
+    List<Kline> filledKlines = new ArrayList<>(klines.size());
+    klines.sort(Comparator.comparingLong(Kline::getOpenTime));
+    Kline firstKline = klines.get(0);
+    for(int i = 0; i < klines.size(); i++) {
+      Kline currentKline = klines.get(i);
+      long expectOpenTime = firstKline.getOpenTime() + (i * intervalEnum.getMills());
+      while (expectOpenTime < currentKline.getOpenTime()) {
+        if (currentKline instanceof StringKline stringKline) {
+          StringKline insertKline = stringKline.deepCopy();
+          insertKline.setOpenTime(expectOpenTime);
+          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
+          insertKline.setHighPrice(stringKline.getClosePrice());
+          insertKline.setLowPrice(stringKline.getClosePrice());
+          insertKline.setOpenPrice(stringKline.getClosePrice());
+          insertKline.setClosePrice(stringKline.getClosePrice());
+          insertKline.setVolume("0");
+          insertKline.setQuoteVolume("0");
+          insertKline.setTradeNum(0);
+          insertKline.setActiveBuyVolume("0");
+          insertKline.setActiveBuyQuoteVolume("0");
+          filledKlines.add(insertKline);
+        } else if (currentKline instanceof FloatKline floatKline) {
+          FloatKline insertKline = floatKline.deepCopy();
+          insertKline.setOpenTime(expectOpenTime);
+          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
+          insertKline.setHighPrice(floatKline.getClosePrice());
+          insertKline.setLowPrice(floatKline.getClosePrice());
+          insertKline.setOpenPrice(floatKline.getClosePrice());
+          insertKline.setClosePrice(floatKline.getClosePrice());
+          insertKline.setVolume(0);
+          insertKline.setQuoteVolume(0);
+          insertKline.setTradeNum(0);
+          insertKline.setActiveBuyVolume(0);
+          insertKline.setActiveBuyQuoteVolume(0);
+          filledKlines.add(insertKline);
+        } else if (currentKline instanceof DoubleKline doubleKline) {
+          DoubleKline insertKline = doubleKline.deepCopy();
+          insertKline.setOpenTime(expectOpenTime);
+          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
+          insertKline.setHighPrice(doubleKline.getClosePrice());
+          insertKline.setLowPrice(doubleKline.getClosePrice());
+          insertKline.setOpenPrice(doubleKline.getClosePrice());
+          insertKline.setClosePrice(doubleKline.getClosePrice());
+          insertKline.setVolume(0);
+          insertKline.setQuoteVolume(0);
+          insertKline.setTradeNum(0);
+          insertKline.setActiveBuyVolume(0);
+          insertKline.setActiveBuyQuoteVolume(0);
+          filledKlines.add(insertKline);
+        } else if (currentKline instanceof BigDecimalKline bigDecimalKline) {
+          BigDecimalKline insertKline = bigDecimalKline.deepCopy();
+          insertKline.setOpenTime(expectOpenTime);
+          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
+          insertKline.setHighPrice(bigDecimalKline.getClosePrice());
+          insertKline.setLowPrice(bigDecimalKline.getClosePrice());
+          insertKline.setOpenPrice(bigDecimalKline.getClosePrice());
+          insertKline.setClosePrice(bigDecimalKline.getClosePrice());
+          insertKline.setVolume(BigDecimal.ZERO);
+          insertKline.setQuoteVolume(BigDecimal.ZERO);
+          insertKline.setTradeNum(0);
+          insertKline.setActiveBuyVolume(BigDecimal.ZERO);
+          insertKline.setActiveBuyQuoteVolume(BigDecimal.ZERO);
+          filledKlines.add(insertKline);
+        }
+        expectOpenTime += intervalEnum.getMills();
+      }
+      filledKlines.add(currentKline);
+    }
+    return filledKlines;
   }
 
   @Override
@@ -873,7 +959,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         new ExceptionSafeRunnable(() -> {
           for (KlineSet klineSet : klineSetMap.values()) {
             String interval = klineSet.getKey().getInterval();
-            Integer minMaintainCount = getSyncConfig().getIntervalSyncConfigs().get(interval).getMinMaintainCount();
+            IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(interval);
+            if (intervalSyncConfig == null) {
+              continue;
+            }
+            Integer minMaintainCount = intervalSyncConfig.getMinMaintainCount();
             NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
             if (klineMap.size() > minMaintainCount + 50) {
               while (klineMap.size() > minMaintainCount) {

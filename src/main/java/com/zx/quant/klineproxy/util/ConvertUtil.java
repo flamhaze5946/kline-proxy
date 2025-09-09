@@ -1,6 +1,10 @@
 package com.zx.quant.klineproxy.util;
 
 import com.zx.quant.klineproxy.model.Kline;
+import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
+import com.zx.quant.klineproxy.model.Kline.DoubleKline;
+import com.zx.quant.klineproxy.model.Kline.FloatKline;
+import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import java.math.BigDecimal;
@@ -30,6 +34,23 @@ public final class ConvertUtil {
 
   private static final ThreadLocal<DecimalFormat> DOUBLE_FORMATTER = ThreadLocal.withInitial(
       () -> new DecimalFormat(DOUBLE_FORMAT));
+
+  public static Kline deepCopy(Kline kline) {
+    if (kline == null) {
+      return null;
+    }
+    if (kline instanceof StringKline stringKline) {
+      return stringKline.deepCopy();
+    } else if (kline instanceof FloatKline floatKline) {
+      return floatKline.deepCopy();
+    } else if (kline instanceof DoubleKline doubleKline) {
+      return doubleKline.deepCopy();
+    } else if (kline instanceof BigDecimalKline bigDecimalKline) {
+      return bigDecimalKline.deepCopy();
+    } else {
+      throw new UnsupportedOperationException();
+    }
+  }
 
   public static Object convertToDisplayTicker(List<Ticker<?>> tickers) {
     if (CollectionUtils.isEmpty(tickers)) {

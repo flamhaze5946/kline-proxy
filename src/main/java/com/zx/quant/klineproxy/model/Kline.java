@@ -62,6 +62,22 @@ public abstract class Kline {
     protected String activeBuyVolume;
 
     protected String activeBuyQuoteVolume;
+    
+    public StringKline deepCopy() {
+      StringKline target = new StringKline();
+      target.setOpenTime(getOpenTime());
+      target.setCloseTime(getCloseTime());
+      target.setTradeNum(getTradeNum());
+      target.setOpenPrice(getOpenPrice());
+      target.setHighPrice(getHighPrice());
+      target.setLowPrice(getLowPrice());
+      target.setClosePrice(getClosePrice());
+      target.setVolume(getVolume());
+      target.setQuoteVolume(getQuoteVolume());
+      target.setActiveBuyVolume(getActiveBuyVolume());
+      target.setActiveBuyQuoteVolume(getActiveBuyQuoteVolume());
+      return target;
+    }
   }
 
   @EqualsAndHashCode(callSuper = true)
@@ -84,6 +100,22 @@ public abstract class Kline {
     protected float activeBuyVolume;
 
     protected float activeBuyQuoteVolume;
+
+    public FloatKline deepCopy() {
+      FloatKline target = new FloatKline();
+      target.setOpenTime(getOpenTime());
+      target.setCloseTime(getCloseTime());
+      target.setTradeNum(getTradeNum());
+      target.setOpenPrice(getOpenPrice());
+      target.setHighPrice(getHighPrice());
+      target.setLowPrice(getLowPrice());
+      target.setClosePrice(getClosePrice());
+      target.setVolume(getVolume());
+      target.setQuoteVolume(getQuoteVolume());
+      target.setActiveBuyVolume(getActiveBuyVolume());
+      target.setActiveBuyQuoteVolume(getActiveBuyQuoteVolume());
+      return target;
+    }
   }
 
   @EqualsAndHashCode(callSuper = true)
@@ -106,6 +138,22 @@ public abstract class Kline {
     protected double activeBuyVolume;
 
     protected double activeBuyQuoteVolume;
+    
+    public DoubleKline deepCopy() {
+      DoubleKline target = new DoubleKline();
+      target.setOpenTime(getOpenTime());
+      target.setCloseTime(getCloseTime());
+      target.setTradeNum(getTradeNum());
+      target.setOpenPrice(getOpenPrice());
+      target.setHighPrice(getHighPrice());
+      target.setLowPrice(getLowPrice());
+      target.setClosePrice(getClosePrice());
+      target.setVolume(getVolume());
+      target.setQuoteVolume(getQuoteVolume());
+      target.setActiveBuyVolume(getActiveBuyVolume());
+      target.setActiveBuyQuoteVolume(getActiveBuyQuoteVolume());
+      return target;
+    }
   }
 
 
@@ -129,5 +177,21 @@ public abstract class Kline {
     protected BigDecimal activeBuyVolume;
 
     protected BigDecimal activeBuyQuoteVolume;
+    
+    public BigDecimalKline deepCopy() {
+      BigDecimalKline target = new BigDecimalKline();
+      target.setOpenTime(getOpenTime());
+      target.setCloseTime(getCloseTime());
+      target.setTradeNum(getTradeNum());
+      target.setOpenPrice(getOpenPrice());
+      target.setHighPrice(getHighPrice());
+      target.setLowPrice(getLowPrice());
+      target.setClosePrice(getClosePrice());
+      target.setVolume(getVolume());
+      target.setQuoteVolume(getQuoteVolume());
+      target.setActiveBuyVolume(getActiveBuyVolume());
+      target.setActiveBuyQuoteVolume(getActiveBuyQuoteVolume());
+      return target;
+    }
   }
 }
