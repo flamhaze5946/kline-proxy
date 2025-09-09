@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("fapi/v1")
 public class BinanceFutureController extends GenericController {
 
-  private static final int DEFAULT_LIMIT = 100;
+  private static final int DEFAULT_LIMIT = 500;
 
   @Autowired
   @Qualifier("binanceFutureKlineService")
