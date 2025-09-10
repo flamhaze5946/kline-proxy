@@ -1037,7 +1037,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (event == null || event.getEventKline() == null) {
       return null;
     }
-    EventKline eventKline = event.getEventKline();
+    EventKline<?> eventKline = event.getEventKline();
     if (eventKline instanceof StringEventKline stringEventKline) {
       StringKline stringKline = new StringKline();
       stringKline.setOpenTime(stringEventKline.getOpenTime());
