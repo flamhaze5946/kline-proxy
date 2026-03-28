@@ -72,12 +72,52 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
 
   @Override
   protected String getRateLimiterName() {
-    return Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME;
+    return Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME;
   }
 
   @Override
   protected List<String> getSymbols() {
     return exchangeService.querySymbols();
+  }
+
+  @Override
+  protected List<Ticker24Hr> queryTicker24HrsBySymbols(java.util.Collection<String> symbols) {
+    if (symbols.size() == 1) {
+      String symbol = symbols.iterator().next();
+      rateLimitManager.acquire(getRateLimiterName(), getTicker24HrsWeight());
+      Call<Ticker24Hr> ticker24HrCall = binanceSpotClient.getSymbolTicker24hr(symbol);
+      Ticker24Hr ticker24Hr = ClientUtil.getResponseBody(ticker24HrCall,
+          () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+      return ticker24Hr == null ? List.of() : List.of(ticker24Hr);
+    }
+
+    rateLimitManager.acquire(getRateLimiterName(), getTicker24HrsWeight());
+    String payload = serializer.toJsonString(symbols);
+    Call<List<Ticker24Hr>> ticker24HrCall = binanceSpotClient.getSymbolsTicker24hr(payload);
+    List<Ticker24Hr> ticker24Hrs = ClientUtil.getResponseBody(ticker24HrCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+    return ticker24Hrs == null ? List.of() : ticker24Hrs;
+  }
+
+  @Override
+  protected List<com.zx.quant.klineproxy.model.Ticker<?>> queryTickersBySymbols(java.util.Collection<String> symbols) {
+    if (symbols.size() == 1) {
+      String symbol = symbols.iterator().next();
+      rateLimitManager.acquire(getRateLimiterName(), 2);
+      Call<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker> tickerCall =
+          binanceSpotClient.getSymbolTickerPrice(symbol);
+      com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker ticker = ClientUtil.getResponseBody(tickerCall,
+          () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+      return ticker == null ? List.of() : List.of(ticker);
+    }
+
+    rateLimitManager.acquire(getRateLimiterName(), 4);
+    String payload = serializer.toJsonString(symbols);
+    Call<List<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker>> tickerCall =
+        binanceSpotClient.getSymbolsTickerPrice(payload);
+    List<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker> tickers = ClientUtil.getResponseBody(tickerCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+    return tickers == null ? List.of() : List.copyOf(tickers);
   }
 
   @Override

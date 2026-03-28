@@ -11,6 +11,7 @@ import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
+import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -54,7 +55,7 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
   @Override
   public void afterPropertiesSet() throws Exception {
     refreshServerTimeDelta();
-    serverTimeRefresher.scheduleAtFixedRate(this::refreshServerTimeDelta, 5, 3600, TimeUnit.SECONDS);
+    serverTimeRefresher.scheduleAtFixedRate(new ExceptionSafeRunnable(this::refreshServerTimeDelta), 5, 3600, TimeUnit.SECONDS);
   }
 
   @Override

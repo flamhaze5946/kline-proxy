@@ -36,6 +36,7 @@ import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -76,6 +77,8 @@ import org.springframework.beans.factory.annotation.Autowired;
  */
 @Slf4j
 public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
+
+  private static final int MAX_WEBSOCKET_FRAME_SIZE = 10 * 1024 * 1024;
 
   private static final String CLIENT_NAME_SEP = "-";
 
@@ -528,6 +531,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
                       new ChunkedWriteHandler(),
                       new HttpObjectAggregator(8192),
                       new WebSocketServerCompressionHandler(),
+                      new WebSocketFrameAggregator(MAX_WEBSOCKET_FRAME_SIZE),
                       inboundHandler);
                 }
               });

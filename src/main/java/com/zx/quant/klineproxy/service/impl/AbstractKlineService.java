@@ -26,6 +26,7 @@ import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
+import com.zx.quant.klineproxy.model.exceptions.ApiException;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
@@ -78,6 +79,7 @@ import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 
 /**
  * abstract kline service
@@ -154,11 +156,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .maximumSize(10240)
       .build(message -> {
         EventTicker24HrEvent[] eventTicker24HrEventArray = serializer.fromJsonString(message, EventTicker24HrEvent[].class);
-        if (eventTicker24HrEventArray == null || eventTicker24HrEventArray.length <= 0) {
+        if (eventTicker24HrEventArray != null && eventTicker24HrEventArray.length > 0) {
+          List<EventTicker24HrEvent> eventTicker24HrEvents = new ArrayList<>(List.of(eventTicker24HrEventArray));
+          return Optional.of(eventTicker24HrEvents);
+        }
+        EventTicker24HrEvent eventTicker24HrEvent = serializer.fromJsonString(message, EventTicker24HrEvent.class);
+        if (eventTicker24HrEvent == null || StringUtils.isBlank(eventTicker24HrEvent.getEventType())) {
           return Optional.empty();
         }
-        List<EventTicker24HrEvent> eventTicker24HrEvents = new ArrayList<>(List.of(eventTicker24HrEventArray));
-        return Optional.of(eventTicker24HrEvents);
+        return Optional.of(List.of(eventTicker24HrEvent));
       });
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
@@ -199,8 +205,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return System.currentTimeMillis();
   }
 
+  protected Collection<String> getTicker24HrSubscribeTopics() {
+    return Set.of(TICKER_24HR_TOPIC);
+  }
+
+  protected String getTicker24HrStreamTopic(String symbol) {
+    return TICKER_24HR_TOPIC;
+  }
+
+  protected List<Ticker24Hr> queryTicker24HrsBySymbols(Collection<String> symbols) {
+    return Collections.emptyList();
+  }
+
+  protected List<Ticker<?>> queryTickersBySymbols(Collection<String> symbols) {
+    return Collections.emptyList();
+  }
+
   @Override
   public List<Ticker<?>> queryTickers(Collection<String> symbols) {
+    if (CollectionUtils.isNotEmpty(symbols)) {
+      List<Ticker<?>> realtimeTickers = queryTickersBySymbols(symbols);
+      if (CollectionUtils.isNotEmpty(realtimeTickers)) {
+        return realtimeTickers;
+      }
+    }
     IntervalEnum intervalEnum = DEFAULT_TICKER_INTERVAL;
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     if (CollectionUtils.isNotEmpty(subscribeIntervals)) {
@@ -234,6 +262,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Override
   public List<Ticker24Hr> queryTicker24hrs(Collection<String> symbols) {
+    if (CollectionUtils.isNotEmpty(symbols)) {
+      List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24HrsBySymbols(symbols);
+      if (CollectionUtils.isNotEmpty(realtimeTicker24Hrs)) {
+        ticker24HrCache.putAll(realtimeTicker24Hrs.stream()
+            .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n)));
+        return realtimeTicker24Hrs;
+      }
+    }
     if (CollectionUtils.isEmpty(symbols)) {
       return ticker24HrCache.asMap().values().stream()
           .toList();
@@ -248,7 +284,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   public ImmutablePair<Collection<Kline>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
-      throw new RuntimeException("invalid interval");
+      throw new ApiException(HttpStatus.BAD_REQUEST, -1120, "Invalid interval.");
     }
     ImmutablePair<Long, Long> realTimePair = calculateRealStartEndTime(startTime, endTime, intervalEnum, limit);
     Long realStartTime = realTimePair.getLeft();
@@ -328,73 +364,88 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     List<Kline> filledKlines = new ArrayList<>(klines.size());
     klines.sort(Comparator.comparingLong(Kline::getOpenTime));
-    Kline firstKline = klines.get(0);
-    for(int i = 0; i < klines.size(); i++) {
-      Kline currentKline = klines.get(i);
-      long expectOpenTime = firstKline.getOpenTime() + (i * intervalEnum.getMills());
+    Kline previousKline = null;
+    for (Kline currentKline : klines) {
+      if (previousKline == null) {
+        filledKlines.add(currentKline);
+        previousKline = currentKline;
+        continue;
+      }
+
+      long expectOpenTime = previousKline.getOpenTime() + intervalEnum.getMills();
       while (expectOpenTime < currentKline.getOpenTime()) {
-        if (currentKline instanceof StringKline stringKline) {
-          StringKline insertKline = stringKline.deepCopy();
-          insertKline.setOpenTime(expectOpenTime);
-          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
-          insertKline.setHighPrice(stringKline.getClosePrice());
-          insertKline.setLowPrice(stringKline.getClosePrice());
-          insertKline.setOpenPrice(stringKline.getClosePrice());
-          insertKline.setClosePrice(stringKline.getClosePrice());
-          insertKline.setVolume("0");
-          insertKline.setQuoteVolume("0");
-          insertKline.setTradeNum(0);
-          insertKline.setActiveBuyVolume("0");
-          insertKline.setActiveBuyQuoteVolume("0");
-          filledKlines.add(insertKline);
-        } else if (currentKline instanceof FloatKline floatKline) {
-          FloatKline insertKline = floatKline.deepCopy();
-          insertKline.setOpenTime(expectOpenTime);
-          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
-          insertKline.setHighPrice(floatKline.getClosePrice());
-          insertKline.setLowPrice(floatKline.getClosePrice());
-          insertKline.setOpenPrice(floatKline.getClosePrice());
-          insertKline.setClosePrice(floatKline.getClosePrice());
-          insertKline.setVolume(0);
-          insertKline.setQuoteVolume(0);
-          insertKline.setTradeNum(0);
-          insertKline.setActiveBuyVolume(0);
-          insertKline.setActiveBuyQuoteVolume(0);
-          filledKlines.add(insertKline);
-        } else if (currentKline instanceof DoubleKline doubleKline) {
-          DoubleKline insertKline = doubleKline.deepCopy();
-          insertKline.setOpenTime(expectOpenTime);
-          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
-          insertKline.setHighPrice(doubleKline.getClosePrice());
-          insertKline.setLowPrice(doubleKline.getClosePrice());
-          insertKline.setOpenPrice(doubleKline.getClosePrice());
-          insertKline.setClosePrice(doubleKline.getClosePrice());
-          insertKline.setVolume(0);
-          insertKline.setQuoteVolume(0);
-          insertKline.setTradeNum(0);
-          insertKline.setActiveBuyVolume(0);
-          insertKline.setActiveBuyQuoteVolume(0);
-          filledKlines.add(insertKline);
-        } else if (currentKline instanceof BigDecimalKline bigDecimalKline) {
-          BigDecimalKline insertKline = bigDecimalKline.deepCopy();
-          insertKline.setOpenTime(expectOpenTime);
-          insertKline.setCloseTime(expectOpenTime + intervalEnum.getMills());
-          insertKline.setHighPrice(bigDecimalKline.getClosePrice());
-          insertKline.setLowPrice(bigDecimalKline.getClosePrice());
-          insertKline.setOpenPrice(bigDecimalKline.getClosePrice());
-          insertKline.setClosePrice(bigDecimalKline.getClosePrice());
-          insertKline.setVolume(BigDecimal.ZERO);
-          insertKline.setQuoteVolume(BigDecimal.ZERO);
-          insertKline.setTradeNum(0);
-          insertKline.setActiveBuyVolume(BigDecimal.ZERO);
-          insertKline.setActiveBuyQuoteVolume(BigDecimal.ZERO);
-          filledKlines.add(insertKline);
-        }
+        Kline insertKline = createFilledKline(previousKline, expectOpenTime, intervalEnum);
+        filledKlines.add(insertKline);
+        previousKline = insertKline;
         expectOpenTime += intervalEnum.getMills();
       }
       filledKlines.add(currentKline);
+      previousKline = currentKline;
     }
     return filledKlines;
+  }
+
+  private Kline createFilledKline(Kline previousKline, long openTime, IntervalEnum intervalEnum) {
+    long closeTime = openTime + intervalEnum.getMills() - 1;
+    if (previousKline instanceof StringKline stringKline) {
+      StringKline insertKline = stringKline.deepCopy();
+      insertKline.setOpenTime(openTime);
+      insertKline.setCloseTime(closeTime);
+      insertKline.setHighPrice(stringKline.getClosePrice());
+      insertKline.setLowPrice(stringKline.getClosePrice());
+      insertKline.setOpenPrice(stringKline.getClosePrice());
+      insertKline.setClosePrice(stringKline.getClosePrice());
+      insertKline.setVolume("0");
+      insertKline.setQuoteVolume("0");
+      insertKline.setTradeNum(0);
+      insertKline.setActiveBuyVolume("0");
+      insertKline.setActiveBuyQuoteVolume("0");
+      return insertKline;
+    } else if (previousKline instanceof FloatKline floatKline) {
+      FloatKline insertKline = floatKline.deepCopy();
+      insertKline.setOpenTime(openTime);
+      insertKline.setCloseTime(closeTime);
+      insertKline.setHighPrice(floatKline.getClosePrice());
+      insertKline.setLowPrice(floatKline.getClosePrice());
+      insertKline.setOpenPrice(floatKline.getClosePrice());
+      insertKline.setClosePrice(floatKline.getClosePrice());
+      insertKline.setVolume(0);
+      insertKline.setQuoteVolume(0);
+      insertKline.setTradeNum(0);
+      insertKline.setActiveBuyVolume(0);
+      insertKline.setActiveBuyQuoteVolume(0);
+      return insertKline;
+    } else if (previousKline instanceof DoubleKline doubleKline) {
+      DoubleKline insertKline = doubleKline.deepCopy();
+      insertKline.setOpenTime(openTime);
+      insertKline.setCloseTime(closeTime);
+      insertKline.setHighPrice(doubleKline.getClosePrice());
+      insertKline.setLowPrice(doubleKline.getClosePrice());
+      insertKline.setOpenPrice(doubleKline.getClosePrice());
+      insertKline.setClosePrice(doubleKline.getClosePrice());
+      insertKline.setVolume(0);
+      insertKline.setQuoteVolume(0);
+      insertKline.setTradeNum(0);
+      insertKline.setActiveBuyVolume(0);
+      insertKline.setActiveBuyQuoteVolume(0);
+      return insertKline;
+    } else if (previousKline instanceof BigDecimalKline bigDecimalKline) {
+      BigDecimalKline insertKline = bigDecimalKline.deepCopy();
+      insertKline.setOpenTime(openTime);
+      insertKline.setCloseTime(closeTime);
+      insertKline.setHighPrice(bigDecimalKline.getClosePrice());
+      insertKline.setLowPrice(bigDecimalKline.getClosePrice());
+      insertKline.setOpenPrice(bigDecimalKline.getClosePrice());
+      insertKline.setClosePrice(bigDecimalKline.getClosePrice());
+      insertKline.setVolume(BigDecimal.ZERO);
+      insertKline.setQuoteVolume(BigDecimal.ZERO);
+      insertKline.setTradeNum(0);
+      insertKline.setActiveBuyVolume(BigDecimal.ZERO);
+      insertKline.setActiveBuyQuoteVolume(BigDecimal.ZERO);
+      return insertKline;
+    } else {
+      throw new UnsupportedOperationException();
+    }
   }
 
   @Override
@@ -518,7 +569,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         if (invalidEventOptional.isPresent()) {
           return null;
         }
-        return TICKER_24HR_TOPIC;
+        if (CommonUtil.isArrayMessage(message)) {
+          return TICKER_24HR_TOPIC;
+        }
+        return getTicker24HrStreamTopic(eventTicker24HrEvents.get(0).getSymbol());
       }
       return null;
     };
@@ -534,12 +588,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return;
     }
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-    List<String> subscribeIntervalSymbols = subscribeIntervals.stream()
-        .map(this::getSubscribeSymbols)
-        .flatMap(Collection::stream)
-        .toList();
-    registerExtraTopic(TICKER_24HR_TOPIC);
-    startKlineWebSocketUpdater(subscribeIntervalSymbols.size());
+    Set<String> expectTopics = new HashSet<>(extraSubscribeTopics);
+    expectTopics.addAll(
+        buildNeedSubscribeKlineUpdateTopics(
+            subscribeIntervals.stream().map(IntervalEnum::code).toList()
+        )
+    );
+    expectTopics.addAll(getTicker24HrSubscribeTopics());
+    startKlineWebSocketUpdater(expectTopics.size());
     startKlineRpcUpdater();
     startTicker24HrRpcUpdater();
     startSymbolOfflineCleaner();
@@ -999,6 +1055,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
                     .map(IntervalEnum::code)
                     .collect(Collectors.toSet());
             Set<String> expectTopics = new HashSet<>(extraSubscribeTopics);
+            expectTopics.addAll(getTicker24HrSubscribeTopics());
             Set<String> subscribedTopics = getSubscribedTopics();
 
             Set<String> needSubscribeKlineTopics =

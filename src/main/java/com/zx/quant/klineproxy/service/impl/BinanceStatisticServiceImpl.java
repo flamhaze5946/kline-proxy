@@ -150,13 +150,13 @@ public class BinanceStatisticServiceImpl implements StatisticService {
       BigDecimal currentLow = lows.get(i);
       BigDecimal previousClose;
       if (i == 0) {
-        previousClose = BigDecimal.ZERO;
+        previousClose = closes.get(i);
       } else {
         previousClose = closes.get(i - 1);
       }
       BigDecimal c1 = currentHigh.subtract(currentLow);
-      BigDecimal c2 = currentHigh.subtract(previousClose);
-      BigDecimal c3 = currentLow.subtract(previousClose);
+      BigDecimal c2 = currentHigh.subtract(previousClose).abs();
+      BigDecimal c3 = currentLow.subtract(previousClose).abs();
       BigDecimal tr = c1.max(c2).max(c3);
       trs.add(tr);
     }

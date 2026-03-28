@@ -1,8 +1,12 @@
 package com.zx.quant.klineproxy.util;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zx.quant.klineproxy.model.BinanceErrorResponse;
+import com.zx.quant.klineproxy.model.exceptions.ApiException;
 import java.io.IOException;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.ResponseBody;
+import org.springframework.http.HttpStatus;
 import retrofit2.Call;
 import retrofit2.Response;
 
@@ -14,6 +18,8 @@ import retrofit2.Response;
 public final class ClientUtil {
 
   private static final String DEFAULT_ERROR_MSG = "client call failed.";
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   public static <T> T getResponseBody(Call<T> call) {
     return getResponseBody(call, false, null);
@@ -40,17 +46,29 @@ public final class ClientUtil {
             String errorString = errorBody.string();
             errorMsg = errorString;
             log.warn("call for response failed, code: {}, error body: {}", code, errorString);
+            BinanceErrorResponse errorResponse = convertErrorResponse(errorString);
+            if (errorResponse != null) {
+              throw new ApiException(HttpStatus.valueOf(code), errorResponse.getCode(), errorResponse.getMsg());
+            }
           }
-          throw new RuntimeException(errorMsg);
+          throw new ApiException(HttpStatus.valueOf(code), code, errorMsg);
         }
       }
       T body = response.body();
       if (!bodyAllowNull && body == null) {
-        throw new RuntimeException("body from call: {} is null.");
+        throw new ApiException(HttpStatus.BAD_GATEWAY, -1000, "body from call is null.");
       }
       return body;
     } catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new ApiException(HttpStatus.BAD_GATEWAY, -1001, e.getMessage());
+    }
+  }
+
+  private static BinanceErrorResponse convertErrorResponse(String errorString) {
+    try {
+      return OBJECT_MAPPER.readValue(errorString, BinanceErrorResponse.class);
+    } catch (IOException e) {
+      return null;
     }
   }
 }

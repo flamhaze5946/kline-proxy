@@ -46,21 +46,23 @@ public class BinanceSpotController extends GenericController {
   @GetMapping("ticker/24hr")
   public Object queryTicker24Hr(
       @RequestParam(value = "symbol", required = false) String symbol,
-      @RequestParam(value = "symbols", required = false) List<String> symbols
+      @RequestParam(value = "symbols", required = false) String symbols
   ) {
     List<String> realSymbols = getRealSymbols(symbol, symbols);
+    validateSymbols(realSymbols, exchangeService.querySymbols());
     List<Ticker24Hr> ticker24Hrs = klineService.queryTicker24hrs(realSymbols);
-    return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs);
+    return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, shouldReturnArray(symbol));
   }
 
   @GetMapping("ticker/price")
   public Object queryTicker(
       @RequestParam(value = "symbol", required = false) String symbol,
-      @RequestParam(value = "symbols", required = false) List<String> symbols
+      @RequestParam(value = "symbols", required = false) String symbols
   ) {
     List<String> realSymbols = getRealSymbols(symbol, symbols);
+    validateSymbols(realSymbols, exchangeService.querySymbols());
     List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
-    return ConvertUtil.convertToDisplayTicker(tickers);
+    return ConvertUtil.convertToDisplayTicker(tickers, shouldReturnArray(symbol), false);
   }
 
   @GetMapping("klines")
@@ -71,6 +73,7 @@ public class BinanceSpotController extends GenericController {
       @RequestParam(value = "endTime", required = false) Long endTime,
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
+    validateSymbols(List.of(symbol), exchangeService.querySymbols());
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
     Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
     Object[][] displayKlines = new Object[klines.length][];
@@ -82,4 +85,3 @@ public class BinanceSpotController extends GenericController {
     return displayKlines;
   }
 }
-

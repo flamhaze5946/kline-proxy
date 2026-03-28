@@ -13,6 +13,7 @@ import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
+import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -64,7 +65,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   @Override
   public void afterPropertiesSet() throws Exception {
     refreshServerTimeDelta();
-    serverTimeRefresher.scheduleAtFixedRate(this::refreshServerTimeDelta, 5, 3600, TimeUnit.SECONDS);
+    serverTimeRefresher.scheduleAtFixedRate(new ExceptionSafeRunnable(this::refreshServerTimeDelta), 5, 3600, TimeUnit.SECONDS);
   }
 
   @Override

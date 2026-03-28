@@ -66,12 +66,7 @@ public interface KlineService {
    */
   default Kline[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp) {
     ImmutablePair<Collection<Kline>, Integer> klinesPair = queryKlines(symbol, interval, startTime, endTime, limit, makeUp);
-    Kline[] klineArray = new Kline[klinesPair.getRight()];
-    int index = 0;
-    for (Kline kline : klinesPair.getLeft()) {
-      klineArray[index++] = kline;
-    }
-    return klineArray;
+    return klinesPair.getLeft().toArray(Kline[]::new);
   }
 
   /**

@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Service;
@@ -53,7 +53,7 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   @Override
   public void acquire(String limiterName, int weight) {
     RateLimiterWrapper wrapper = getWrapper(limiterName);
-    while (wrapper.getStopper().get()) {
+    while (System.currentTimeMillis() < wrapper.getStopUntilMillis().get()) {
       CommonUtil.sleep(50);
     }
     CheckedRunnable checkedRunnable = RateLimiter.decorateCheckedRunnable(wrapper.getRateLimiter(), weight, DO_NOTHING);
@@ -63,8 +63,12 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
   @Override
   public void stopAcquire(String limiterName, long mills) {
     RateLimiterWrapper wrapper = getWrapper(limiterName);
-    wrapper.getStopper().set(true);
-    timer.newTimeout(timeout -> wrapper.getStopper().set(false), mills, TimeUnit.MILLISECONDS);
+    long stopUntilMillis = System.currentTimeMillis() + mills;
+    wrapper.getStopUntilMillis().updateAndGet(current -> Math.max(current, stopUntilMillis));
+    timer.newTimeout(timeout -> {
+      long now = System.currentTimeMillis();
+      wrapper.getStopUntilMillis().updateAndGet(current -> current <= now ? 0L : current);
+    }, mills, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -98,7 +102,7 @@ public class RateLimitManagerImpl implements RateLimitManager, InitializingBean 
 
     private final RateLimiter rateLimiter;
 
-    private final AtomicBoolean stopper = new AtomicBoolean(false);
+    private final AtomicLong stopUntilMillis = new AtomicLong(0);
 
     public RateLimiterWrapper(RateLimiter rateLimiter) {
       this.rateLimiter = rateLimiter;

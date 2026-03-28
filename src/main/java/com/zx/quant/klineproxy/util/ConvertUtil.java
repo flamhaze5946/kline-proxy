@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import org.apache.commons.collections4.CollectionUtils;
 
 /**
@@ -53,23 +52,35 @@ public final class ConvertUtil {
   }
 
   public static Object convertToDisplayTicker(List<Ticker<?>> tickers) {
+    return convertToDisplayTicker(tickers, false);
+  }
+
+  public static Object convertToDisplayTicker(List<Ticker<?>> tickers, boolean forceArray) {
+    return convertToDisplayTicker(tickers, forceArray, true);
+  }
+
+  public static Object convertToDisplayTicker(List<Ticker<?>> tickers, boolean forceArray, boolean includeTime) {
     if (CollectionUtils.isEmpty(tickers)) {
       return Collections.emptyList();
     }
-    if (tickers.size() == 1) {
-      return convertToDisplayTicker(tickers.get(0));
+    if (!forceArray && tickers.size() == 1) {
+      return convertToDisplayTicker(tickers.get(0), includeTime);
     } else {
       return tickers.stream()
-          .map(ConvertUtil::convertToDisplayTicker)
+          .map(ticker -> convertToDisplayTicker(ticker, includeTime))
           .collect(Collectors.toList());
     }
   }
 
   public static Object convertToDisplayTicker24hr(List<Ticker24Hr> ticker24Hrs) {
+    return convertToDisplayTicker24hr(ticker24Hrs, false);
+  }
+
+  public static Object convertToDisplayTicker24hr(List<Ticker24Hr> ticker24Hrs, boolean forceArray) {
     if (CollectionUtils.isEmpty(ticker24Hrs)) {
       return Collections.emptyList();
     }
-    if (ticker24Hrs.size() == 1) {
+    if (!forceArray && ticker24Hrs.size() == 1) {
       return convertToDisplayTicker24hr(ticker24Hrs.get(0));
     } else {
       return ticker24Hrs.stream()
@@ -79,12 +90,18 @@ public final class ConvertUtil {
   }
 
   public static Object convertToDisplayTicker(Ticker<?> ticker) {
+    return convertToDisplayTicker(ticker, true);
+  }
+
+  public static Object convertToDisplayTicker(Ticker<?> ticker, boolean includeTime) {
     if (ticker == null) {
       return new Object[0];
     }
     DisplayTicker displayTicker = new DisplayTicker();
     displayTicker.setSymbol(ticker.getSymbol());
-    displayTicker.setTime(ticker.getTime());
+    if (includeTime) {
+      displayTicker.setTime(ticker.getTime());
+    }
     if (ticker instanceof Ticker.StringTicker stringTicker) {
       displayTicker.setPrice(stringTicker.getPrice());
     } else if (ticker instanceof Ticker.FloatTicker floatTicker) {
@@ -220,9 +237,13 @@ public final class ConvertUtil {
     return transformer.apply(item);
   }
 
-  @EqualsAndHashCode(callSuper = true)
   @Data
-  private static class DisplayTicker extends Ticker<String> {
+  private static class DisplayTicker {
+    private String symbol;
+
+    private String price;
+
+    private Long time;
   }
 
   @Data
