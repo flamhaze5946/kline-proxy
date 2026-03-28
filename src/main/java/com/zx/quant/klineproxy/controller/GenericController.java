@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,10 @@ import org.springframework.http.HttpStatus;
  * @author flamhaze5946
  */
 public class GenericController {
+
+  protected static final Set<String> VALID_SYMBOL_STATUSES = Set.of("TRADING", "HALT", "BREAK");
+
+  protected static final Set<String> VALID_TICKER_TYPES = Set.of("FULL", "MINI");
 
   @Autowired
   protected Serializer serializer;
@@ -35,26 +40,21 @@ public class GenericController {
       return new ArrayList<>(realSymbols);
     }
 
-    if (StringUtils.startsWith(StringUtils.trim(symbolsPayload), "[")) {
-      try {
-        String[] symbols = serializer.fromJsonString(symbolsPayload, String[].class);
-        if (symbols == null) {
-          throw invalidSymbolsParameter();
-        }
-        for (String item : symbols) {
-          if (StringUtils.isNotBlank(item)) {
-            realSymbols.add(item);
-          }
-        }
-      } catch (RuntimeException e) {
+    if (!StringUtils.startsWith(StringUtils.trim(symbolsPayload), "[")) {
+      throw invalidSymbolsParameter();
+    }
+    try {
+      String[] symbols = serializer.fromJsonString(symbolsPayload, String[].class);
+      if (symbols == null) {
         throw invalidSymbolsParameter();
       }
-    } else {
-      for (String item : StringUtils.split(symbolsPayload, ",")) {
+      for (String item : symbols) {
         if (StringUtils.isNotBlank(item)) {
-          realSymbols.add(StringUtils.trim(item));
+          realSymbols.add(item);
         }
       }
+    } catch (RuntimeException e) {
+      throw invalidSymbolsParameter();
     }
 
     return new ArrayList<>(realSymbols);
@@ -76,6 +76,27 @@ public class GenericController {
   }
 
   private ApiException invalidSymbolsParameter() {
-    return new ApiException(HttpStatus.BAD_REQUEST, -1100, "Invalid symbols parameter.");
+    return new ApiException(
+        HttpStatus.BAD_REQUEST,
+        -1100,
+        "Illegal characters found in parameter 'symbols'; legal range is '^\\[(\"[\\w\\-._&&[^a-z]]{1,50}\"(,\"[\\w\\-._&&[^a-z]]{1,50}\"){0,}){0,1}\\]$'.");
+  }
+
+  protected void validateTickerType(String type) {
+    if (StringUtils.isBlank(type)) {
+      return;
+    }
+    if (!VALID_TICKER_TYPES.contains(type)) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, -1139, "Invalid ticker type.");
+    }
+  }
+
+  protected void validateSymbolStatus(String symbolStatus) {
+    if (StringUtils.isBlank(symbolStatus)) {
+      return;
+    }
+    if (!VALID_SYMBOL_STATUSES.contains(symbolStatus)) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, -1122, "Invalid symbolStatus.");
+    }
   }
 }

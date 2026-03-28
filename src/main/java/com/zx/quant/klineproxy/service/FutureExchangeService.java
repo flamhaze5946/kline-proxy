@@ -14,7 +14,7 @@ public interface FutureExchangeService<T> extends ExchangeService<T> {
    * query funding rates in all market
    * @return funding rates
    */
-  List<FutureFundingRate> queryFundingRates();
+  List<FutureFundingRate> queryFundingRates(String symbol, Long startTime, Long endTime, Integer limit);
 
   /**
    * query premium indices

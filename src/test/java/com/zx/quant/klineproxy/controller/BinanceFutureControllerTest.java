@@ -1,12 +1,15 @@
 package com.zx.quant.klineproxy.controller;
 
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.zx.quant.klineproxy.config.GlobalExceptionConfig;
 import com.zx.quant.klineproxy.config.SerializeConfig;
+import com.zx.quant.klineproxy.model.FutureFundingRate;
+import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
@@ -64,5 +67,51 @@ class BinanceFutureControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.symbol").value("BTCUSDT"))
         .andExpect(jsonPath("$.price").value("100"));
+  }
+
+  @Test
+  void shouldReturnFundingRateFieldsAsStringsAndPassParams() throws Exception {
+    FutureFundingRate fundingRate = new FutureFundingRate();
+    fundingRate.setSymbol("BTCUSDT");
+    fundingRate.setFundingTime(1L);
+    fundingRate.setFundingRate(new BigDecimal("0.0001"));
+    fundingRate.setMarkPrice(new BigDecimal("100"));
+    given(exchangeService.querySymbols()).willReturn(List.of("BTCUSDT"));
+    given(exchangeService.queryFundingRates("BTCUSDT", 10L, 20L, 30))
+        .willReturn(List.of(fundingRate));
+
+    mockMvc.perform(get("/fapi/v1/fundingRate")
+            .param("symbol", "BTCUSDT")
+            .param("startTime", "10")
+            .param("endTime", "20")
+            .param("limit", "30"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].symbol").value("BTCUSDT"))
+        .andExpect(jsonPath("$[0].fundingRate").value("0.0001"))
+        .andExpect(jsonPath("$[0].markPrice").value("100"));
+    verify(exchangeService).queryFundingRates("BTCUSDT", 10L, 20L, 30);
+  }
+
+  @Test
+  void shouldReturnPremiumIndexFieldsAsStrings() throws Exception {
+    FuturePremiumIndex premiumIndex = new FuturePremiumIndex();
+    premiumIndex.setSymbol("BTCUSDT");
+    premiumIndex.setMarkPrice(new BigDecimal("100"));
+    premiumIndex.setIndexPrice(new BigDecimal("101"));
+    premiumIndex.setEstimatedSettlePrice(new BigDecimal("102"));
+    premiumIndex.setLastFundingRate(new BigDecimal("0.0001"));
+    premiumIndex.setInterestRate(new BigDecimal("0.0002"));
+    premiumIndex.setNextFundingTime(2L);
+    premiumIndex.setTime(3L);
+    given(exchangeService.querySymbols()).willReturn(List.of("BTCUSDT"));
+    given(exchangeService.queryPremiumIndex("BTCUSDT")).willReturn(premiumIndex);
+
+    mockMvc.perform(get("/fapi/v1/premiumIndex").param("symbol", "BTCUSDT"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.symbol").value("BTCUSDT"))
+        .andExpect(jsonPath("$.markPrice").value("100"))
+        .andExpect(jsonPath("$.indexPrice").value("101"))
+        .andExpect(jsonPath("$.lastFundingRate").value("0.0001"))
+        .andExpect(jsonPath("$.interestRate").value("0.0002"));
   }
 }

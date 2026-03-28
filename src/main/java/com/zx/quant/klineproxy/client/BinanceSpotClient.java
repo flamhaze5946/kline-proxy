@@ -26,6 +26,16 @@ public interface BinanceSpotClient {
       @Query("limit") Integer limit
   );
 
+  @GET("api/v3/klines")
+  Call<List<Object[]>> getKlines(
+      @Query("symbol") String symbol,
+      @Query("interval") String interval,
+      @Query("startTime") Long startTime,
+      @Query("endTime") Long endTime,
+      @Query("limit") Integer limit,
+      @Query("timeZone") String timeZone
+  );
+
   @GET("api/v3/ticker/24hr")
   Call<List<Ticker24Hr>> getTicker24hr();
 
@@ -38,6 +48,9 @@ public interface BinanceSpotClient {
   Call<List<Ticker24Hr>> getSymbolsTicker24hr(
       @Query("symbols") String symbols
   );
+
+  @GET("api/v3/ticker/price")
+  Call<List<Ticker.BigDecimalTicker>> getTickerPrices();
 
   @GET("api/v3/ticker/price")
   Call<Ticker.BigDecimalTicker> getSymbolTickerPrice(

@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.controller;
 
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
+import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
 import com.zx.quant.klineproxy.client.model.BinanceFutureServerTime;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.Kline;
@@ -46,8 +47,17 @@ public class BinanceFutureController extends GenericController {
   }
 
   @GetMapping("fundingRate")
-  public List<FutureFundingRate> queryFundingRate() {
-    return exchangeService.queryFundingRates();
+  public Object queryFundingRate(
+      @RequestParam(value = "symbol", required = false) String symbol,
+      @RequestParam(value = "startTime", required = false) Long startTime,
+      @RequestParam(value = "endTime", required = false) Long endTime,
+      @RequestParam(value = "limit", required = false) Integer limit
+  ) {
+    if (StringUtils.isNotBlank(symbol)) {
+      validateSymbols(List.of(symbol), allSymbols(exchangeService.queryExchange()));
+    }
+    List<FutureFundingRate> fundingRates = exchangeService.queryFundingRates(symbol, startTime, endTime, limit);
+    return ConvertUtil.convertToDisplayFundingRates(fundingRates);
   }
 
   @GetMapping("premiumIndex")
@@ -55,10 +65,10 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "symbol", required = false) String symbol
   ) {
     if (StringUtils.isNotBlank(symbol)) {
-      validateSymbols(List.of(symbol), exchangeService.querySymbols());
-      return exchangeService.queryPremiumIndex(symbol);
+      validateSymbols(List.of(symbol), allSymbols(exchangeService.queryExchange()));
+      return ConvertUtil.convertToDisplayPremiumIndex(exchangeService.queryPremiumIndex(symbol));
     } else {
-      return exchangeService.queryPremiumIndices();
+      return ConvertUtil.convertToDisplayPremiumIndices(exchangeService.queryPremiumIndices());
     }
   }
 
@@ -67,7 +77,7 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "symbol", required = false) String symbol
   ) {
     List<String> realSymbols = StringUtils.isNotBlank(symbol) ? List.of(symbol) : List.of();
-    validateSymbols(realSymbols, exchangeService.querySymbols());
+    validateSymbols(realSymbols, allSymbols(exchangeService.queryExchange()));
     List<Ticker24Hr> ticker24Hrs = klineService.queryTicker24hrs(realSymbols);
     return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, shouldReturnArray(symbol));
   }
@@ -77,7 +87,7 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "symbol", required = false) String symbol
   ) {
     List<String> realSymbols = StringUtils.isNotBlank(symbol) ? List.of(symbol) : List.of();
-    validateSymbols(realSymbols, exchangeService.querySymbols());
+    validateSymbols(realSymbols, allSymbols(exchangeService.queryExchange()));
     List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
     return ConvertUtil.convertToDisplayTicker(tickers, shouldReturnArray(symbol));
   }
@@ -90,7 +100,7 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "endTime", required = false) Long endTime,
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
-    validateSymbols(List.of(symbol), exchangeService.querySymbols());
+    validateSymbols(List.of(symbol), allSymbols(exchangeService.queryExchange()));
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
     Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
     Object[][] displayKlines = new Object[klines.length][];
@@ -100,5 +110,14 @@ public class BinanceFutureController extends GenericController {
       displayKlines[i] = displayKline;
     }
     return displayKlines;
+  }
+
+  private List<String> allSymbols(BinanceFutureExchange exchange) {
+    if (exchange == null || exchange.getSymbols() == null || exchange.getSymbols().isEmpty()) {
+      return exchangeService.querySymbols();
+    }
+    return exchange.getSymbols().stream()
+        .map(BinanceFutureSymbol::getSymbol)
+        .toList();
   }
 }

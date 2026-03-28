@@ -5,6 +5,8 @@ import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
 import com.zx.quant.klineproxy.model.Kline.DoubleKline;
 import com.zx.quant.klineproxy.model.Kline.FloatKline;
 import com.zx.quant.klineproxy.model.Kline.StringKline;
+import com.zx.quant.klineproxy.model.FutureFundingRate;
+import com.zx.quant.klineproxy.model.FuturePremiumIndex;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import java.math.BigDecimal;
@@ -73,18 +75,22 @@ public final class ConvertUtil {
   }
 
   public static Object convertToDisplayTicker24hr(List<Ticker24Hr> ticker24Hrs) {
-    return convertToDisplayTicker24hr(ticker24Hrs, false);
+    return convertToDisplayTicker24hr(ticker24Hrs, false, false);
   }
 
   public static Object convertToDisplayTicker24hr(List<Ticker24Hr> ticker24Hrs, boolean forceArray) {
+    return convertToDisplayTicker24hr(ticker24Hrs, forceArray, false);
+  }
+
+  public static Object convertToDisplayTicker24hr(List<Ticker24Hr> ticker24Hrs, boolean forceArray, boolean mini) {
     if (CollectionUtils.isEmpty(ticker24Hrs)) {
       return Collections.emptyList();
     }
     if (!forceArray && ticker24Hrs.size() == 1) {
-      return convertToDisplayTicker24hr(ticker24Hrs.get(0));
+      return convertToDisplayTicker24hr(ticker24Hrs.get(0), mini);
     } else {
       return ticker24Hrs.stream()
-          .map(ConvertUtil::convertToDisplayTicker24hr)
+          .map(ticker24Hr -> convertToDisplayTicker24hr(ticker24Hr, mini))
           .collect(Collectors.toList());
     }
   }
@@ -115,8 +121,28 @@ public final class ConvertUtil {
   }
 
   public static Object convertToDisplayTicker24hr(Ticker24Hr ticker24Hr) {
+    return convertToDisplayTicker24hr(ticker24Hr, false);
+  }
+
+  public static Object convertToDisplayTicker24hr(Ticker24Hr ticker24Hr, boolean mini) {
     if (ticker24Hr == null) {
       return new Object[0];
+    }
+    if (mini) {
+      DisplayMiniTicker24Hr displayTicker24Hr = new DisplayMiniTicker24Hr();
+      displayTicker24Hr.setSymbol(ticker24Hr.getSymbol());
+      displayTicker24Hr.setOpenPrice(decimalToString(ticker24Hr.getOpenPrice()));
+      displayTicker24Hr.setHighPrice(decimalToString(ticker24Hr.getHighPrice()));
+      displayTicker24Hr.setLowPrice(decimalToString(ticker24Hr.getLowPrice()));
+      displayTicker24Hr.setLastPrice(decimalToString(ticker24Hr.getLastPrice()));
+      displayTicker24Hr.setVolume(decimalToString(ticker24Hr.getVolume()));
+      displayTicker24Hr.setQuoteVolume(decimalToString(ticker24Hr.getQuoteVolume()));
+      displayTicker24Hr.setOpenTime(ticker24Hr.getOpenTime());
+      displayTicker24Hr.setCloseTime(ticker24Hr.getCloseTime());
+      displayTicker24Hr.setFirstId(ticker24Hr.getFirstId());
+      displayTicker24Hr.setLastId(ticker24Hr.getLastId());
+      displayTicker24Hr.setCount(ticker24Hr.getCount());
+      return displayTicker24Hr;
     }
     DisplayTicker24Hr displayTicker24Hr = new DisplayTicker24Hr();
     displayTicker24Hr.setSymbol(ticker24Hr.getSymbol());
@@ -142,6 +168,40 @@ public final class ConvertUtil {
     displayTicker24Hr.setCount(ticker24Hr.getCount());
 
     return displayTicker24Hr;
+  }
+
+  public static List<DisplayFundingRate> convertToDisplayFundingRates(List<FutureFundingRate> fundingRates) {
+    if (CollectionUtils.isEmpty(fundingRates)) {
+      return Collections.emptyList();
+    }
+    return fundingRates.stream()
+        .map(ConvertUtil::convertToDisplayFundingRate)
+        .collect(Collectors.toList());
+  }
+
+  public static Object convertToDisplayPremiumIndex(FuturePremiumIndex premiumIndex) {
+    if (premiumIndex == null) {
+      return new Object[0];
+    }
+    DisplayFuturePremiumIndex displayPremiumIndex = new DisplayFuturePremiumIndex();
+    displayPremiumIndex.setSymbol(premiumIndex.getSymbol());
+    displayPremiumIndex.setMarkPrice(decimalToString(premiumIndex.getMarkPrice()));
+    displayPremiumIndex.setIndexPrice(decimalToString(premiumIndex.getIndexPrice()));
+    displayPremiumIndex.setEstimatedSettlePrice(decimalToString(premiumIndex.getEstimatedSettlePrice()));
+    displayPremiumIndex.setLastFundingRate(decimalToString(premiumIndex.getLastFundingRate()));
+    displayPremiumIndex.setInterestRate(decimalToString(premiumIndex.getInterestRate()));
+    displayPremiumIndex.setNextFundingTime(premiumIndex.getNextFundingTime());
+    displayPremiumIndex.setTime(premiumIndex.getTime());
+    return displayPremiumIndex;
+  }
+
+  public static Object convertToDisplayPremiumIndices(List<FuturePremiumIndex> premiumIndices) {
+    if (CollectionUtils.isEmpty(premiumIndices)) {
+      return Collections.emptyList();
+    }
+    return premiumIndices.stream()
+        .map(ConvertUtil::convertToDisplayPremiumIndex)
+        .collect(Collectors.toList());
   }
 
   public static Object[] convertToDisplayKline(Kline kline) {
@@ -289,5 +349,71 @@ public final class ConvertUtil {
     private Long lastId;
 
     private Long count;
+  }
+
+  @Data
+  private static class DisplayMiniTicker24Hr {
+    private String symbol;
+
+    private String openPrice;
+
+    private String highPrice;
+
+    private String lowPrice;
+
+    private String lastPrice;
+
+    private String volume;
+
+    private String quoteVolume;
+
+    private Long openTime;
+
+    private Long closeTime;
+
+    private Long firstId;
+
+    private Long lastId;
+
+    private Long count;
+  }
+
+  @Data
+  public static class DisplayFundingRate {
+    private String symbol;
+
+    private Long fundingTime;
+
+    private String fundingRate;
+
+    private String markPrice;
+  }
+
+  @Data
+  private static class DisplayFuturePremiumIndex {
+    private String symbol;
+
+    private String markPrice;
+
+    private String indexPrice;
+
+    private String estimatedSettlePrice;
+
+    private String lastFundingRate;
+
+    private Long nextFundingTime;
+
+    private String interestRate;
+
+    private Long time;
+  }
+
+  private static DisplayFundingRate convertToDisplayFundingRate(FutureFundingRate fundingRate) {
+    DisplayFundingRate displayFundingRate = new DisplayFundingRate();
+    displayFundingRate.setSymbol(fundingRate.getSymbol());
+    displayFundingRate.setFundingTime(fundingRate.getFundingTime());
+    displayFundingRate.setFundingRate(decimalToString(fundingRate.getFundingRate()));
+    displayFundingRate.setMarkPrice(decimalToString(fundingRate.getMarkPrice()));
+    return displayFundingRate;
   }
 }

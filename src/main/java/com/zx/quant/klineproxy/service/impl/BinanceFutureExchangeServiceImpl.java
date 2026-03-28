@@ -17,14 +17,11 @@ import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
@@ -39,8 +36,6 @@ import retrofit2.Call;
 @Service("binanceFutureExchangeService")
 public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<BinanceFutureExchange>, InitializingBean {
 
-  private static final int MAX_FUNDING_RATE_LIMIT = 1000;
-
   private static final String VALID_SYMBOL_STATUS = "TRADING";
 
   private static final String SERVER_TIME_REFRESHER_GROUP = "futureServerTimeRefresher";
@@ -49,10 +44,6 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       ThreadFactoryUtil.getNamedThreadFactory(SERVER_TIME_REFRESHER_GROUP));
 
   private final LoadingCache<String, BinanceFutureExchange> exchangeCache = buildExchangeCache();
-
-  private final LoadingCache<String, List<FutureFundingRate>> fundingRatesCache = buildFundingRatesCache();
-
-  private final LoadingCache<String, Map<String, FuturePremiumIndex>> premiumIndicesCache = buildPremiumIndicesCache();
 
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
 
@@ -81,18 +72,26 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   }
 
   @Override
-  public List<FutureFundingRate> queryFundingRates() {
-    return fundingRatesCache.get(StringUtils.EMPTY);
+  public List<FutureFundingRate> queryFundingRates(String symbol, Long startTime, Long endTime, Integer limit) {
+    Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates(symbol, startTime, endTime, limit);
+    List<FutureFundingRate> rates = ClientUtil.getResponseBody(ratesCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+    return rates == null ? List.of() : rates;
   }
 
   @Override
   public List<FuturePremiumIndex> queryPremiumIndices() {
-    return Lists.newArrayList(premiumIndicesCache.get(StringUtils.EMPTY).values());
+    Call<List<FuturePremiumIndex>> indicesCall = binanceFutureClient.getSymbolPremiumIndices();
+    List<FuturePremiumIndex> indices = ClientUtil.getResponseBody(indicesCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+    return indices == null ? List.of() : indices;
   }
 
   @Override
   public FuturePremiumIndex queryPremiumIndex(String symbol) {
-    return premiumIndicesCache.get(StringUtils.EMPTY).get(symbol);
+    Call<FuturePremiumIndex> premiumIndexCall = binanceFutureClient.getSymbolPremiumIndex(symbol);
+    return ClientUtil.getResponseBody(premiumIndexCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
   }
 
   @Override
@@ -125,43 +124,4 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
         });
   }
 
-  private LoadingCache<String, List<FutureFundingRate>> buildFundingRatesCache() {
-    return Caffeine.newBuilder()
-        .maximumSize(1)
-        .expireAfterWrite(Duration.of(10, ChronoUnit.MINUTES))
-        .refreshAfterWrite(5, TimeUnit.MINUTES)
-        .build(s -> {
-          Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates(MAX_FUNDING_RATE_LIMIT);
-          List<FutureFundingRate> rates = ClientUtil.getResponseBody(ratesCall,
-              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
-          Map<String, FutureFundingRate> symbolRateMap = rates.stream()
-              .collect(Collectors.toMap(FutureFundingRate::getSymbol, Function.identity(), (o, n) -> {
-                if (o.getFundingTime() == null) {
-                  return n;
-                }
-                if (n.getFundingTime() == null) {
-                  return o;
-                }
-                if (o.getFundingTime() > n.getFundingTime()) {
-                  return o;
-                }
-                return n;
-              }));
-          return Collections.unmodifiableList(Lists.newArrayList(symbolRateMap.values()));
-        });
-  }
-
-  private LoadingCache<String, Map<String, FuturePremiumIndex>> buildPremiumIndicesCache() {
-    return Caffeine.newBuilder()
-        .maximumSize(1)
-        .expireAfterWrite(Duration.of(20, ChronoUnit.MINUTES))
-        .refreshAfterWrite(10, TimeUnit.MINUTES)
-        .build(s -> {
-          Call<List<FuturePremiumIndex>> indicesCall = binanceFutureClient.getSymbolPremiumIndices();
-          List<FuturePremiumIndex> indices = ClientUtil.getResponseBody(indicesCall,
-              () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
-          return indices.stream()
-              .collect(Collectors.toMap(FuturePremiumIndex::getSymbol, Function.identity()));
-        });
-  }
 }

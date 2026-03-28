@@ -217,6 +217,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return Collections.emptyList();
   }
 
+  protected List<Ticker<?>> queryTickers0() {
+    return Collections.emptyList();
+  }
+
   protected List<Ticker<?>> queryTickersBySymbols(Collection<String> symbols) {
     return Collections.emptyList();
   }
@@ -225,6 +229,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   public List<Ticker<?>> queryTickers(Collection<String> symbols) {
     if (CollectionUtils.isNotEmpty(symbols)) {
       List<Ticker<?>> realtimeTickers = queryTickersBySymbols(symbols);
+      if (CollectionUtils.isNotEmpty(realtimeTickers)) {
+        return realtimeTickers;
+      }
+    } else {
+      List<Ticker<?>> realtimeTickers = queryTickers0();
       if (CollectionUtils.isNotEmpty(realtimeTickers)) {
         return realtimeTickers;
       }
@@ -271,8 +280,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
     if (CollectionUtils.isEmpty(symbols)) {
-      return ticker24HrCache.asMap().values().stream()
-          .toList();
+      List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24Hrs();
+      ticker24HrCache.putAll(realtimeTicker24Hrs.stream()
+          .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n)));
+      return realtimeTicker24Hrs;
     }
     return symbols.stream()
         .map(ticker24HrCache::getIfPresent)

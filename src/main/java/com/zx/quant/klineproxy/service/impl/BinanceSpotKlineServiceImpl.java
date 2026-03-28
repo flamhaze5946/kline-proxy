@@ -66,6 +66,15 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   }
 
   @Override
+  protected List<com.zx.quant.klineproxy.model.Ticker<?>> queryTickers0() {
+    rateLimitManager.acquire(getRateLimiterName(), 4);
+    Call<List<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker>> tickerCall = binanceSpotClient.getTickerPrices();
+    List<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker> tickers = ClientUtil.getResponseBody(tickerCall,
+        () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
+    return tickers == null ? List.of() : List.copyOf(tickers);
+  }
+
+  @Override
   protected long getServerTime() {
     return exchangeService.queryServerTime();
   }
