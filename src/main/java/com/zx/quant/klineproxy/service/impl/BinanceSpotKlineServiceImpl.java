@@ -153,4 +153,9 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   protected String getServiceType() {
     return SERVICE_TYPE;
   }
+
+  @Override
+  protected String getPersistenceServiceCode() {
+    return "spot";
+  }
 }

@@ -22,12 +22,15 @@ import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
+import com.zx.quant.klineproxy.model.config.KlinePersistenceProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
 import com.zx.quant.klineproxy.model.exceptions.ApiException;
+import com.zx.quant.klineproxy.model.persistence.PersistedKlineRow;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
+import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ConvertUtil;
@@ -36,8 +39,12 @@ import com.zx.quant.klineproxy.util.Serializer;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
+import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -161,6 +168,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final AtomicLong lastAllMarketTicker24HrAccessTime = new AtomicLong(0L);
 
+  private final Set<KlineSetKey> dirtyPersistenceKeys = ConcurrentHashMap.newKeySet();
+
   private volatile ExpectedTopicsSnapshot expectedTopicsSnapshot;
 
   @Autowired
@@ -171,6 +180,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Autowired
   protected Serializer serializer;
+
+  @Autowired
+  private KlinePersistenceStore klinePersistenceStore;
+
+  @Autowired
+  private KlinePersistenceProperties persistenceProperties;
 
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
@@ -211,6 +226,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected abstract int getTicker24HrsWeight();
 
   protected abstract String getServiceType();
+
+  protected abstract String getPersistenceServiceCode();
 
   protected long getServerTime() {
     return System.currentTimeMillis();
@@ -366,13 +383,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     klinesToUpdate.addAll(klines);
     klinesToUpdate = fillKlines(klinesToUpdate, intervalEnum);
+    boolean updated = false;
     for (Kline kline : klinesToUpdate) {
       Kline existKline = klineMap.get(kline.getOpenTime());
       if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
         klineMap.put(kline.getOpenTime(), kline);
+        updated = true;
       }
     }
     trimKlinesIfNeeded(klineSet, intervalEnum);
+    if (updated && isPersistenceEnabled()) {
+      dirtyPersistenceKeys.add(klineSetKey);
+    }
   }
 
   private List<Kline> fillKlines(List<Kline> klines, IntervalEnum intervalEnum) {
@@ -468,6 +490,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Override
   public void afterPropertiesSet() throws Exception {
     start();
+  }
+
+  @PreDestroy
+  public void dumpPersistedKlinesOnShutdown() {
+    if (!isPersistenceEnabled() || !persistenceProperties.isDumpOnShutdown()) {
+      return;
+    }
+    dumpPersistedKlines(true);
   }
 
   protected List<IntervalEnum> getSubscribeIntervals() {
@@ -598,12 +628,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return;
     }
     expectedTopicsSnapshot = null;
+    Set<KlineSetKey> configuredKlineSetKeys = buildConfiguredKlineSetKeys();
+    Set<KlineSetKey> restoredKlineSetKeys = restorePersistedKlines(configuredKlineSetKeys);
     Set<String> expectTopics = buildExpectedTopics();
     startKlineWebSocketUpdater(expectTopics.size());
+    startPersistedKlineWarmup(restoredKlineSetKeys, configuredKlineSetKeys);
     startKlineRpcUpdater();
     startTicker24HrRpcUpdater();
     startAllMarketSnapshotUpdater();
     startSymbolOfflineCleaner();
+    startKlinePersistenceUpdater();
   }
 
   protected void registerExtraTopic(String topic) {
@@ -1103,6 +1137,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           }
           for (KlineSetKey klineSetKey : offlineKlineSetKeys) {
             klineSetMap.remove(klineSetKey);
+            cleanupPersistedKlines(klineSetKey);
             log.info("symbol: {} offline, kline set of interval: {} removed", klineSetKey.getSymbol(), klineSetKey.getInterval());
           }
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
@@ -1155,6 +1190,17 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
             log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
           }, MANAGE_EXECUTOR).join();
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+  }
+
+  private void startKlinePersistenceUpdater() {
+    if (!isPersistenceEnabled()) {
+      return;
+    }
+    long dumpIntervalSeconds = Math.max(1, persistenceProperties.getDumpIntervalSeconds());
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        new ExceptionSafeRunnable(() -> dumpPersistedKlines(false)),
+        dumpIntervalSeconds, dumpIntervalSeconds, TimeUnit.SECONDS
+    );
   }
 
   private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals) {
@@ -1239,7 +1285,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalSyncConfig == null || intervalSyncConfig.getMinMaintainCount() == null) {
       return;
     }
-    Integer minMaintainCount = intervalSyncConfig.getMinMaintainCount();
+    int minMaintainCount = getEffectiveMaintainCount(klineSet.getKey().getSymbol(), intervalEnum);
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
     if (klineMap.size() <= minMaintainCount + KLINE_TRIM_BUFFER) {
       return;
@@ -1442,6 +1488,232 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private NumberTypeEnum getNumberType() {
     return CommonUtil.getEnumByCode(numberType, NumberTypeEnum.class);
+  }
+
+  private boolean isPersistenceEnabled() {
+    return persistenceProperties != null && persistenceProperties.isEnabled();
+  }
+
+  private void startPersistedKlineWarmup(Set<KlineSetKey> restoredKlineSetKeys,
+                                         Set<KlineSetKey> configuredKlineSetKeys) {
+    if (!isPersistenceEnabled() || CollectionUtils.isEmpty(restoredKlineSetKeys)
+        && CollectionUtils.isEmpty(configuredKlineSetKeys)) {
+      return;
+    }
+    CompletableFuture.runAsync(() -> {
+      warmUpPersistedKlines(restoredKlineSetKeys);
+      reconcilePersistedKlines(configuredKlineSetKeys);
+    }, MANAGE_EXECUTOR);
+  }
+
+  private Set<KlineSetKey> restorePersistedKlines(Set<KlineSetKey> configuredKlineSetKeys) {
+    if (!isPersistenceEnabled() || !persistenceProperties.isLoadOnStartup()
+        || CollectionUtils.isEmpty(configuredKlineSetKeys)) {
+      return Set.of();
+    }
+    Set<KlineSetKey> restoredKeys = new HashSet<>();
+    for (KlineSetKey configuredKey : configuredKlineSetKeys) {
+      IntervalEnum intervalEnum = CommonUtil.getEnumByCode(configuredKey.getInterval(), IntervalEnum.class);
+      if (intervalEnum == null) {
+        continue;
+      }
+      int maxStoreCount = getPersistenceMaxStoreCount(configuredKey.getSymbol(), intervalEnum);
+      List<PersistedKlineRow> persistedRows = klinePersistenceStore.loadRows(
+          getPersistenceServiceCode(), configuredKey.getInterval(), configuredKey.getSymbol(), maxStoreCount);
+      if (CollectionUtils.isEmpty(persistedRows)) {
+        continue;
+      }
+      List<Kline> persistedKlines = persistedRows.stream()
+          .map(this::persistedRowToKline)
+          .filter(Objects::nonNull)
+          .toList();
+      if (CollectionUtils.isEmpty(persistedKlines)) {
+        continue;
+      }
+      restoreKlines(configuredKey, intervalEnum, persistedKlines);
+      restoredKeys.add(configuredKey);
+    }
+    if (CollectionUtils.isNotEmpty(restoredKeys)) {
+      log.info("restored {} persisted kline series for {}", restoredKeys.size(), getClass().getSimpleName());
+    }
+    return restoredKeys;
+  }
+
+  private void warmUpPersistedKlines(Set<KlineSetKey> restoredKlineSetKeys) {
+    if (CollectionUtils.isEmpty(restoredKlineSetKeys)) {
+      return;
+    }
+    List<Runnable> warmupTasks = restoredKlineSetKeys.stream()
+        .<Runnable>map(klineSetKey -> () -> {
+          IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
+          if (intervalEnum == null) {
+            return;
+          }
+          int maxStoreCount = getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum);
+          List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(
+              klineSetKey.getSymbol(), null, getServerTime(), intervalEnum, maxStoreCount, true);
+          if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
+            return;
+          }
+          fetchAndStoreKlines(klineSetKey.getSymbol(), klineSetKey.getInterval(),
+              filterMakeUpTimeRangesByOnboardTime(klineSetKey.getSymbol(), makeUpTimeRanges), 1, MANAGE_EXECUTOR);
+        }).toList();
+    runTasksWithLimitedWorkers(warmupTasks, MAX_RPC_SYNC_WORKERS, MANAGE_EXECUTOR);
+  }
+
+  private void reconcilePersistedKlines(Set<KlineSetKey> configuredKlineSetKeys) {
+    if (CollectionUtils.isEmpty(configuredKlineSetKeys)) {
+      return;
+    }
+    long currentTime = getServerTime();
+    for (KlineSetKey klineSetKey : configuredKlineSetKeys) {
+      dumpPersistedKlineSet(klineSetKey, currentTime);
+      dirtyPersistenceKeys.remove(klineSetKey);
+    }
+  }
+
+  private void dumpPersistedKlines(boolean force) {
+    if (!isPersistenceEnabled()) {
+      return;
+    }
+    Set<KlineSetKey> keys = force ? new HashSet<>(klineSetMap.keySet()) : new HashSet<>(dirtyPersistenceKeys);
+    if (CollectionUtils.isEmpty(keys)) {
+      return;
+    }
+    long currentTime = getServerTime();
+    for (KlineSetKey key : keys) {
+      dumpPersistedKlineSet(key, currentTime);
+      dirtyPersistenceKeys.remove(key);
+    }
+  }
+
+  private void dumpPersistedKlineSet(KlineSetKey klineSetKey, long currentTime) {
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
+    if (intervalEnum == null) {
+      return;
+    }
+    KlineSet klineSet = klineSetMap.get(klineSetKey);
+    Collection<Kline> sourceKlines = klineSet == null ? List.of() : klineSet.getKlineMap().values();
+    List<PersistedKlineRow> persistedRows = sourceKlines.stream()
+        .filter(kline -> isClosedKline(kline, currentTime))
+        .sorted(Comparator.comparingLong(Kline::getOpenTime))
+        .map(this::toPersistedKlineRow)
+        .toList();
+    klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
+        klineSetKey.getSymbol(), persistedRows,
+        getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), currentTime);
+  }
+
+  private void cleanupPersistedKlines(KlineSetKey klineSetKey) {
+    if (!isPersistenceEnabled()) {
+      return;
+    }
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
+    if (intervalEnum == null) {
+      return;
+    }
+    klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
+        klineSetKey.getSymbol(), List.of(),
+        getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), getServerTime());
+    dirtyPersistenceKeys.remove(klineSetKey);
+  }
+
+  private void restoreKlines(KlineSetKey klineSetKey, IntervalEnum intervalEnum, List<Kline> klines) {
+    KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
+    NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+    for (Kline kline : klines) {
+      Kline existKline = klineMap.get(kline.getOpenTime());
+      if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
+        klineMap.put(kline.getOpenTime(), kline);
+      }
+    }
+    trimKlinesIfNeeded(klineSet, intervalEnum);
+  }
+
+  private boolean isClosedKline(Kline kline, long currentTime) {
+    return kline != null && currentTime > kline.getCloseTime();
+  }
+
+  private PersistedKlineRow toPersistedKlineRow(Kline kline) {
+    Object[] displayKline = ConvertUtil.convertToDisplayKline(kline);
+    PersistedKlineRow row = new PersistedKlineRow();
+    row.setOpenTime(((Number) displayKline[0]).longValue());
+    row.setOpenPrice(String.valueOf(displayKline[1]));
+    row.setHighPrice(String.valueOf(displayKline[2]));
+    row.setLowPrice(String.valueOf(displayKline[3]));
+    row.setClosePrice(String.valueOf(displayKline[4]));
+    row.setVolume(String.valueOf(displayKline[5]));
+    row.setCloseTime(((Number) displayKline[6]).longValue());
+    row.setQuoteVolume(String.valueOf(displayKline[7]));
+    row.setTradeNum(((Number) displayKline[8]).intValue());
+    row.setActiveBuyVolume(String.valueOf(displayKline[9]));
+    row.setActiveBuyQuoteVolume(String.valueOf(displayKline[10]));
+    return row;
+  }
+
+  private Kline persistedRowToKline(PersistedKlineRow row) {
+    Object[] serverKline = new Object[] {
+        row.getOpenTime(),
+        row.getOpenPrice(),
+        row.getHighPrice(),
+        row.getLowPrice(),
+        row.getClosePrice(),
+        row.getVolume(),
+        row.getCloseTime(),
+        row.getQuoteVolume(),
+        row.getTradeNum(),
+        row.getActiveBuyVolume(),
+        row.getActiveBuyQuoteVolume()
+    };
+    return serverKlineToKline(serverKline);
+  }
+
+  private Set<KlineSetKey> buildConfiguredKlineSetKeys() {
+    List<String> symbols = getSymbols();
+    Set<KlineSetKey> configuredKeys = new HashSet<>();
+    for (IntervalEnum interval : getSubscribeIntervals()) {
+      for (String symbol : getSubscribeSymbols(symbols, interval)) {
+        configuredKeys.add(new KlineSetKey(symbol, interval.code()));
+      }
+    }
+    return configuredKeys;
+  }
+
+  private int getPersistenceMaxStoreCount(String symbol, IntervalEnum intervalEnum) {
+    IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code());
+    int defaultMaxStoreCount = intervalSyncConfig.getMinMaintainCount() * 2;
+    if (!isPersistenceEnabled()) {
+      return defaultMaxStoreCount;
+    }
+    KlinePersistenceProperties.ServicePersistenceConfig servicePersistenceConfig = getPersistenceServiceConfig();
+    KlinePersistenceProperties.IntervalPersistenceConfig intervalPersistenceConfig =
+        servicePersistenceConfig.getIntervalConfigs().get(intervalEnum.code());
+    Integer symbolMaxStoreCount = intervalPersistenceConfig == null
+        ? null
+        : intervalPersistenceConfig.getSymbolMaxStoreCounts().get(symbol);
+    Integer intervalMaxStoreCount = intervalPersistenceConfig == null ? null : intervalPersistenceConfig.getMaxStoreCount();
+    int configuredMaxStoreCount = symbolMaxStoreCount != null
+        ? symbolMaxStoreCount
+        : intervalMaxStoreCount != null ? intervalMaxStoreCount : defaultMaxStoreCount;
+    return Math.max(configuredMaxStoreCount, intervalSyncConfig.getMinMaintainCount());
+  }
+
+  private int getEffectiveMaintainCount(String symbol, IntervalEnum intervalEnum) {
+    IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code());
+    if (intervalSyncConfig == null || intervalSyncConfig.getMinMaintainCount() == null) {
+      return 0;
+    }
+    if (!isPersistenceEnabled()) {
+      return intervalSyncConfig.getMinMaintainCount();
+    }
+    return Math.max(intervalSyncConfig.getMinMaintainCount(), getPersistenceMaxStoreCount(symbol, intervalEnum));
+  }
+
+  private KlinePersistenceProperties.ServicePersistenceConfig getPersistenceServiceConfig() {
+    if (StringUtils.equals(getPersistenceServiceCode(), "future")) {
+      return persistenceProperties.getFuture();
+    }
+    return persistenceProperties.getSpot();
   }
 
   private int getMapSize(NavigableMap<Long, ?> map, IntervalEnum interval) {

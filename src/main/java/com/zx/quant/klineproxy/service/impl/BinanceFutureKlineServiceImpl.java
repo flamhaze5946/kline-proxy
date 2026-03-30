@@ -141,4 +141,9 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   protected String getServiceType() {
     return SERVICE_TYPE;
   }
+
+  @Override
+  protected String getPersistenceServiceCode() {
+    return "future";
+  }
 }

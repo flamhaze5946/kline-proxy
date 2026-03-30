@@ -16,15 +16,21 @@ import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
+import com.zx.quant.klineproxy.model.config.KlinePersistenceProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
+import com.zx.quant.klineproxy.model.persistence.PersistedKlineRow;
+import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class AbstractKlineServiceFillKlinesTest {
 
@@ -168,6 +174,69 @@ class AbstractKlineServiceFillKlinesTest {
     assertTrue(awaitCondition(() -> new BigDecimal("101").equals(service.queryTicker24hrs(List.of()).get(0).getLastPrice())));
   }
 
+  @Test
+  void restoredPersistedKlinesShouldWarmUpOnlyMissingRanges() {
+    long hour = IntervalEnum.ONE_HOUR.getMills();
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
+    KlineSetKey klineSetKey = new KlineSetKey("BTCUSDT", IntervalEnum.ONE_HOUR.code());
+    persistenceStore.setLoadRows("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT", List.of(
+        buildPersistedRow(hour, "101"),
+        buildPersistedRow(hour * 3, "103")));
+    service.configurePersistence(persistenceStore, 4, Map.of());
+    service.setServerTime((hour * 4) + 5_000L);
+    service.putSymbolOnboardTime("BTCUSDT", 0L);
+    service.setQueryKlinesResult(new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 2, hour * 2, 1),
+        List.of(buildKline(hour * 2, "102")));
+    service.setQueryKlinesResult(new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 4, hour * 4, 1),
+        List.of(buildKline(hour * 4, "104")));
+
+    Set<KlineSetKey> restoredKeys = service.invokeRestorePersistedKlines(Set.of(klineSetKey));
+    service.invokeWarmUpPersistedKlines(restoredKeys);
+
+    assertEquals(Set.of(klineSetKey), restoredKeys);
+    assertEquals(4, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
+    assertEquals(List.of(
+            new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 2, hour * 2, 1),
+            new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 4, hour * 4, 1)),
+        service.getQueryRequests());
+    KlineSet klineSet = service.klineSetMap.get(klineSetKey);
+    assertNotNull(klineSet);
+    assertEquals(List.of(hour, hour * 2, hour * 3, hour * 4), new ArrayList<>(klineSet.getKlineMap().keySet()));
+  }
+
+  @Test
+  void dumpPersistedKlinesShouldExcludeUnclosedLastKlineAndUseDefaultMaxStoreCount() {
+    long hour = IntervalEnum.ONE_HOUR.getMills();
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
+    service.configurePersistence(persistenceStore, null, Map.of());
+    service.setServerTime(hour + (hour / 2));
+    service.updateKlines("BTCUSDT", IntervalEnum.ONE_HOUR.code(),
+        List.of(buildKline(0, "100"), buildKline(hour, "101")));
+
+    service.invokeDumpPersistedKlines(true);
+
+    DumpInvocation dumpInvocation = persistenceStore.getLastDumpInvocation("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT");
+    assertNotNull(dumpInvocation);
+    assertEquals(6, dumpInvocation.maxStoreCount());
+    assertEquals(1, dumpInvocation.rows().size());
+    assertEquals(0L, dumpInvocation.rows().get(0).getOpenTime());
+    assertEquals(hour - 1, dumpInvocation.rows().get(0).getCloseTime());
+    assertEquals(service.getServerTimeForTest(), dumpInvocation.currentTime());
+  }
+
+  @Test
+  void restorePersistedKlinesShouldUseSymbolSpecificMaxStoreCountWhenConfigured() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
+    service.configurePersistence(persistenceStore, 4, Map.of("BTCUSDT", 7));
+
+    service.invokeRestorePersistedKlines(Set.of(new KlineSetKey("BTCUSDT", IntervalEnum.ONE_HOUR.code())));
+
+    assertEquals(7, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
+  }
+
   private static boolean awaitCondition(CheckedBooleanSupplier supplier) throws Exception {
     long deadline = System.currentTimeMillis() + 3_000L;
     while (System.currentTimeMillis() < deadline) {
@@ -212,6 +281,66 @@ class AbstractKlineServiceFillKlinesTest {
     return ticker24Hr;
   }
 
+  private static PersistedKlineRow buildPersistedRow(long openTime, String closePrice) {
+    PersistedKlineRow row = new PersistedKlineRow();
+    row.setOpenTime(openTime);
+    row.setOpenPrice(closePrice);
+    row.setHighPrice(closePrice);
+    row.setLowPrice(closePrice);
+    row.setClosePrice(closePrice);
+    row.setVolume("1");
+    row.setCloseTime(openTime + IntervalEnum.ONE_HOUR.getMills() - 1);
+    row.setQuoteVolume("1");
+    row.setTradeNum(1);
+    row.setActiveBuyVolume("1");
+    row.setActiveBuyQuoteVolume("1");
+    return row;
+  }
+
+  private record QueryKlineRequest(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+  }
+
+  private record StoreKey(String service, String interval, String symbol) {
+  }
+
+  private record DumpInvocation(List<PersistedKlineRow> rows, int maxStoreCount, long currentTime) {
+  }
+
+  private static class RecordingPersistenceStore implements KlinePersistenceStore {
+
+    private final Map<StoreKey, List<PersistedKlineRow>> loadRowsByKey = new HashMap<>();
+
+    private final Map<StoreKey, Integer> lastLoadMaxStoreCount = new HashMap<>();
+
+    private final Map<StoreKey, DumpInvocation> lastDumpInvocations = new HashMap<>();
+
+    private void setLoadRows(String service, String interval, String symbol, List<PersistedKlineRow> rows) {
+      loadRowsByKey.put(new StoreKey(service, interval, symbol), List.copyOf(rows));
+    }
+
+    private int getLastLoadMaxStoreCount(String service, String interval, String symbol) {
+      return lastLoadMaxStoreCount.getOrDefault(new StoreKey(service, interval, symbol), 0);
+    }
+
+    private DumpInvocation getLastDumpInvocation(String service, String interval, String symbol) {
+      return lastDumpInvocations.get(new StoreKey(service, interval, symbol));
+    }
+
+    @Override
+    public List<PersistedKlineRow> loadRows(String service, String interval, String symbol, int maxStoreCount) {
+      StoreKey key = new StoreKey(service, interval, symbol);
+      lastLoadMaxStoreCount.put(key, maxStoreCount);
+      return loadRowsByKey.getOrDefault(key, List.of());
+    }
+
+    @Override
+    public void dumpRows(String service, String interval, String symbol, List<PersistedKlineRow> rows,
+                         int maxStoreCount, long currentTime) {
+      lastDumpInvocations.put(new StoreKey(service, interval, symbol),
+          new DumpInvocation(List.copyOf(rows), maxStoreCount, currentTime));
+    }
+  }
+
   private static class TestKlineService extends AbstractKlineService<WebSocketClient> {
 
     private final KlineSyncConfigProperties syncConfig;
@@ -230,6 +359,12 @@ class AbstractKlineServiceFillKlinesTest {
 
     private volatile long realtimeTicker24HrDelayMillis;
 
+    private volatile long serverTime = System.currentTimeMillis();
+
+    private final List<QueryKlineRequest> queryRequests = new ArrayList<>();
+
+    private final Map<QueryKlineRequest, List<Kline>> queryResults = new HashMap<>();
+
     private TestKlineService() {
       IntervalSyncConfig intervalSyncConfig = new IntervalSyncConfig();
       intervalSyncConfig.setMinMaintainCount(3);
@@ -237,6 +372,7 @@ class AbstractKlineServiceFillKlinesTest {
       syncConfig = new KlineSyncConfigProperties();
       syncConfig.setIntervalSyncConfigs(Map.of(IntervalEnum.ONE_HOUR.code(), intervalSyncConfig));
       this.rateLimitManager = mock(RateLimitManager.class);
+      ReflectionTestUtils.setField(this, "numberType", "string");
     }
 
     private void setSymbols(List<String> symbols) {
@@ -271,9 +407,61 @@ class AbstractKlineServiceFillKlinesTest {
       this.realtimeTicker24HrDelayMillis = realtimeTicker24HrDelayMillis;
     }
 
+    private void setServerTime(long serverTime) {
+      this.serverTime = serverTime;
+    }
+
+    private long getServerTimeForTest() {
+      return serverTime;
+    }
+
+    private void configurePersistence(KlinePersistenceStore persistenceStore, Integer intervalMaxStoreCount,
+                                      Map<String, Integer> symbolMaxStoreCounts) {
+      KlinePersistenceProperties persistenceProperties = new KlinePersistenceProperties();
+      persistenceProperties.setEnabled(true);
+      KlinePersistenceProperties.IntervalPersistenceConfig intervalPersistenceConfig =
+          new KlinePersistenceProperties.IntervalPersistenceConfig();
+      intervalPersistenceConfig.setMaxStoreCount(intervalMaxStoreCount);
+      intervalPersistenceConfig.setSymbolMaxStoreCounts(new HashMap<>(symbolMaxStoreCounts));
+      persistenceProperties.getSpot().getIntervalConfigs().put(IntervalEnum.ONE_HOUR.code(), intervalPersistenceConfig);
+      ReflectionTestUtils.setField(this, "persistenceProperties", persistenceProperties);
+      ReflectionTestUtils.setField(this, "klinePersistenceStore", persistenceStore);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void putSymbolOnboardTime(String symbol, long onboardTime) {
+      Map<String, Long> symbolOnboardTimeMap =
+          (Map<String, Long>) ReflectionTestUtils.getField(this, "symbolOnboardTimeMap");
+      assertNotNull(symbolOnboardTimeMap);
+      symbolOnboardTimeMap.put(symbol, onboardTime);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<KlineSetKey> invokeRestorePersistedKlines(Set<KlineSetKey> configuredKlineSetKeys) {
+      return (Set<KlineSetKey>) ReflectionTestUtils.invokeMethod(this, "restorePersistedKlines", configuredKlineSetKeys);
+    }
+
+    private void invokeWarmUpPersistedKlines(Set<KlineSetKey> restoredKlineSetKeys) {
+      ReflectionTestUtils.invokeMethod(this, "warmUpPersistedKlines", restoredKlineSetKeys);
+    }
+
+    private void invokeDumpPersistedKlines(boolean force) {
+      ReflectionTestUtils.invokeMethod(this, "dumpPersistedKlines", force);
+    }
+
+    private void setQueryKlinesResult(QueryKlineRequest request, List<Kline> klines) {
+      queryResults.put(request, List.copyOf(klines));
+    }
+
+    private List<QueryKlineRequest> getQueryRequests() {
+      return List.copyOf(queryRequests);
+    }
+
     @Override
     protected List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
-      return List.of();
+      QueryKlineRequest request = new QueryKlineRequest(symbol, interval, startTime, endTime, limit);
+      queryRequests.add(request);
+      return queryResults.getOrDefault(request, List.of());
     }
 
     @Override
@@ -323,6 +511,16 @@ class AbstractKlineServiceFillKlinesTest {
     @Override
     protected String getServiceType() {
       return "test";
+    }
+
+    @Override
+    protected String getPersistenceServiceCode() {
+      return "spot";
+    }
+
+    @Override
+    protected long getServerTime() {
+      return serverTime;
     }
 
     private void sleep(long delayMillis) {

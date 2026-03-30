@@ -17,6 +17,24 @@ management:
 number:
   type: double
 kline:
+  persistence:
+    enabled: false
+    loadOnStartup: true
+    dumpOnShutdown: true
+    dumpIntervalSeconds: 300
+    rootDir: ./data/kline-cache
+    spot:
+      intervalConfigs:
+        "1h":
+          # default is minMaintainCount * 2 when omitted
+          maxStoreCount: 2000
+          symbolMaxStoreCounts:
+            BTCUSDT: 4000
+    future:
+      intervalConfigs:
+        "1h":
+          # default is minMaintainCount * 2 when omitted
+          maxStoreCount: 2000
   binance:
     spot:
       intervalSyncConfigs:
