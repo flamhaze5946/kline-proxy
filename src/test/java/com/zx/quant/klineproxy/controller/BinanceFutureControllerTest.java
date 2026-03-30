@@ -70,6 +70,24 @@ class BinanceFutureControllerTest {
   }
 
   @Test
+  void shouldReturnAllMarketTickerPriceArrayWithoutSymbol() throws Exception {
+    Ticker.BigDecimalTicker btcTicker = new Ticker.BigDecimalTicker();
+    btcTicker.setSymbol("BTCUSDT");
+    btcTicker.setPrice(new BigDecimal("100"));
+    btcTicker.setTime(123L);
+    Ticker.BigDecimalTicker ethTicker = new Ticker.BigDecimalTicker();
+    ethTicker.setSymbol("ETHUSDT");
+    ethTicker.setPrice(new BigDecimal("200"));
+    ethTicker.setTime(456L);
+    given(klineService.queryTickers(List.of())).willReturn(List.of(btcTicker, ethTicker));
+
+    mockMvc.perform(get("/fapi/v1/ticker/price"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].symbol").value("BTCUSDT"))
+        .andExpect(jsonPath("$[1].symbol").value("ETHUSDT"));
+  }
+
+  @Test
   void shouldReturnFundingRateFieldsAsStringsAndPassParams() throws Exception {
     FutureFundingRate fundingRate = new FutureFundingRate();
     fundingRate.setSymbol("BTCUSDT");

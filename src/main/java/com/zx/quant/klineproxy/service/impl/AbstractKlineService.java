@@ -1,8 +1,8 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.EventKline;
@@ -19,9 +19,9 @@ import com.zx.quant.klineproxy.model.Kline.FloatKline;
 import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
+import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
-import com.zx.quant.klineproxy.model.WebsocketResponse;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
@@ -39,7 +39,6 @@ import io.prometheus.client.Counter;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -56,7 +55,9 @@ import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -66,9 +67,14 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -106,6 +112,20 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final int SYMBOLS_PER_CONNECTION = 150;
 
+  private static final int MAX_RPC_SYNC_WORKERS = 8;
+
+  private static final int MAX_MAKE_UP_WORKERS = 4;
+
+  private static final int KLINE_TRIM_BUFFER = 50;
+
+  private static final long SUBSCRIBE_TOPICS_ADJUST_INTERVAL_MILLS = 30_000L;
+
+  private static final Duration ALL_MARKET_TICKER_CACHE_TTL = Duration.ofMillis(500);
+
+  private static final long ALL_MARKET_SNAPSHOT_REFRESH_IDLE_TIMEOUT_MILLS = 5_000L;
+
+  private static final long ALL_MARKET_SNAPSHOT_REFRESH_CHECK_INTERVAL_MILLS = 100L;
+
   private static final String KLINE_SCHEDULER_GROUP = "symbols-sync";
 
   private static final ScheduledExecutorService SCHEDULE_EXECUTOR_SERVICE = new ScheduledThreadPoolExecutor(4,
@@ -121,11 +141,27 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final Map<String, Long> symbolOnboardTimeMap = new ConcurrentHashMap<>();
 
-  private final Set<String> extraSubscribeTopics = new HashSet<>();
+  private final Set<String> extraSubscribeTopics = ConcurrentHashMap.newKeySet();
 
   private final Cache<String, Ticker24Hr> ticker24HrCache = Caffeine.newBuilder()
       .expireAfterWrite(Duration.ofDays(1))
       .build();
+
+  private final AtomicReference<AllMarketSnapshot<Ticker<?>>> allMarketTickerSnapshot =
+      new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
+
+  private final AtomicReference<AllMarketSnapshot<Ticker24Hr>> allMarketTicker24HrSnapshot =
+      new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
+
+  private final AtomicBoolean refreshingAllMarketTickerSnapshot = new AtomicBoolean(false);
+
+  private final AtomicBoolean refreshingAllMarketTicker24HrSnapshot = new AtomicBoolean(false);
+
+  private final AtomicLong lastAllMarketTickerAccessTime = new AtomicLong(0L);
+
+  private final AtomicLong lastAllMarketTicker24HrAccessTime = new AtomicLong(0L);
+
+  private volatile ExpectedTopicsSnapshot expectedTopicsSnapshot;
 
   @Autowired
   protected RateLimitManager rateLimitManager;
@@ -141,31 +177,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Value("${number.type:bigDecimal}")
   private String numberType;
-
-  private final LoadingCache<String, Optional<EventKlineEvent<?, ?>>> messageKlineEventLruCache = Caffeine.newBuilder()
-      .expireAfterWrite(1, TimeUnit.MINUTES)
-      .maximumSize(10240)
-      .build(message -> {
-        NumberTypeEnum numberTypeEnum = getNumberType();
-        EventKlineEvent<?, ?> eventKlineEvent = serializer.fromJsonString(message, numberTypeEnum.eventKlineEventClass());
-        return Optional.ofNullable(eventKlineEvent);
-      });
-
-  private final LoadingCache<String, Optional<List<EventTicker24HrEvent>>> messageTicker24HrEventLruCache = Caffeine.newBuilder()
-      .expireAfterWrite(1, TimeUnit.MINUTES)
-      .maximumSize(10240)
-      .build(message -> {
-        EventTicker24HrEvent[] eventTicker24HrEventArray = serializer.fromJsonString(message, EventTicker24HrEvent[].class);
-        if (eventTicker24HrEventArray != null && eventTicker24HrEventArray.length > 0) {
-          List<EventTicker24HrEvent> eventTicker24HrEvents = new ArrayList<>(List.of(eventTicker24HrEventArray));
-          return Optional.of(eventTicker24HrEvents);
-        }
-        EventTicker24HrEvent eventTicker24HrEvent = serializer.fromJsonString(message, EventTicker24HrEvent.class);
-        if (eventTicker24HrEvent == null || StringUtils.isBlank(eventTicker24HrEvent.getEventType())) {
-          return Optional.empty();
-        }
-        return Optional.of(List.of(eventTicker24HrEvent));
-      });
 
   protected final Map<KlineSetKey, KlineSet> klineSetMap = new ConcurrentHashMap<>();
 
@@ -233,7 +244,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         return realtimeTickers;
       }
     } else {
-      List<Ticker<?>> realtimeTickers = queryTickers0();
+      List<Ticker<?>> realtimeTickers = queryAllMarketTickersSnapshot();
       if (CollectionUtils.isNotEmpty(realtimeTickers)) {
         return realtimeTickers;
       }
@@ -280,10 +291,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
     if (CollectionUtils.isEmpty(symbols)) {
-      List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24Hrs();
-      ticker24HrCache.putAll(realtimeTicker24Hrs.stream()
-          .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n)));
-      return realtimeTicker24Hrs;
+      List<Ticker24Hr> realtimeTicker24Hrs = queryAllMarketTicker24HrsSnapshot();
+      if (CollectionUtils.isNotEmpty(realtimeTicker24Hrs)) {
+        return realtimeTicker24Hrs;
+      }
+      return List.copyOf(ticker24HrCache.asMap().values());
     }
     return symbols.stream()
         .map(ticker24HrCache::getIfPresent)
@@ -311,16 +323,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           buildMakeUpTimeRanges(symbol, startTime, endTime, intervalEnum, limit, true);
 
       if (CollectionUtils.isNotEmpty(makeUpTimeRanges)) {
-        CompletableFuture<?>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
-        for(int i = 0; i < makeUpTimeRanges.size(); i++) {
-          ImmutablePair<Long, Long> makeUpRange = makeUpTimeRanges.get(i);
-          CompletableFuture<?> makeUpFuture = CompletableFuture.runAsync(() ->
-                  safeQueryKlines(symbol, interval,
-                      makeUpRange.getLeft(), makeUpRange.getRight(), getMakeUpKlinesLimit())
-              , MANAGE_EXECUTOR);
-          futures[i] = makeUpFuture;
-        }
-        CompletableFuture.allOf(futures).join();
+        fetchAndStoreKlines(symbol, interval,
+            filterMakeUpTimeRangesByOnboardTime(symbol, makeUpTimeRanges),
+            MAX_MAKE_UP_WORKERS, KLINE_FETCH_EXECUTOR);
       }
     }
 
@@ -367,6 +372,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         klineMap.put(kline.getOpenTime(), kline);
       }
     }
+    trimKlinesIfNeeded(klineSet, intervalEnum);
   }
 
   private List<Kline> fillKlines(List<Kline> klines, IntervalEnum intervalEnum) {
@@ -476,32 +482,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         .toList();
   }
 
-  protected Function<String, Boolean> getKlineEventMessageHandler() {
-    return message -> {
-      EventKlineEvent<?, ?> eventKlineEvent = convertToEventKlineEvent(message);
-      if (eventKlineEvent == null) {
-        return false;
-      }
-      return doForKlineEvent(eventKlineEvent, message);
-    };
+  protected Function<ParsedWebSocketMessage, Boolean> getKlineEventMessageHandler() {
+    return parsedMessage -> doForKlineEvent(convertToEventKlineEvent(parsedMessage));
   }
 
-  protected Function<String, Boolean> getTicker24HrEventMessageHandler() {
-    return message -> {
-      List<EventTicker24HrEvent> eventTicker24HrEvents = convertToEventTicker24HrEvent(message);
-      if (CollectionUtils.isEmpty(eventTicker24HrEvents)) {
-        return false;
-      }
-      return doForTicker24HrEvents(eventTicker24HrEvents, message);
-    };
+  protected Function<ParsedWebSocketMessage, Boolean> getTicker24HrEventMessageHandler() {
+    return parsedMessage -> doForTicker24HrEvents(convertToEventTicker24HrEvent(parsedMessage));
   }
 
-  protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent, String originalMessage) {
+  protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent) {
     if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
-      WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
-      if (websocketResponse == null) {
-        log.info("not handlable message received: {}", originalMessage);
-      }
       return false;
     }
     Kline kline = convertToKline(eventKlineEvent);
@@ -512,18 +502,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return true;
   }
 
-  protected boolean doForTicker24HrEvents(List<EventTicker24HrEvent> eventTicker24HrEvents, String originalMessage) {
-    if (CollectionUtils.isNotEmpty(eventTicker24HrEvents)) {
-      Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
-          .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
-          .findAny();
-      if (invalidEventOptional.isPresent()) {
-        WebsocketResponse websocketResponse = serializer.fromJsonString(originalMessage, WebsocketResponse.class);
-        if (websocketResponse == null) {
-          log.info("not handlable message received: {}", originalMessage);
-        }
-        return false;
-      }
+  protected boolean doForTicker24HrEvents(List<EventTicker24HrEvent> eventTicker24HrEvents) {
+    if (CollectionUtils.isEmpty(eventTicker24HrEvents)) {
+      return false;
+    }
+    Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
+        .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
+        .findAny();
+    if (invalidEventOptional.isPresent()) {
+      return false;
     }
     eventTicker24HrEvents.forEach(this::doForTicker24HrEvent);
     return true;
@@ -557,35 +544,47 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     monitorManager.incReceivedTickerMessage(getServiceType());
   }
 
-  protected Function<String, String> getKlineEventMessageTopicExtractor() {
-    return message -> {
-      EventKlineEvent<?, ?> eventKlineEvent = convertToEventKlineEvent(message);
-      if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+  protected Function<ParsedWebSocketMessage, String> getKlineEventMessageTopicExtractor() {
+    return parsedMessage -> {
+      if (!StringUtils.equals(parsedMessage.eventType(), KLINE_EVENT)) {
         return null;
       }
-      EventKline eventKline = eventKlineEvent.getEventKline();
-      String symbol = eventKlineEvent.getSymbol();
-      String interval = eventKline.getInterval();
+      if (StringUtils.isNotBlank(parsedMessage.stream())) {
+        return parsedMessage.stream();
+      }
+      JsonNode payloadNode = parsedMessage.payloadNode();
+      String symbol = extractTextField(payloadNode, "s");
+      String interval = extractTextField(payloadNode != null ? payloadNode.get("k") : null, "i");
+      if (StringUtils.isAnyBlank(symbol, interval)) {
+        return null;
+      }
       return buildSymbolUpdateTopic(symbol, interval);
     };
   }
 
-  protected Function<String, String> getTicker24HrEventMessageTopicExtractor() {
-    return message -> {
-      List<EventTicker24HrEvent> eventTicker24HrEvents = convertToEventTicker24HrEvent(message);
-      if (CollectionUtils.isNotEmpty(eventTicker24HrEvents)) {
-        Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
-            .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
-            .findAny();
-        if (invalidEventOptional.isPresent()) {
+  protected Function<ParsedWebSocketMessage, String> getTicker24HrEventMessageTopicExtractor() {
+    return parsedMessage -> {
+      JsonNode payloadNode = parsedMessage.payloadNode();
+      if (payloadNode == null || payloadNode.isNull()) {
+        return null;
+      }
+      if (payloadNode.isArray()) {
+        if (payloadNode.isEmpty() || !allEventTypesMatch(payloadNode, TICKER_24HR_EVENT)) {
           return null;
         }
-        if (CommonUtil.isArrayMessage(message)) {
-          return TICKER_24HR_TOPIC;
-        }
-        return getTicker24HrStreamTopic(eventTicker24HrEvents.get(0).getSymbol());
+        return TICKER_24HR_TOPIC;
       }
-      return null;
+      if (!StringUtils.equals(parsedMessage.eventType(), TICKER_24HR_EVENT)) {
+        return null;
+      }
+      if (StringUtils.isNotBlank(parsedMessage.stream())) {
+        return parsedMessage.stream();
+      }
+      String symbol = extractTextField(payloadNode, "s");
+      if (StringUtils.isBlank(symbol)) {
+        return null;
+      }
+      return getTicker24HrStreamTopic(symbol);
     };
   }
 
@@ -598,26 +597,23 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       log.info("kline service {} disabled.", getClass().getSimpleName());
       return;
     }
-    List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-    Set<String> expectTopics = new HashSet<>(extraSubscribeTopics);
-    expectTopics.addAll(
-        buildNeedSubscribeKlineUpdateTopics(
-            subscribeIntervals.stream().map(IntervalEnum::code).toList()
-        )
-    );
-    expectTopics.addAll(getTicker24HrSubscribeTopics());
+    expectedTopicsSnapshot = null;
+    Set<String> expectTopics = buildExpectedTopics();
     startKlineWebSocketUpdater(expectTopics.size());
     startKlineRpcUpdater();
     startTicker24HrRpcUpdater();
+    startAllMarketSnapshotUpdater();
     startSymbolOfflineCleaner();
   }
 
   protected void registerExtraTopic(String topic) {
     this.extraSubscribeTopics.add(topic);
+    expectedTopicsSnapshot = null;
   }
 
   protected void unregisterExtraTopic(String topic) {
     this.extraSubscribeTopics.remove(topic);
+    expectedTopicsSnapshot = null;
   }
 
   private List<ImmutablePair<Long, Long>> buildMakeUpTimeRanges(String symbol, Long startTime, Long endTime, IntervalEnum intervalEnum, Integer limit, boolean useSetCache) {
@@ -701,8 +697,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private List<String> getSubscribeSymbols(IntervalEnum interval) {
+    return getSubscribeSymbols(getSymbols(), interval);
+  }
+
+  private List<String> getSubscribeSymbols(Collection<String> symbols, IntervalEnum interval) {
     List<Pattern> subscribeSymbolPatterns = getSubscribeSymbolPatterns(interval);
-    List<String> symbols = getSymbols();
     return symbols.stream()
         .filter(symbol -> {
           for (Pattern pattern : subscribeSymbolPatterns) {
@@ -727,7 +726,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       webSocketClient.start();
     }
     adjustSubscribeTopics();
-    releaseSymbolKlines();
   }
 
   protected void subscribe(Collection<String> topics) {
@@ -906,43 +904,189 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   public List<Ticker24Hr> queryTicker24Hrs() {
     rateLimitManager.acquire(getRateLimiterName(), getTicker24HrsWeight());
-    return queryTicker24Hrs0();
+    List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs0();
+    return ticker24Hrs == null ? List.of() : ticker24Hrs;
   }
 
-  @SuppressWarnings("unchecked")
+  private void startAllMarketSnapshotUpdater() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
+        new ExceptionSafeRunnable(() -> {
+          long now = System.currentTimeMillis();
+          refreshAllMarketSnapshotIfActive(now, lastAllMarketTickerAccessTime, allMarketTickerSnapshot,
+              this::triggerAllMarketTickerRefresh);
+          refreshAllMarketSnapshotIfActive(now, lastAllMarketTicker24HrAccessTime, allMarketTicker24HrSnapshot,
+              this::triggerAllMarketTicker24HrRefresh);
+        }), 1000, ALL_MARKET_SNAPSHOT_REFRESH_CHECK_INTERVAL_MILLS, TimeUnit.MILLISECONDS);
+  }
+
+  private <E> void refreshAllMarketSnapshotIfActive(long now, AtomicLong lastAccessTime,
+                                                    AtomicReference<AllMarketSnapshot<E>> snapshotRef,
+                                                    Runnable refreshTask) {
+    if (now - lastAccessTime.get() > ALL_MARKET_SNAPSHOT_REFRESH_IDLE_TIMEOUT_MILLS) {
+      return;
+    }
+    AllMarketSnapshot<E> snapshot = snapshotRef.get();
+    if (!snapshot.isStale(now)) {
+      return;
+    }
+    refreshTask.run();
+  }
+
+  private void triggerAllMarketTickerRefreshIfStale(AllMarketSnapshot<Ticker<?>> snapshot) {
+    if (snapshot.isStale(System.currentTimeMillis())) {
+      triggerAllMarketTickerRefresh();
+    }
+  }
+
+  private void triggerAllMarketTicker24HrRefreshIfStale(AllMarketSnapshot<Ticker24Hr> snapshot) {
+    if (snapshot.isStale(System.currentTimeMillis())) {
+      triggerAllMarketTicker24HrRefresh();
+    }
+  }
+
+  private void triggerAllMarketTickerRefresh() {
+    triggerAllMarketSnapshotRefresh(refreshingAllMarketTickerSnapshot,
+        this::loadAllMarketTickerSnapshot,
+        allMarketTickerSnapshot::set);
+  }
+
+  private void triggerAllMarketTicker24HrRefresh() {
+    triggerAllMarketSnapshotRefresh(refreshingAllMarketTicker24HrSnapshot,
+        this::loadAllMarketTicker24HrSnapshot,
+        snapshot -> {
+          allMarketTicker24HrSnapshot.set(snapshot);
+          syncTicker24HrCache(snapshot.values());
+        });
+  }
+
+  private <E> void triggerAllMarketSnapshotRefresh(AtomicBoolean refreshing,
+                                                   Supplier<AllMarketSnapshot<E>> loader,
+                                                   Consumer<AllMarketSnapshot<E>> snapshotUpdater) {
+    if (!refreshing.compareAndSet(false, true)) {
+      return;
+    }
+    CompletableFuture.runAsync(() -> {
+      try {
+        snapshotUpdater.accept(loader.get());
+      } finally {
+        refreshing.set(false);
+      }
+    }, MANAGE_EXECUTOR);
+  }
+
+  private List<Ticker<?>> refreshAllMarketTickersSnapshotNow() {
+    AllMarketSnapshot<Ticker<?>> snapshot = loadAllMarketTickerSnapshot();
+    allMarketTickerSnapshot.set(snapshot);
+    return snapshot.values();
+  }
+
+  private List<Ticker24Hr> refreshAllMarketTicker24HrsSnapshotNow() {
+    AllMarketSnapshot<Ticker24Hr> snapshot = loadAllMarketTicker24HrSnapshot();
+    allMarketTicker24HrSnapshot.set(snapshot);
+    syncTicker24HrCache(snapshot.values());
+    return snapshot.values();
+  }
+
+  private AllMarketSnapshot<Ticker<?>> loadAllMarketTickerSnapshot() {
+    List<Ticker<?>> realtimeTickers = queryTickers0();
+    if (CollectionUtils.isEmpty(realtimeTickers)) {
+      return new AllMarketSnapshot<>(List.of(), System.currentTimeMillis());
+    }
+    return new AllMarketSnapshot<>(List.copyOf(realtimeTickers), System.currentTimeMillis());
+  }
+
+  private AllMarketSnapshot<Ticker24Hr> loadAllMarketTicker24HrSnapshot() {
+    List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24Hrs();
+    if (CollectionUtils.isEmpty(realtimeTicker24Hrs)) {
+      return new AllMarketSnapshot<>(List.of(), System.currentTimeMillis());
+    }
+    return new AllMarketSnapshot<>(List.copyOf(realtimeTicker24Hrs), System.currentTimeMillis());
+  }
+
+  private void syncTicker24HrCache(List<Ticker24Hr> ticker24Hrs) {
+    if (CollectionUtils.isEmpty(ticker24Hrs)) {
+      return;
+    }
+    Map<String, Ticker24Hr> ticker24HrMap = ticker24Hrs.stream()
+        .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n));
+    Set<String> needRemoveKeys = ticker24HrCache.asMap().keySet().stream()
+        .filter(existKey -> !ticker24HrMap.containsKey(existKey))
+        .collect(Collectors.toSet());
+    ticker24HrCache.putAll(ticker24HrMap);
+    if (CollectionUtils.isNotEmpty(needRemoveKeys)) {
+      ticker24HrCache.invalidateAll(needRemoveKeys);
+    }
+  }
+
+  private List<Ticker<?>> queryAllMarketTickersSnapshot() {
+    lastAllMarketTickerAccessTime.set(System.currentTimeMillis());
+    AllMarketSnapshot<Ticker<?>> snapshot = allMarketTickerSnapshot.get();
+    if (CollectionUtils.isNotEmpty(snapshot.values())) {
+      triggerAllMarketTickerRefreshIfStale(snapshot);
+      return snapshot.values();
+    }
+    return refreshAllMarketTickersSnapshotNow();
+  }
+
+  private List<Ticker24Hr> queryAllMarketTicker24HrsSnapshot() {
+    lastAllMarketTicker24HrAccessTime.set(System.currentTimeMillis());
+    AllMarketSnapshot<Ticker24Hr> snapshot = allMarketTicker24HrSnapshot.get();
+    if (CollectionUtils.isNotEmpty(snapshot.values())) {
+      triggerAllMarketTicker24HrRefreshIfStale(snapshot);
+      return snapshot.values();
+    }
+    return refreshAllMarketTicker24HrsSnapshotNow();
+  }
+
   private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
+    return safeQueryKlines(symbol, interval, startTime, endTime, limit, MAX_MAKE_UP_WORKERS, KLINE_FETCH_EXECUTOR);
+  }
+
+  private List<Kline> safeQueryKlines(String symbol, String interval, Long startTime, Long endTime,
+                                      Integer limit, int maxWorkers, Executor executor) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(symbol, startTime,
         endTime, intervalEnum, limit, false);
-    Long symbolOnboardTime = querySymbolOnboardTime(symbol);
-    if (symbolOnboardTime >= 0) {
-      makeUpTimeRanges = makeUpTimeRanges.stream()
-          .filter(range -> range.getRight() >= symbolOnboardTime)
-          .collect(Collectors.toList());
-    }
+    makeUpTimeRanges = filterMakeUpTimeRangesByOnboardTime(symbol, makeUpTimeRanges);
 
+    return fetchAndStoreKlines(symbol, interval, makeUpTimeRanges, maxWorkers, executor);
+  }
+
+  private List<ImmutablePair<Long, Long>> filterMakeUpTimeRangesByOnboardTime(String symbol,
+                                                                               List<ImmutablePair<Long, Long>> makeUpTimeRanges) {
+    if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
+      return Collections.emptyList();
+    }
+    Long symbolOnboardTime = querySymbolOnboardTime(symbol);
+    if (symbolOnboardTime < 0) {
+      return makeUpTimeRanges;
+    }
+    return makeUpTimeRanges.stream()
+        .filter(range -> range.getRight() >= symbolOnboardTime)
+        .collect(Collectors.toList());
+  }
+
+  private List<Kline> fetchAndStoreKlines(String symbol, String interval,
+                                          List<ImmutablePair<Long, Long>> makeUpTimeRanges,
+                                          int maxWorkers, Executor executor) {
     if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
       return Collections.emptyList();
     }
 
-    CompletableFuture<List<Kline>>[] futures = new CompletableFuture[makeUpTimeRanges.size()];
-    for(int i = 0; i < makeUpTimeRanges.size(); i++) {
-      ImmutablePair<Long, Long> rangePair = makeUpTimeRanges.get(i);
-      CompletableFuture<List<Kline>> future = CompletableFuture.supplyAsync(() -> {
+    List<Kline> fetchedKlines = Collections.synchronizedList(new ArrayList<>());
+    List<Runnable> fetchTasks = makeUpTimeRanges.stream()
+        .<Runnable>map(rangePair -> () -> {
         rateLimitManager.acquire(getRateLimiterName(), getMakeUpKlinesWeight());
         List<Kline> subKlines = queryKlines0(symbol, interval,
             rangePair.getLeft(), rangePair.getRight(), getMakeUpKlinesLimit());
         for (Kline makeUpKline : subKlines) {
           updateKline(symbol, interval, makeUpKline);
         }
-        return subKlines;
-      }, KLINE_FETCH_EXECUTOR);
-      futures[i] = future;
-    }
-    CompletableFuture.allOf(futures).join();
-    return Arrays.stream(futures)
-        .map(CompletableFuture::join)
-        .flatMap(Collection::stream)
+        fetchedKlines.addAll(subKlines);
+      })
+        .toList();
+    runTasksWithLimitedWorkers(fetchTasks, maxWorkers, executor);
+    return fetchedKlines.stream()
         .sorted(Comparator.comparing(Kline::getOpenTime))
         .toList();
   }
@@ -971,16 +1115,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           if (CollectionUtils.isEmpty(ticker24Hrs)) {
             return;
           }
-
-          Map<String, Ticker24Hr> ticker24HrMap = ticker24Hrs.stream()
-              .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> o));
-          Set<String> needRemoveKeys = ticker24HrCache.asMap().keySet().stream()
-                  .filter(existKey -> !ticker24HrMap.containsKey(existKey))
-                  .collect(Collectors.toSet());
-          ticker24HrCache.putAll(ticker24HrMap);
-          if (CollectionUtils.isNotEmpty(needRemoveKeys)) {
-            ticker24HrCache.invalidateAll(needRemoveKeys);
-          }
+          AllMarketSnapshot<Ticker24Hr> snapshot = new AllMarketSnapshot<>(List.copyOf(ticker24Hrs),
+              System.currentTimeMillis());
+          allMarketTicker24HrSnapshot.set(snapshot);
+          syncTicker24HrCache(snapshot.values());
         }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
     );
   }
@@ -989,65 +1127,48 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+          List<String> symbols = getSymbols();
           List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
           for (IntervalEnum interval : subscribeIntervals) {
-            List<String> subscribeSymbols = getSubscribeSymbols(interval);
+            List<String> subscribeSymbols = getSubscribeSymbols(symbols, interval);
             for (String symbol : subscribeSymbols) {
               symbolIntervals.add(ImmutablePair.of(symbol, interval));
             }
           }
           CompletableFuture.runAsync(() -> {
-            CompletableFuture<?>[] syncFutures = new CompletableFuture[symbolIntervals.size()];
-            for(int i = 0; i < symbolIntervals.size(); i++) {
-              ImmutablePair<String, IntervalEnum> symbolInterval = symbolIntervals.get(i);
-              String symbol = symbolInterval.getLeft();
-              IntervalEnum interval = symbolInterval.getRight();
-              CompletableFuture<?> syncFuture = CompletableFuture.runAsync(() -> {
-                int refreshKlineCount = getSyncConfig().getIntervalSyncConfigs().get(interval.code()).getMinMaintainCount();
-                KlineSetKey key = new KlineSetKey(symbol, interval.code());
-                KlineSet klineSet = klineSetMap.get(key);
-                if (klineSet != null && getMapSize(klineSet.getKlineMap(), interval) >= getSyncConfig().getRpcRefreshCount()) {
-                  refreshKlineCount = getSyncConfig().getRpcRefreshCount();
-                }
-                safeQueryKlines(symbol, interval.code(),
-                    null, System.currentTimeMillis(),
-                    refreshKlineCount);
-              }, KLINE_FETCH_EXECUTOR);
-              syncFutures[i] = syncFuture;
-            }
-            CompletableFuture.allOf(syncFutures).join();
+            List<Runnable> syncTasks = symbolIntervals.stream()
+                .<Runnable>map(symbolInterval -> () -> {
+                  String symbol = symbolInterval.getLeft();
+                  IntervalEnum interval = symbolInterval.getRight();
+                  int refreshKlineCount = getSyncConfig().getIntervalSyncConfigs().get(interval.code()).getMinMaintainCount();
+                  KlineSetKey key = new KlineSetKey(symbol, interval.code());
+                  KlineSet klineSet = klineSetMap.get(key);
+                  if (klineSet != null && getMapSize(klineSet.getKlineMap(), interval) >= getSyncConfig().getRpcRefreshCount()) {
+                    refreshKlineCount = getSyncConfig().getRpcRefreshCount();
+                  }
+                  safeQueryKlines(symbol, interval.code(),
+                      null, System.currentTimeMillis(),
+                      refreshKlineCount, 1, KLINE_FETCH_EXECUTOR);
+                })
+                .toList();
+            runTasksWithLimitedWorkers(syncTasks, MAX_RPC_SYNC_WORKERS, KLINE_FETCH_EXECUTOR);
             log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
           }, MANAGE_EXECUTOR).join();
         }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
   }
 
-  private void releaseSymbolKlines() {
-    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
-        new ExceptionSafeRunnable(() -> {
-          for (KlineSet klineSet : klineSetMap.values()) {
-            String interval = klineSet.getKey().getInterval();
-            IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(interval);
-            if (intervalSyncConfig == null) {
-              continue;
-            }
-            Integer minMaintainCount = intervalSyncConfig.getMinMaintainCount();
-            NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-            if (klineMap.size() > minMaintainCount + 50) {
-              while (klineMap.size() > minMaintainCount) {
-                klineMap.pollFirstEntry();
-              }
-            }
-          }
-        }), 1000, 5000, TimeUnit.MILLISECONDS);
+  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals) {
+    return buildNeedSubscribeKlineUpdateTopics(needSubscribeIntervals, getSymbols());
   }
 
-  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals) {
+  private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals,
+                                                          Collection<String> symbols) {
     if (CollectionUtils.isEmpty(needSubscribeIntervals)) {
       return Collections.emptySet();
     }
     Set<String> topics = new HashSet<>(needSubscribeIntervals.size());
     for (String interval : needSubscribeIntervals) {
-      List<String> subscribeSymbols = getSubscribeSymbols(
+      List<String> subscribeSymbols = getSubscribeSymbols(symbols,
           CommonUtil.getEnumByCode(interval, IntervalEnum.class));
       for (String symbol : subscribeSymbols) {
         String topic = buildSymbolUpdateTopic(symbol, interval);
@@ -1057,21 +1178,33 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return topics;
   }
 
+  protected Set<String> buildExpectedTopics() {
+    Set<String> subscribeIntervals = getSubscribeIntervals().stream()
+        .map(IntervalEnum::code)
+        .collect(Collectors.toSet());
+    Set<String> symbols = new HashSet<>(getSymbols());
+    Set<String> extraTopics = Set.copyOf(extraSubscribeTopics);
+    Set<String> tickerTopics = Set.copyOf(getTicker24HrSubscribeTopics());
+    ExpectedTopicsSnapshot snapshot = expectedTopicsSnapshot;
+    if (snapshot != null && snapshot.matches(symbols, subscribeIntervals, extraTopics, tickerTopics)) {
+      return snapshot.expectedTopics();
+    }
+
+    Set<String> expectTopics = new HashSet<>(extraTopics);
+    expectTopics.addAll(tickerTopics);
+    expectTopics.addAll(buildNeedSubscribeKlineUpdateTopics(subscribeIntervals, symbols));
+    Set<String> immutableExpectedTopics = Set.copyOf(expectTopics);
+    expectedTopicsSnapshot = new ExpectedTopicsSnapshot(Set.copyOf(symbols),
+        Set.copyOf(subscribeIntervals), extraTopics, tickerTopics, immutableExpectedTopics);
+    return immutableExpectedTopics;
+  }
+
   private void adjustSubscribeTopics() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           synchronized (this) {
-            Set<String> needSubscribeKlineIntervals =
-                getSubscribeIntervals().stream()
-                    .map(IntervalEnum::code)
-                    .collect(Collectors.toSet());
-            Set<String> expectTopics = new HashSet<>(extraSubscribeTopics);
-            expectTopics.addAll(getTicker24HrSubscribeTopics());
+            Set<String> expectTopics = buildExpectedTopics();
             Set<String> subscribedTopics = getSubscribedTopics();
-
-            Set<String> needSubscribeKlineTopics =
-                buildNeedSubscribeKlineUpdateTopics(needSubscribeKlineIntervals);
-            expectTopics.addAll(needSubscribeKlineTopics);
 
             Set<String> needNewSubscribeTopics = new HashSet<>(expectTopics);
             needNewSubscribeTopics.removeAll(subscribedTopics);
@@ -1087,7 +1220,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
               unsubscribe(needUnsubscribeTopics);
             }
           }
-        }), 1000, 5000, TimeUnit.MILLISECONDS);
+        }), 1000, SUBSCRIBE_TOPICS_ADJUST_INTERVAL_MILLS, TimeUnit.MILLISECONDS);
   }
 
   private Set<String> getSubscribedTopics() {
@@ -1099,6 +1232,23 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private List<T> getActiveWebSocketClients() {
     return webSocketClients.subList(0, connectionCount.get());
+  }
+
+  private void trimKlinesIfNeeded(KlineSet klineSet, IntervalEnum intervalEnum) {
+    IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code());
+    if (intervalSyncConfig == null || intervalSyncConfig.getMinMaintainCount() == null) {
+      return;
+    }
+    Integer minMaintainCount = intervalSyncConfig.getMinMaintainCount();
+    NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+    if (klineMap.size() <= minMaintainCount + KLINE_TRIM_BUFFER) {
+      return;
+    }
+    synchronized (klineSet) {
+      while (klineMap.size() > minMaintainCount) {
+        klineMap.pollFirstEntry();
+      }
+    }
   }
 
   private Kline convertToKline(EventKlineEvent<?, ?> event) {
@@ -1179,14 +1329,94 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
-  private EventKlineEvent<?, ?> convertToEventKlineEvent(String message) {
-    Optional<EventKlineEvent<?, ?>> eventOptional = messageKlineEventLruCache.get(message);
-    return eventOptional.orElse(null);
+  private EventKlineEvent<?, ?> convertToEventKlineEvent(ParsedWebSocketMessage parsedMessage) {
+    NumberTypeEnum numberTypeEnum = getNumberType();
+    return serializer.treeToValue(parsedMessage.payloadNode(), numberTypeEnum.eventKlineEventClass());
   }
 
-  private List<EventTicker24HrEvent> convertToEventTicker24HrEvent(String message) {
-    Optional<List<EventTicker24HrEvent>> eventOptional = messageTicker24HrEventLruCache.get(message);
-    return eventOptional.orElse(null);
+  private List<EventTicker24HrEvent> convertToEventTicker24HrEvent(ParsedWebSocketMessage parsedMessage) {
+    JsonNode payloadNode = parsedMessage.payloadNode();
+    if (payloadNode == null || payloadNode.isNull()) {
+      return null;
+    }
+    if (payloadNode.isArray()) {
+      EventTicker24HrEvent[] eventTicker24HrEventArray = serializer.treeToValue(payloadNode, EventTicker24HrEvent[].class);
+      if (eventTicker24HrEventArray == null || eventTicker24HrEventArray.length == 0) {
+        return null;
+      }
+      return new ArrayList<>(List.of(eventTicker24HrEventArray));
+    }
+    EventTicker24HrEvent eventTicker24HrEvent = serializer.treeToValue(payloadNode, EventTicker24HrEvent.class);
+    if (eventTicker24HrEvent == null || StringUtils.isBlank(eventTicker24HrEvent.getEventType())) {
+      return null;
+    }
+    return List.of(eventTicker24HrEvent);
+  }
+
+  protected static void runTasksWithLimitedWorkers(List<Runnable> tasks, int maxWorkers, Executor executor) {
+    if (CollectionUtils.isEmpty(tasks)) {
+      return;
+    }
+    int workerCount = Math.max(1, Math.min(maxWorkers, tasks.size()));
+    if (workerCount == 1) {
+      tasks.forEach(Runnable::run);
+      return;
+    }
+    ConcurrentLinkedQueue<Runnable> taskQueue = new ConcurrentLinkedQueue<>(tasks);
+    CompletableFuture<?>[] workers = new CompletableFuture[workerCount];
+    for (int i = 0; i < workerCount; i++) {
+      workers[i] = CompletableFuture.runAsync(() -> {
+        Runnable task;
+        while ((task = taskQueue.poll()) != null) {
+          task.run();
+        }
+      }, executor);
+    }
+    CompletableFuture.allOf(workers).join();
+  }
+
+  private record ExpectedTopicsSnapshot(Set<String> symbols,
+                                        Set<String> subscribeIntervals,
+                                        Set<String> extraTopics,
+                                        Set<String> tickerTopics,
+                                        Set<String> expectedTopics) {
+
+    private boolean matches(Set<String> currentSymbols,
+                            Set<String> currentSubscribeIntervals,
+                            Set<String> currentExtraTopics,
+                            Set<String> currentTickerTopics) {
+      return Objects.equals(symbols, currentSymbols)
+          && Objects.equals(subscribeIntervals, currentSubscribeIntervals)
+          && Objects.equals(extraTopics, currentExtraTopics)
+          && Objects.equals(tickerTopics, currentTickerTopics);
+    }
+  }
+
+  private record AllMarketSnapshot<E>(List<E> values, long refreshedAt) {
+
+    private boolean isStale(long now) {
+      return now - refreshedAt >= ALL_MARKET_TICKER_CACHE_TTL.toMillis();
+    }
+  }
+
+  private boolean allEventTypesMatch(JsonNode eventArrayNode, String eventType) {
+    for (JsonNode eventNode : eventArrayNode) {
+      if (!StringUtils.equals(extractTextField(eventNode, "e"), eventType)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private String extractTextField(JsonNode jsonNode, String fieldName) {
+    if (jsonNode == null || !jsonNode.isObject()) {
+      return null;
+    }
+    JsonNode fieldNode = jsonNode.get(fieldName);
+    if (fieldNode == null || fieldNode.isNull()) {
+      return null;
+    }
+    return fieldNode.asText();
   }
 
   private static ExecutorService buildKlineFetchExecutor() {

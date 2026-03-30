@@ -127,6 +127,40 @@ class BinanceSpotControllerTest {
   }
 
   @Test
+  void shouldReturnAllMarketTicker24HrArrayWithoutSymbols() throws Exception {
+    Ticker24Hr btcTicker = new Ticker24Hr();
+    btcTicker.setSymbol("BTCUSDT");
+    btcTicker.setLastPrice(new BigDecimal("100"));
+    Ticker24Hr ethTicker = new Ticker24Hr();
+    ethTicker.setSymbol("ETHUSDT");
+    ethTicker.setLastPrice(new BigDecimal("200"));
+    given(exchangeService.querySymbols()).willReturn(List.of("BTCUSDT", "ETHUSDT"));
+    given(klineService.queryTicker24hrs(List.of())).willReturn(List.of(btcTicker, ethTicker));
+
+    mockMvc.perform(get("/api/v3/ticker/24hr"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].symbol").value("BTCUSDT"))
+        .andExpect(jsonPath("$[1].symbol").value("ETHUSDT"));
+  }
+
+  @Test
+  void shouldReturnAllMarketTickerPriceArrayWithoutSymbols() throws Exception {
+    Ticker.BigDecimalTicker btcTicker = new Ticker.BigDecimalTicker();
+    btcTicker.setSymbol("BTCUSDT");
+    btcTicker.setPrice(new BigDecimal("100"));
+    Ticker.BigDecimalTicker ethTicker = new Ticker.BigDecimalTicker();
+    ethTicker.setSymbol("ETHUSDT");
+    ethTicker.setPrice(new BigDecimal("200"));
+    given(exchangeService.querySymbols()).willReturn(List.of("BTCUSDT", "ETHUSDT"));
+    given(klineService.queryTickers(List.of())).willReturn(List.of(btcTicker, ethTicker));
+
+    mockMvc.perform(get("/api/v3/ticker/price"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].symbol").value("BTCUSDT"))
+        .andExpect(jsonPath("$[1].symbol").value("ETHUSDT"));
+  }
+
+  @Test
   void shouldRejectSingleSymbolStatusMismatch() throws Exception {
     BinanceSpotExchange exchange = new BinanceSpotExchange();
     BinanceSpotSymbol symbol = new BinanceSpotSymbol();

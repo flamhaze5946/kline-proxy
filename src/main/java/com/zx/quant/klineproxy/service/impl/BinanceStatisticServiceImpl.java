@@ -8,6 +8,9 @@ import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
+import com.zx.quant.klineproxy.model.Kline.DoubleKline;
+import com.zx.quant.klineproxy.model.Kline.FloatKline;
+import com.zx.quant.klineproxy.model.Kline.StringKline;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.statistic.YamaDateSymbolInfo;
@@ -121,10 +124,7 @@ public class BinanceStatisticServiceImpl implements StatisticService {
     Kline[] klineArray = binanceSpotKlineService.queryKlineArray(
         atrSymbol, ATR_INTERVAL.code(), null, System.currentTimeMillis(), atrPeriod);
     List<BigDecimalKline> klines = Arrays.stream(klineArray)
-        .map(kline -> {
-          String klineJson = serializer.toJsonString(kline);
-          return serializer.fromJsonString(klineJson, BigDecimalKline.class);
-        })
+        .map(this::toBigDecimalKline)
         .toList();
     if (CollectionUtils.isEmpty(klines) || klines.size() < 2) {
       return;
@@ -259,7 +259,7 @@ public class BinanceStatisticServiceImpl implements StatisticService {
     for (String symbol : symbols) {
       List<BigDecimalKline> klines = binanceFutureKlineService.queryKlineList(
               symbol, ALT_COIN_INDEX_INTERVAL.code(), klineStartDate, klineEndDate, Integer.MAX_VALUE).stream()
-          .map(kline -> serializer.fromJsonString(serializer.toJsonString(kline), BigDecimalKline.class))
+          .map(this::toBigDecimalKline)
           .toList();
       if (CollectionUtils.isEmpty(klines)) {
         continue;
@@ -334,6 +334,54 @@ public class BinanceStatisticServiceImpl implements StatisticService {
       dateIndexMap.put(openTime, index);
     });
     return dateIndexMap;
+  }
+
+  private BigDecimalKline toBigDecimalKline(Kline kline) {
+    if (kline == null) {
+      return null;
+    }
+    if (kline instanceof BigDecimalKline bigDecimalKline) {
+      return bigDecimalKline.deepCopy();
+    }
+
+    BigDecimalKline target = new BigDecimalKline();
+    target.setOpenTime(kline.getOpenTime());
+    target.setCloseTime(kline.getCloseTime());
+    target.setTradeNum(kline.getTradeNum());
+    if (kline instanceof StringKline stringKline) {
+      target.setOpenPrice(new BigDecimal(stringKline.getOpenPrice()));
+      target.setHighPrice(new BigDecimal(stringKline.getHighPrice()));
+      target.setLowPrice(new BigDecimal(stringKline.getLowPrice()));
+      target.setClosePrice(new BigDecimal(stringKline.getClosePrice()));
+      target.setVolume(new BigDecimal(stringKline.getVolume()));
+      target.setQuoteVolume(new BigDecimal(stringKline.getQuoteVolume()));
+      target.setActiveBuyVolume(new BigDecimal(stringKline.getActiveBuyVolume()));
+      target.setActiveBuyQuoteVolume(new BigDecimal(stringKline.getActiveBuyQuoteVolume()));
+      return target;
+    }
+    if (kline instanceof FloatKline floatKline) {
+      target.setOpenPrice(BigDecimal.valueOf(floatKline.getOpenPrice()));
+      target.setHighPrice(BigDecimal.valueOf(floatKline.getHighPrice()));
+      target.setLowPrice(BigDecimal.valueOf(floatKline.getLowPrice()));
+      target.setClosePrice(BigDecimal.valueOf(floatKline.getClosePrice()));
+      target.setVolume(BigDecimal.valueOf(floatKline.getVolume()));
+      target.setQuoteVolume(BigDecimal.valueOf(floatKline.getQuoteVolume()));
+      target.setActiveBuyVolume(BigDecimal.valueOf(floatKline.getActiveBuyVolume()));
+      target.setActiveBuyQuoteVolume(BigDecimal.valueOf(floatKline.getActiveBuyQuoteVolume()));
+      return target;
+    }
+    if (kline instanceof DoubleKline doubleKline) {
+      target.setOpenPrice(BigDecimal.valueOf(doubleKline.getOpenPrice()));
+      target.setHighPrice(BigDecimal.valueOf(doubleKline.getHighPrice()));
+      target.setLowPrice(BigDecimal.valueOf(doubleKline.getLowPrice()));
+      target.setClosePrice(BigDecimal.valueOf(doubleKline.getClosePrice()));
+      target.setVolume(BigDecimal.valueOf(doubleKline.getVolume()));
+      target.setQuoteVolume(BigDecimal.valueOf(doubleKline.getQuoteVolume()));
+      target.setActiveBuyVolume(BigDecimal.valueOf(doubleKline.getActiveBuyVolume()));
+      target.setActiveBuyQuoteVolume(BigDecimal.valueOf(doubleKline.getActiveBuyQuoteVolume()));
+      return target;
+    }
+    throw new UnsupportedOperationException("unsupported kline type: " + kline.getClass().getName());
   }
 
   private NavigableMap<Long, Yama02Index> calculateYama02DateIndexMap(List<String> symbols, Long klineStartDate, Long klineEndDate) {

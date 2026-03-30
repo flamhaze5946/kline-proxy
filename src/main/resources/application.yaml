@@ -21,21 +21,21 @@ kline:
     spot:
       intervalSyncConfigs:
         "1h":
-          minMaintainCount: 5000
+          minMaintainCount: 1000
           listenSymbolPatterns:
             - .*?USDT
         "1d":
-          minMaintainCount: 1000
+          minMaintainCount: 365
           listenSymbolPatterns:
             - .*?USDT
     future:
       intervalSyncConfigs:
         "1h":
-          minMaintainCount: 5000
+          minMaintainCount: 1000
           listenSymbolPatterns:
             - .*?USDT
         "1d":
-          minMaintainCount: 1000
+          minMaintainCount: 365
           listenSymbolPatterns:
             - .*?USDT
 

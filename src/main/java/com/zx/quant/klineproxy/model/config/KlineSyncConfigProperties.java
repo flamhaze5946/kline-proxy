@@ -26,10 +26,10 @@ public class KlineSyncConfigProperties {
   public static class BinanceFutureKlineSyncConfigProperties extends KlineSyncConfigProperties {
   }
 
-  @Data
-  public static class IntervalSyncConfig {
+    @Data
+    public static class IntervalSyncConfig {
 
-    private Integer minMaintainCount = 1000;
+    private Integer minMaintainCount = 365;
 
     private List<String> listenSymbolPatterns;
   }

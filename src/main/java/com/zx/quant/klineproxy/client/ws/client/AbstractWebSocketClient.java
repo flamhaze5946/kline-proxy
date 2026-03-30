@@ -1,19 +1,17 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.LoadingCache;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.Sets;
 import com.zx.quant.klineproxy.client.ws.enums.ProtocolEnum;
 import com.zx.quant.klineproxy.client.ws.handler.WebSocketChannelInboundHandler;
 import com.zx.quant.klineproxy.client.ws.task.ClientMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.FrameSendTask;
 import com.zx.quant.klineproxy.client.ws.task.PingTask;
-import com.zx.quant.klineproxy.client.ws.task.TopicMonitorTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsSubscribeTask;
 import com.zx.quant.klineproxy.client.ws.task.TopicsUnsubscribeTask;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
-import com.zx.quant.klineproxy.model.CombineEvent;
 import com.zx.quant.klineproxy.model.ListTopicsEvent;
+import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
@@ -48,7 +46,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -62,9 +59,10 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
+import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
@@ -90,6 +88,12 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-message-handler";
 
+  private static final long TOPIC_MONITOR_INTERVAL_MILLS = 30_000L;
+
+  private static final long TOPIC_MESSAGE_TIMEOUT_MILLS = 120_000L;
+
+  private static final AtomicLong MESSAGE_TASK_DROP_COUNT = new AtomicLong(0);
+
   private static final ExecutorService MESSAGE_EXECUTOR = buildMessageExecutor();
 
   private static final String PING = "PING";
@@ -100,9 +104,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Supplier<WebSocketChannelInboundHandler> handlerSupplier;
 
-  private final List<Function<String, Boolean>> messageHandlers;
+  private final List<Function<ParsedWebSocketMessage, Boolean>> messageHandlers;
 
-  private final List<Function<String, String>> messageTopicExtractors;
+  private final List<Function<ParsedWebSocketMessage, String>> messageTopicExtractors;
 
   private final SetQueue<String> candidateSubscribeTopics;
 
@@ -110,7 +114,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private final Queue<WebSocketFrameWrapper> candidateFrameWrappers;
 
-  private final Map<String, TopicMonitorTask> topicMonitorTaskMap;
+  private final Map<String, Long> topicLastMessageTimeMap;
 
   protected WebSocketChannelInboundHandler inboundHandler;
 
@@ -144,14 +148,6 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private String clientName;
 
-  private final LoadingCache<String, Optional<CombineEvent>> combineMessageEventLruCache = Caffeine.newBuilder()
-      .expireAfterWrite(1, TimeUnit.MINUTES)
-      .maximumSize(10240)
-      .build(message -> {
-        CombineEvent combineEvent = serializer.fromJsonString(message, CombineEvent.class);
-        return Optional.ofNullable(combineEvent);
-      });
-
   public AbstractWebSocketClient() {
     this(1);
   }
@@ -171,7 +167,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     this.candidateSubscribeTopics = new HashSetQueue<>();
     this.candidateUnsubscribeTopics = new HashSetQueue<>();
     this.candidateFrameWrappers = new LinkedBlockingQueue<>();
-    this.topicMonitorTaskMap = new ConcurrentHashMap<>();
+    this.topicLastMessageTimeMap = new ConcurrentHashMap<>();
   }
 
   private void executeSubscribeTask(Collection<String> topics) {
@@ -183,7 +179,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     Runnable afterSendFunc = () -> {
       registeredTopics.addAll(topics);
       if (monitorTopicMessage()) {
-        startTopicMessageMonitors(topics);
+        registerTopicHeartbeats(topics);
       }
       log.info("websocket client: {} subscribe topics: {} message sent.", clientName(), topics);
     };
@@ -208,7 +204,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     Runnable afterSendFunc = () -> {
       registeredTopics.removeAll(Sets.newHashSet(topics));
       if (monitorTopicMessage()) {
-        stopTopicMessageMonitors(topics);
+        unregisterTopicHeartbeats(topics);
       }
       log.info("websocket client: {} unsubscribe topics: {} message sent.", clientName(), topics);
     };
@@ -231,7 +227,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       this.candidateFrameWrappers.clear();
       this.candidateSubscribeTopics.clear();
       this.candidateUnsubscribeTopics.clear();
-      this.topicMonitorTaskMap.clear();
+      this.topicLastMessageTimeMap.clear();
       this.registeredTopics.clear();
       this.channelRegisteredTopics.clear();
 
@@ -248,6 +244,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
           new SwitchableRunnable(pingTask), 1000 * 30, 1000 * 60, TimeUnit.MILLISECONDS);
       monitorScheduler.scheduleWithFixedDelay(
           new SwitchableRunnable(this::executeListTopicsTask), 1000 * 10, 1000 * 30, TimeUnit.MILLISECONDS);
+      monitorScheduler.scheduleWithFixedDelay(
+          new SwitchableRunnable(this::monitorTopics), 1000 * 10, TOPIC_MONITOR_INTERVAL_MILLS, TimeUnit.MILLISECONDS);
 
       FrameSendTask frameSendTask = new FrameSendTask(this::sendData0, this.candidateFrameWrappers, commonScheduler);
       long millsIntervalForFrameSend = 1000 / getMaxFramesPerSecond();
@@ -266,53 +264,20 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   }
 
   @Override
-  public synchronized void addMessageHandler(Function<String, Boolean> messageHandler) {
+  public synchronized void addMessageHandler(Function<ParsedWebSocketMessage, Boolean> messageHandler) {
     this.messageHandlers.add(messageHandler);
   }
 
   @Override
-  public void addMessageTopicExtractorHandler(Function<String, String> messageTopicExtractor) {
+  public void addMessageTopicExtractorHandler(Function<ParsedWebSocketMessage, String> messageTopicExtractor) {
     this.messageTopicExtractors.add(messageTopicExtractor);
   }
 
   @Override
   public void onReceive(String message) {
     clientMonitorTask.heartbeat();
-    heartbeatTopic(message);
     CompletableFuture.runAsync(
-        () -> {
-          AtomicReference<String> realMessage = new AtomicReference<>();
-          realMessage.set(message);
-          if (StringUtils.contains(realMessage.get(), PING)) {
-            this.sendMessage(realMessage.get().replace(PING, PONG));
-            return;
-          }
-          if (StringUtils.contains(realMessage.get(), PONG)) {
-            return;
-          }
-
-          CombineEvent combineEvent = convertToCombineEvents(realMessage.get());
-          if (combineEvent != null && StringUtils.isNotBlank(combineEvent.getStream())) {
-            realMessage.set(serializer.toJsonString(combineEvent.getData()));
-          }
-
-          ListTopicsEvent listTopicsEvent =
-              serializer.fromJsonString(realMessage.get(), ListTopicsEvent.class);
-          if (listTopicsEvent != null && listTopicsEvent.getResult() != null) {
-            synchronized (channelRegisteredTopics) {
-              channelRegisteredTopics.clear();
-              channelRegisteredTopics.addAll(listTopicsEvent.getResult());
-            }
-            return;
-          }
-
-          for (Function<String, Boolean> messageHandler : messageHandlers) {
-            boolean handled = messageHandler.apply(realMessage.get());
-            if (handled) {
-              return;
-            }
-          }
-        },
+        () -> handleMessage(message),
         MESSAGE_EXECUTOR);
   }
 
@@ -512,7 +477,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         sslCtx = null;
       }
       shutdownGroup("reconnect");
-      group = new NioEventLoopGroup(2, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
+      group = new NioEventLoopGroup(1, ThreadFactoryUtil.getNamedThreadFactory(clientName()));
       log.info("websocket client: {} new event group: {} has been startup.", clientName(), group);
       Bootstrap bootstrap = new Bootstrap();
       bootstrap
@@ -558,11 +523,6 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
-  private CombineEvent convertToCombineEvents(String message) {
-    Optional<CombineEvent> eventOptional = combineMessageEventLruCache.get(message);
-    return eventOptional.orElse(null);
-  }
-
   private void shutdownGroup(String causeBy) {
     if (group != null && !group.isShutdown() && !group.isShuttingDown()) {
       group.shutdownGracefully().addListener(event ->
@@ -570,35 +530,42 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
-  private void startTopicMessageMonitors(Collection<String> topics) {
-    synchronized (topicMonitorTaskMap) {
-      for (String topic : topics) {
-        TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
-        if (topicMonitorTask == null) {
-          topicMonitorTask = new TopicMonitorTask(this, topic);
-          topicMonitorTaskMap.put(topic, topicMonitorTask);
-          monitorScheduler.scheduleWithFixedDelay(
-              new SwitchableRunnable(topicMonitorTask), 1000 * 10, 1000, TimeUnit.MILLISECONDS);
-        }
-        topicMonitorTask.start();
-      }
+  private void registerTopicHeartbeats(Collection<String> topics) {
+    long now = System.currentTimeMillis();
+    for (String topic : topics) {
+      topicLastMessageTimeMap.put(topic, now);
     }
   }
 
-  private void stopTopicMessageMonitors(Collection<String> topics) {
-    synchronized (topicMonitorTaskMap) {
-      for (String topic : topics) {
-        TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
-        if (topicMonitorTask != null) {
-          topicMonitorTask.stop();
-        }
-      }
+  private void unregisterTopicHeartbeats(Collection<String> topics) {
+    for (String topic : topics) {
+      topicLastMessageTimeMap.remove(topic);
     }
+  }
+
+  private void monitorTopics() {
+    if (!monitorTopicMessage() || topicLastMessageTimeMap.isEmpty()) {
+      return;
+    }
+    long now = System.currentTimeMillis();
+    topicLastMessageTimeMap.forEach((topic, lastMessageTime) -> {
+      if (lastMessageTime == null || now - lastMessageTime <= TOPIC_MESSAGE_TIMEOUT_MILLS) {
+        return;
+      }
+      if (channelRegisteredTopics.contains(topic)) {
+        topicLastMessageTimeMap.put(topic, now);
+        return;
+      }
+      log.info("{}ms not received messages from client {} for topic: {}, resubscribe.",
+          TOPIC_MESSAGE_TIMEOUT_MILLS, clientName(), topic);
+      topicLastMessageTimeMap.put(topic, now);
+      subscribeTopic(topic);
+    });
   }
 
   private ExecutorService buildCommonExecutor() {
     ThreadFactory threadFactory = ThreadFactoryUtil.getNamedThreadFactory(
-        getMonitorScheduleExecutorGroupName());
+        getCommonScheduleExecutorGroupName());
     return new ThreadPoolExecutor(
         2, 10,
         1, TimeUnit.MINUTES,
@@ -608,7 +575,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   private ScheduledExecutorService buildMonitorScheduler() {
     ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         getMonitorScheduleExecutorGroupName());
-    return new ScheduledThreadPoolExecutor(2, scheduleThreadFactory, new AbortPolicy() {
+    return new ScheduledThreadPoolExecutor(1, scheduleThreadFactory, new AbortPolicy() {
       @Override
       public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
         log.warn("client: {} monitor scheduler {} reject task: {}.", clientName(), e, r);
@@ -620,7 +587,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   private ScheduledExecutorService buildSubscribeScheduler() {
     ThreadFactory scheduleThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         getSubscribeScheduleExecutorGroupName());
-    return new ScheduledThreadPoolExecutor(2, scheduleThreadFactory, new AbortPolicy() {
+    return new ScheduledThreadPoolExecutor(1, scheduleThreadFactory, new AbortPolicy() {
       @Override
       public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
         log.warn("client: {} subscribe scheduler {} reject task: {}.", clientName(), e, r);
@@ -641,24 +608,21 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     return String.join(CLIENT_NAME_SEP, SUBSCRIBE_SCHEDULE_EXECUTOR_GROUP_PREFIX, clientName());
   }
 
-  private void heartbeatTopic(String message) {
-    String topic = extractTopicFromMessage(message);
+  private void heartbeatTopic(ParsedWebSocketMessage parsedMessage) {
+    String topic = extractTopicFromMessage(parsedMessage);
     if (StringUtils.isNotBlank(topic)) {
-      TopicMonitorTask topicMonitorTask = topicMonitorTaskMap.get(topic);
-      if (topicMonitorTask != null) {
-        topicMonitorTask.heartbeat();
-      }
+      long now = System.currentTimeMillis();
+      topicLastMessageTimeMap.computeIfPresent(topic, (ignore, lastMessageTime) -> now);
     }
   }
 
-  private String extractTopicFromMessage(String message) {
-    CombineEvent combineEvent = convertToCombineEvents(message);
-    if (combineEvent != null && StringUtils.isNotBlank(combineEvent.getStream())) {
-      return combineEvent.getStream();
+  private String extractTopicFromMessage(ParsedWebSocketMessage parsedMessage) {
+    if (parsedMessage.combined()) {
+      return parsedMessage.stream();
     }
 
-    for (Function<String, String> topicExtractor : messageTopicExtractors) {
-      String extractTopic = topicExtractor.apply(message);
+    for (Function<ParsedWebSocketMessage, String> topicExtractor : messageTopicExtractors) {
+      String extractTopic = topicExtractor.apply(parsedMessage);
       if (StringUtils.isNotBlank(extractTopic)) {
         return extractTopic;
       }
@@ -666,17 +630,112 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     return null;
   }
 
+  private void handleMessage(String message) {
+    try {
+      if (StringUtils.contains(message, PING)) {
+        this.sendMessage(message.replace(PING, PONG));
+        return;
+      }
+      if (StringUtils.contains(message, PONG)) {
+        return;
+      }
+
+      ParsedWebSocketMessage parsedMessage = parseMessage(message);
+      heartbeatTopic(parsedMessage);
+      if (isListTopicsMessage(parsedMessage.rootNode())) {
+        ListTopicsEvent listTopicsEvent = serializer.treeToValue(parsedMessage.rootNode(), ListTopicsEvent.class);
+        synchronized (channelRegisteredTopics) {
+          channelRegisteredTopics.clear();
+          channelRegisteredTopics.addAll(listTopicsEvent.getResult());
+        }
+        return;
+      }
+
+      for (Function<ParsedWebSocketMessage, Boolean> messageHandler : messageHandlers) {
+        boolean handled = messageHandler.apply(parsedMessage);
+        if (handled) {
+          return;
+        }
+      }
+
+      if (!isWebSocketResponseMessage(parsedMessage)) {
+        log.info("not handlable message received: {}", parsedMessage.rawMessage());
+      }
+    } catch (RuntimeException e) {
+      log.warn("websocket client: {} handle message failed.", clientName(), e);
+    }
+  }
+
+  private ParsedWebSocketMessage parseMessage(String message) {
+    JsonNode rootNode = serializer.readTree(message);
+    JsonNode payloadNode = rootNode;
+    String stream = extractTextField(rootNode, "stream");
+    JsonNode dataNode = rootNode.get("data");
+    if (StringUtils.isNotBlank(stream) && dataNode != null && !dataNode.isNull()) {
+      payloadNode = dataNode;
+    }
+    return new ParsedWebSocketMessage(message, rootNode, payloadNode, stream, extractEventType(payloadNode));
+  }
+
+  private String extractEventType(JsonNode payloadNode) {
+    if (payloadNode == null || payloadNode.isNull()) {
+      return null;
+    }
+    if (payloadNode.isArray()) {
+      if (payloadNode.isEmpty()) {
+        return null;
+      }
+      return extractTextField(payloadNode.get(0), "e");
+    }
+    return extractTextField(payloadNode, "e");
+  }
+
+  private String extractTextField(JsonNode jsonNode, String fieldName) {
+    if (jsonNode == null || !jsonNode.isObject()) {
+      return null;
+    }
+    JsonNode fieldNode = jsonNode.get(fieldName);
+    if (fieldNode == null || fieldNode.isNull()) {
+      return null;
+    }
+    return fieldNode.asText();
+  }
+
+  private boolean isWebSocketResponseMessage(ParsedWebSocketMessage parsedMessage) {
+    JsonNode rootNode = parsedMessage.rootNode();
+    return rootNode != null && rootNode.isObject() && rootNode.has("result") && rootNode.has("id");
+  }
+
+  private boolean isListTopicsMessage(JsonNode rootNode) {
+    return rootNode != null
+        && rootNode.isObject()
+        && rootNode.has("id")
+        && rootNode.has("result")
+        && rootNode.get("result").isArray();
+  }
+
   private static ExecutorService buildMessageExecutor() {
     ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         MESSAGE_EXECUTOR_GROUP_PREFIX);
     return new ThreadPoolExecutor(
-        2,
+        4,
         20,
         1,
         TimeUnit.MINUTES,
-        new LinkedBlockingQueue<>(1024),
+        new LinkedBlockingQueue<>(4096),
         namedThreadFactory,
-        new CallerRunsPolicy());
+        new DiscardOldestPolicy() {
+          @Override
+          public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+            if (!e.isShutdown()) {
+              long dropped = MESSAGE_TASK_DROP_COUNT.incrementAndGet();
+              if (dropped == 1 || dropped % 100 == 0) {
+                log.warn("message executor queue full, dropped {} websocket messages.", dropped);
+              }
+            }
+            super.rejectedExecution(r, e);
+          }
+        });
   }
 
   private class SwitchableRunnable implements Runnable {

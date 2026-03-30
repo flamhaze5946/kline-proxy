@@ -11,14 +11,18 @@ import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import com.zx.quant.klineproxy.util.ConvertUtil;
+import com.zx.quant.klineproxy.util.Serializer;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -44,6 +48,18 @@ public class BinanceSpotController extends GenericController {
 
   @Autowired
   private com.zx.quant.klineproxy.client.BinanceSpotClient binanceSpotClient;
+
+  @Autowired
+  private Serializer serializer;
+
+  private final AtomicReference<RenderedJsonResponse<List<Ticker<?>>>> allMarketTickerResponse =
+      new AtomicReference<>();
+
+  private final AtomicReference<RenderedJsonResponse<List<Ticker24Hr>>> allMarketTicker24HrResponse =
+      new AtomicReference<>();
+
+  private final AtomicReference<RenderedJsonResponse<List<Ticker24Hr>>> allMarketMiniTicker24HrResponse =
+      new AtomicReference<>();
 
   @GetMapping("exchangeInfo")
   public BinanceSpotExchange queryExchange() {
@@ -78,6 +94,9 @@ public class BinanceSpotController extends GenericController {
           .filter(ticker24Hr -> statusMatches(ticker24Hr.getSymbol(), symbolStatus, symbolMap))
           .collect(Collectors.toList());
     }
+    if (!explicitSymbolRequest && StringUtils.isBlank(symbolStatus)) {
+      return renderAllMarketTicker24HrResponse(ticker24Hrs, StringUtils.equals(type, "MINI"));
+    }
     return ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, shouldReturnArray(symbol), StringUtils.equals(type, "MINI"));
   }
 
@@ -89,6 +108,9 @@ public class BinanceSpotController extends GenericController {
     List<String> realSymbols = getRealSymbols(symbol, symbols);
     validateSymbols(realSymbols, allSymbols(exchangeService.queryExchange()));
     List<Ticker<?>> tickers = klineService.queryTickers(realSymbols);
+    if (CollectionUtils.isEmpty(realSymbols)) {
+      return renderAllMarketTickerResponse(tickers);
+    }
     return ConvertUtil.convertToDisplayTicker(tickers, shouldReturnArray(symbol), false);
   }
 
@@ -166,5 +188,36 @@ public class BinanceSpotController extends GenericController {
     }
     BinanceSpotSymbol symbolInfo = symbolMap.get(symbol);
     return symbolInfo != null && StringUtils.equals(symbolInfo.getStatus(), symbolStatus);
+  }
+
+  private Object renderAllMarketTickerResponse(List<Ticker<?>> tickers) {
+    RenderedJsonResponse<List<Ticker<?>>> cachedResponse = allMarketTickerResponse.get();
+    if (cachedResponse != null && cachedResponse.source() == tickers) {
+      return cachedResponse.response();
+    }
+    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker(tickers, true, false));
+    ResponseEntity<String> response = ResponseEntity.ok()
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(payload);
+    allMarketTickerResponse.set(new RenderedJsonResponse<>(tickers, response));
+    return response;
+  }
+
+  private Object renderAllMarketTicker24HrResponse(List<Ticker24Hr> ticker24Hrs, boolean mini) {
+    AtomicReference<RenderedJsonResponse<List<Ticker24Hr>>> cacheRef =
+        mini ? allMarketMiniTicker24HrResponse : allMarketTicker24HrResponse;
+    RenderedJsonResponse<List<Ticker24Hr>> cachedResponse = cacheRef.get();
+    if (cachedResponse != null && cachedResponse.source() == ticker24Hrs) {
+      return cachedResponse.response();
+    }
+    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, true, mini));
+    ResponseEntity<String> response = ResponseEntity.ok()
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(payload);
+    cacheRef.set(new RenderedJsonResponse<>(ticker24Hrs, response));
+    return response;
+  }
+
+  private record RenderedJsonResponse<T>(T source, ResponseEntity<String> response) {
   }
 }
