@@ -1,4 +1,4 @@
-FROM openjdk:17-alpine
+FROM eclipse-temurin:17-jre-alpine
 
 ENV JAVA_OPTS="-Xms800m"
 COPY target/kline-proxy-1.7.0.jar /app/
