@@ -27,9 +27,9 @@ kline:
       intervalConfigs:
         "1h":
           # default is minMaintainCount * 2 when omitted
-          maxStoreCount: 2000
+          maxStoreCount: 18000
           symbolMaxStoreCounts:
-            BTCUSDT: 4000
+            BTCUSDT: 20000
     future:
       intervalConfigs:
         "1h":
@@ -39,21 +39,21 @@ kline:
     spot:
       intervalSyncConfigs:
         "1h":
-          minMaintainCount: 1000
+          minMaintainCount: 9000
           listenSymbolPatterns:
             - .*?USDT
         "1d":
-          minMaintainCount: 365
+          minMaintainCount: 1000
           listenSymbolPatterns:
             - .*?USDT
     future:
       intervalSyncConfigs:
         "1h":
-          minMaintainCount: 1000
+          minMaintainCount: 9000
           listenSymbolPatterns:
             - .*?USDT
         "1d":
-          minMaintainCount: 365
+          minMaintainCount: 1000
           listenSymbolPatterns:
             - .*?USDT
 
