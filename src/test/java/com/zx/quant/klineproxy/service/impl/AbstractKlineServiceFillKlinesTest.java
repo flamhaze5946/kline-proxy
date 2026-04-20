@@ -237,6 +237,21 @@ class AbstractKlineServiceFillKlinesTest {
     assertEquals(7, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
   }
 
+  @Test
+  void initialBackgroundSyncShouldUsePersistenceMaxStoreCountWhenGreaterThanMinMaintainCount() {
+    long hour = IntervalEnum.ONE_HOUR.getMills();
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
+    service.setSymbols(List.of("ETHUSDT"));
+    service.configurePersistence(persistenceStore, 5, Map.of());
+    service.setServerTime((hour * 10) + 5_000L);
+    service.putSymbolOnboardTime("ETHUSDT", 0L);
+
+    service.invokeSyncConfiguredKlinesOnce();
+
+    assertEquals(5, service.getQueryRequests().size());
+  }
+
   private static boolean awaitCondition(CheckedBooleanSupplier supplier) throws Exception {
     long deadline = System.currentTimeMillis() + 3_000L;
     while (System.currentTimeMillis() < deadline) {
@@ -447,6 +462,10 @@ class AbstractKlineServiceFillKlinesTest {
 
     private void invokeDumpPersistedKlines(boolean force) {
       ReflectionTestUtils.invokeMethod(this, "dumpPersistedKlines", force);
+    }
+
+    private void invokeSyncConfiguredKlinesOnce() {
+      ReflectionTestUtils.invokeMethod(this, "syncConfiguredKlinesOnce");
     }
 
     private void setQueryKlinesResult(QueryKlineRequest request, List<Kline> klines) {

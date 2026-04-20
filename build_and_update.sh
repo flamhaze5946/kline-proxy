@@ -1,3 +1,3 @@
 mvn clean package
-docker build -t flamhaze5946/kline-proxy:1.7.0 --platform linux/amd64 .
-docker push flamhaze5946/kline-proxy:1.7.0
+docker build -t flamhaze5946/kline-proxy:1.7.1 --platform linux/amd64 .
+docker push flamhaze5946/kline-proxy:1.7.1

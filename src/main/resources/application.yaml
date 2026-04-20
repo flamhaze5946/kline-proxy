@@ -70,4 +70,4 @@ ws:
     binanceSpot:
       url: wss://stream.binance.com/ws
     binanceFuture:
-      url: wss://fstream.binance.com/ws
+      url: wss://fstream.binance.com/market/ws

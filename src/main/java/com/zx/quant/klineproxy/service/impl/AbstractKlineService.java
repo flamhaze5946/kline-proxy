@@ -1160,36 +1160,33 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private void startKlineRpcUpdater() {
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
-        new ExceptionSafeRunnable(() -> {
-          List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-          List<String> symbols = getSymbols();
-          List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
-          for (IntervalEnum interval : subscribeIntervals) {
-            List<String> subscribeSymbols = getSubscribeSymbols(symbols, interval);
-            for (String symbol : subscribeSymbols) {
-              symbolIntervals.add(ImmutablePair.of(symbol, interval));
-            }
-          }
-          CompletableFuture.runAsync(() -> {
-            List<Runnable> syncTasks = symbolIntervals.stream()
-                .<Runnable>map(symbolInterval -> () -> {
-                  String symbol = symbolInterval.getLeft();
-                  IntervalEnum interval = symbolInterval.getRight();
-                  int refreshKlineCount = getSyncConfig().getIntervalSyncConfigs().get(interval.code()).getMinMaintainCount();
-                  KlineSetKey key = new KlineSetKey(symbol, interval.code());
-                  KlineSet klineSet = klineSetMap.get(key);
-                  if (klineSet != null && getMapSize(klineSet.getKlineMap(), interval) >= getSyncConfig().getRpcRefreshCount()) {
-                    refreshKlineCount = getSyncConfig().getRpcRefreshCount();
-                  }
-                  safeQueryKlines(symbol, interval.code(),
-                      null, System.currentTimeMillis(),
-                      refreshKlineCount, 1, KLINE_FETCH_EXECUTOR);
-                })
-                .toList();
-            runTasksWithLimitedWorkers(syncTasks, MAX_RPC_SYNC_WORKERS, KLINE_FETCH_EXECUTOR);
-            log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
-          }, MANAGE_EXECUTOR).join();
-        }), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+        new ExceptionSafeRunnable(this::syncConfiguredKlinesOnce), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
+  }
+
+  private void syncConfiguredKlinesOnce() {
+    List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
+    List<String> symbols = getSymbols();
+    List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
+    for (IntervalEnum interval : subscribeIntervals) {
+      List<String> subscribeSymbols = getSubscribeSymbols(symbols, interval);
+      for (String symbol : subscribeSymbols) {
+        symbolIntervals.add(ImmutablePair.of(symbol, interval));
+      }
+    }
+    CompletableFuture.runAsync(() -> {
+      List<Runnable> syncTasks = symbolIntervals.stream()
+          .<Runnable>map(symbolInterval -> () -> {
+            String symbol = symbolInterval.getLeft();
+            IntervalEnum interval = symbolInterval.getRight();
+            int refreshKlineCount = getBackgroundRefreshKlineCount(symbol, interval);
+            safeQueryKlines(symbol, interval.code(),
+                null, System.currentTimeMillis(),
+                refreshKlineCount, 1, KLINE_FETCH_EXECUTOR);
+          })
+          .toList();
+      runTasksWithLimitedWorkers(syncTasks, MAX_RPC_SYNC_WORKERS, KLINE_FETCH_EXECUTOR);
+      log.info("klines for {} with intervals: {} synced.", getClass().getSimpleName(), subscribeIntervals);
+    }, MANAGE_EXECUTOR).join();
   }
 
   private void startKlinePersistenceUpdater() {
@@ -1707,6 +1704,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return intervalSyncConfig.getMinMaintainCount();
     }
     return Math.max(intervalSyncConfig.getMinMaintainCount(), getPersistenceMaxStoreCount(symbol, intervalEnum));
+  }
+
+  private int getBackgroundRefreshKlineCount(String symbol, IntervalEnum intervalEnum) {
+    int refreshKlineCount = getEffectiveMaintainCount(symbol, intervalEnum);
+    Integer rpcRefreshCount = getSyncConfig().getRpcRefreshCount();
+    int realRpcRefreshCount = rpcRefreshCount == null ? refreshKlineCount : rpcRefreshCount;
+    KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
+    KlineSet klineSet = klineSetMap.get(key);
+    if (klineSet != null && getMapSize(klineSet.getKlineMap(), intervalEnum) >= realRpcRefreshCount) {
+      return realRpcRefreshCount;
+    }
+    return refreshKlineCount;
   }
 
   private KlinePersistenceProperties.ServicePersistenceConfig getPersistenceServiceConfig() {
