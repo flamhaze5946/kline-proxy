@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.config;
 
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -19,6 +20,7 @@ public class SerializeConfig {
     ObjectMapper objectMapper = new ObjectMapper();
     objectMapper.setSerializationInclusion(Include.NON_NULL);
     objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    objectMapper.configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
     return objectMapper;
   }
 

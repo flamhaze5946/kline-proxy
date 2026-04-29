@@ -123,7 +123,6 @@ public class BinanceSpotController extends GenericController {
       @RequestParam(value = "limit", required = false) Integer limit,
       @RequestParam(value = "timeZone", required = false) String timeZone
   ) {
-    validateSymbols(List.of(symbol), allSymbols(exchangeService.queryExchange()));
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
     if (StringUtils.isNotBlank(timeZone) || StringUtils.equals(interval, IntervalEnum.ONE_MONTH.code())) {
       Call<List<Object[]>> klinesCall = binanceSpotClient.getKlines(symbol, interval, startTime, endTime, realLimit, timeZone);

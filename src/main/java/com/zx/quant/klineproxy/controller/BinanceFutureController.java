@@ -119,7 +119,6 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "endTime", required = false) Long endTime,
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
-    validateSymbols(List.of(symbol), allSymbols(exchangeService.queryExchange()));
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
     Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
     Object[][] displayKlines = new Object[klines.length][];
