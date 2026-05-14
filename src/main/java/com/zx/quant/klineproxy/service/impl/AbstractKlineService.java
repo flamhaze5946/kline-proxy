@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.EventKline;
 import com.zx.quant.klineproxy.model.EventKline.BigDecimalEventKline;
 import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
@@ -50,6 +51,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -129,6 +131,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final Duration ALL_MARKET_TICKER_CACHE_TTL = Duration.ofMillis(500);
 
+  private static final Duration BULK_KLINES_CACHE_TTL = Duration.ofSeconds(1);
+
+  private static final int DEFAULT_BULK_KLINES_LIMIT = 5;
+
+  private static final int MAX_BULK_KLINES_LIMIT = 100;
+
   private static final long ALL_MARKET_SNAPSHOT_REFRESH_IDLE_TIMEOUT_MILLS = 5_000L;
 
   private static final long ALL_MARKET_SNAPSHOT_REFRESH_CHECK_INTERVAL_MILLS = 100L;
@@ -152,6 +160,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final Cache<String, Ticker24Hr> ticker24HrCache = Caffeine.newBuilder()
       .expireAfterWrite(Duration.ofDays(1))
+      .build();
+
+  private final Cache<BulkKlinesKey, BulkKlinesResponse> bulkKlinesCache = Caffeine.newBuilder()
+      .expireAfterWrite(BULK_KLINES_CACHE_TTL)
+      .maximumSize(64)
       .build();
 
   private final AtomicReference<AllMarketSnapshot<Ticker<?>>> allMarketTickerSnapshot =
@@ -365,6 +378,65 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
 
     return ImmutablePair.of(savedKlineMap.values(), mapSize);
+  }
+
+  @Override
+  public BulkKlinesResponse queryBulkKlines(String interval, Integer limit, boolean closedOnly, Collection<String> symbols) {
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
+    if (intervalEnum == null) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, -1120, "Invalid interval.");
+    }
+    int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_KLINES_LIMIT, MIN_LIMIT),
+        MAX_BULK_KLINES_LIMIT);
+    List<String> normalizedSymbols = normalizeBulkSymbols(symbols, intervalEnum);
+    BulkKlinesKey cacheKey = new BulkKlinesKey(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols);
+    return bulkKlinesCache.get(cacheKey, key -> buildBulkKlinesResponse(key.interval(), key.limit(),
+        key.closedOnly(), key.symbols()));
+  }
+
+  private BulkKlinesResponse buildBulkKlinesResponse(String interval, int limit, boolean closedOnly, List<String> symbols) {
+    long now = getServerTime();
+    Map<String, List<Object[]>> out = new LinkedHashMap<>();
+    for (String symbol : symbols) {
+      KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
+      if (klineSet == null || MapUtils.isEmpty(klineSet.getKlineMap())) {
+        continue;
+      }
+      List<Kline> klines = klineSet.getKlineMap()
+          .descendingMap()
+          .values()
+          .stream()
+          .filter(kline -> !closedOnly || kline.getCloseTime() <= now)
+          .limit(limit)
+          .collect(Collectors.toCollection(ArrayList::new));
+      if (klines.isEmpty()) {
+        continue;
+      }
+      Collections.reverse(klines);
+      out.put(symbol, klines.stream().map(ConvertUtil::convertToDisplayKline).toList());
+    }
+    return new BulkKlinesResponse(interval, now, out);
+  }
+
+  private List<String> normalizeBulkSymbols(Collection<String> symbols, IntervalEnum intervalEnum) {
+    if (CollectionUtils.isEmpty(symbols)) {
+      return klineSetMap.keySet().stream()
+          .filter(key -> StringUtils.equals(key.getInterval(), intervalEnum.code()))
+          .map(KlineSetKey::getSymbol)
+          .distinct()
+          .sorted()
+          .toList();
+    }
+    return symbols.stream()
+        .filter(StringUtils::isNotBlank)
+        .map(StringUtils::trim)
+        .filter(symbol -> klineSetMap.containsKey(new KlineSetKey(symbol, intervalEnum.code())))
+        .distinct()
+        .sorted()
+        .toList();
+  }
+
+  private record BulkKlinesKey(String interval, int limit, boolean closedOnly, List<String> symbols) {
   }
 
   @Override

@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.service;
 
+import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
@@ -80,6 +81,13 @@ public interface KlineService {
    * @return klines, klines size
    */
   ImmutablePair<Collection<Kline>, Integer> queryKlines(String symbol, String interval, Long startTime, Long endTime, int limit, boolean makeUp);
+
+  /**
+   * Query the last closed in-memory klines for many websocket-subscribed symbols.
+   */
+  default BulkKlinesResponse queryBulkKlines(String interval, Integer limit, boolean closedOnly, Collection<String> symbols) {
+    throw new UnsupportedOperationException("bulk klines not supported");
+  }
 
   /**
    * update klines

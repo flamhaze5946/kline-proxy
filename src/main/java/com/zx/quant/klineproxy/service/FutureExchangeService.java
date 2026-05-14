@@ -1,7 +1,9 @@
 package com.zx.quant.klineproxy.service;
 
+import com.zx.quant.klineproxy.model.BulkFundingRateResponse;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.FuturePremiumIndex;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -15,6 +17,8 @@ public interface FutureExchangeService<T> extends ExchangeService<T> {
    * @return funding rates
    */
   List<FutureFundingRate> queryFundingRates(String symbol, Long startTime, Long endTime, Integer limit);
+
+  BulkFundingRateResponse queryBulkFundingRates(Collection<String> symbols, Long sinceMs, Long untilMs, Integer limit);
 
   /**
    * query premium indices

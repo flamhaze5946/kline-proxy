@@ -3,6 +3,8 @@ package com.zx.quant.klineproxy.controller;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
 import com.zx.quant.klineproxy.client.model.BinanceFutureServerTime;
+import com.zx.quant.klineproxy.model.BulkFundingRateResponse;
+import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
@@ -11,6 +13,7 @@ import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.Serializer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.commons.lang3.StringUtils;
@@ -73,6 +76,16 @@ public class BinanceFutureController extends GenericController {
     return ConvertUtil.convertToDisplayFundingRates(fundingRates);
   }
 
+  @GetMapping("fundingRate/bulk")
+  public BulkFundingRateResponse queryBulkFundingRate(
+      @RequestParam(value = "symbols", required = false) String symbols,
+      @RequestParam(value = "since_ms", required = false) Long sinceMs,
+      @RequestParam(value = "until_ms", required = false) Long untilMs,
+      @RequestParam(value = "limit", required = false) Integer limit
+  ) {
+    return exchangeService.queryBulkFundingRates(parseCsv(symbols), sinceMs, untilMs, limit);
+  }
+
   @GetMapping("premiumIndex")
   public Object queryPremiumIndex(
       @RequestParam(value = "symbol", required = false) String symbol
@@ -111,6 +124,16 @@ public class BinanceFutureController extends GenericController {
     return ConvertUtil.convertToDisplayTicker(tickers, shouldReturnArray(symbol));
   }
 
+  @GetMapping("klines/bulk")
+  public BulkKlinesResponse queryBulkKlines(
+      @RequestParam(value = "interval") String interval,
+      @RequestParam(value = "limit", required = false) Integer limit,
+      @RequestParam(value = "closed_only", required = false, defaultValue = "true") Boolean closedOnly,
+      @RequestParam(value = "symbols", required = false) String symbols
+  ) {
+    return klineService.queryBulkKlines(interval, limit, Boolean.TRUE.equals(closedOnly), parseCsv(symbols));
+  }
+
   @GetMapping("klines")
   public Object[][] queryKlines(
       @RequestParam(value = "symbol") String symbol,
@@ -128,6 +151,18 @@ public class BinanceFutureController extends GenericController {
       displayKlines[i] = displayKline;
     }
     return displayKlines;
+  }
+
+  private List<String> parseCsv(String symbols) {
+    if (StringUtils.isBlank(symbols)) {
+      return List.of();
+    }
+    return Arrays.stream(symbols.split(","))
+        .map(StringUtils::trim)
+        .filter(StringUtils::isNotBlank)
+        .distinct()
+        .sorted()
+        .toList();
   }
 
   private List<String> allSymbols(BinanceFutureExchange exchange) {

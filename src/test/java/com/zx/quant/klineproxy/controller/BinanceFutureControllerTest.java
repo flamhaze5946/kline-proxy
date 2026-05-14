@@ -8,14 +8,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.zx.quant.klineproxy.config.GlobalExceptionConfig;
 import com.zx.quant.klineproxy.config.SerializeConfig;
+import com.zx.quant.klineproxy.model.BulkFundingRateResponse;
+import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
 import com.zx.quant.klineproxy.model.FuturePremiumIndex;
+import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -108,6 +113,50 @@ class BinanceFutureControllerTest {
         .andExpect(jsonPath("$[0].fundingRate").value("0.0001"))
         .andExpect(jsonPath("$[0].markPrice").value("100"));
     verify(exchangeService).queryFundingRates("BTCUSDT", 10L, 20L, 30);
+  }
+
+  @Test
+  void shouldReturnBulkKlinesAndPassNormalizedSymbols() throws Exception {
+    Map<String, List<Object[]>> rows = new LinkedHashMap<>();
+    rows.put("BTCUSDT", java.util.Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
+    given(klineService.queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT")))
+        .willReturn(new BulkKlinesResponse("1h", 123L, rows));
+
+    mockMvc.perform(get("/fapi/v1/klines/bulk")
+            .param("interval", "1h")
+            .param("limit", "5")
+            .param("closed_only", "true")
+            .param("symbols", "ETHUSDT,BTCUSDT"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.interval").value("1h"))
+        .andExpect(jsonPath("$.ts_ms").value(123L))
+        .andExpect(jsonPath("$.klines.BTCUSDT[0][0]").value(1L))
+        .andExpect(jsonPath("$.klines.BTCUSDT[0][11]").value("0"));
+    verify(klineService).queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT"));
+  }
+
+  @Test
+  void shouldReturnBulkFundingRateAndPassParams() throws Exception {
+    FutureFundingRate fundingRate = new FutureFundingRate();
+    fundingRate.setSymbol("BTCUSDT");
+    fundingRate.setFundingTime(1L);
+    fundingRate.setFundingRate(new BigDecimal("0.0001"));
+    fundingRate.setMarkPrice(new BigDecimal("100"));
+    Map<String, List<ConvertUtil.DisplayFundingRate>> rows = new LinkedHashMap<>();
+    rows.put("BTCUSDT", ConvertUtil.convertToDisplayFundingRates(List.of(fundingRate)));
+    given(exchangeService.queryBulkFundingRates(List.of("BTCUSDT"), 10L, 20L, 3))
+        .willReturn(new BulkFundingRateResponse(123L, rows));
+
+    mockMvc.perform(get("/fapi/v1/fundingRate/bulk")
+            .param("symbols", "BTCUSDT")
+            .param("since_ms", "10")
+            .param("until_ms", "20")
+            .param("limit", "3"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ts_ms").value(123L))
+        .andExpect(jsonPath("$.fundingRates.BTCUSDT[0].fundingRate").value("0.0001"))
+        .andExpect(jsonPath("$.fundingRates.BTCUSDT[0].markPrice").value("100"));
+    verify(exchangeService).queryBulkFundingRates(List.of("BTCUSDT"), 10L, 20L, 3);
   }
 
   @Test

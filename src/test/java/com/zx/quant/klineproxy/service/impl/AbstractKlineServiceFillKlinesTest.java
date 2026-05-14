@@ -70,6 +70,25 @@ class AbstractKlineServiceFillKlinesTest {
   }
 
   @Test
+  void queryBulkKlinesShouldReturnLastClosedRowsAndOmitUnsubscribedSymbols() {
+    TestKlineService service = new TestKlineService();
+    long hour = IntervalEnum.ONE_HOUR.getMills();
+    service.updateKlines("BTCUSDT", IntervalEnum.ONE_HOUR.code(),
+        List.of(buildKline(0, "100"), buildKline(hour, "101"), buildKline(hour * 2, "102"),
+            buildKline(hour * 3, "103")));
+    service.setServerTime((hour * 3) - 1);
+
+    var response = service.queryBulkKlines(IntervalEnum.ONE_HOUR.code(), 2, true,
+        List.of("MISSING", "BTCUSDT"));
+
+    assertEquals(List.of("BTCUSDT"), new ArrayList<>(response.klines().keySet()));
+    assertEquals(hour, response.klines().get("BTCUSDT").get(0)[0]);
+    assertEquals(hour * 2, response.klines().get("BTCUSDT").get(1)[0]);
+    assertEquals("101", response.klines().get("BTCUSDT").get(0)[4]);
+    assertEquals("102", response.klines().get("BTCUSDT").get(1)[4]);
+  }
+
+  @Test
   void updateKlinesShouldTrimSeriesWhenMaintainCountExceeded() {
     TestKlineService service = new TestKlineService();
     List<Kline> klines = java.util.stream.IntStream.range(0, 60)
