@@ -126,24 +126,18 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   private BulkFundingRateResponse loadBulkFundingRatesWithHistoricalCache(
       List<String> symbols, Long sinceMs, Long untilMs, int limit) {
-    if (sinceMs == null || untilMs == null) {
-      return loadBulkFundingRates(symbols, sinceMs, untilMs, limit);
-    }
-    Map<String, List<DisplayFundingRate>> out = new LinkedHashMap<>();
-    List<String> misses = new ArrayList<>();
-    for (String symbol : symbols) {
-      List<DisplayFundingRate> cached = cachedHistoricalFundingRates(symbol, sinceMs, untilMs, limit);
-      if (cached == null) {
-        misses.add(symbol);
-      } else {
-        out.put(symbol, cached);
-      }
-    }
-    if (!misses.isEmpty()) {
-      BulkFundingRateResponse fetched = loadBulkFundingRates(misses, sinceMs, untilMs, limit);
-      out.putAll(fetched.fundingRates());
-    }
-    return new BulkFundingRateResponse(System.currentTimeMillis(), orderedBySymbols(symbols, out));
+    // R31-fix-r2: explicit window queries skip the historical-cache
+    // expectedFundingTimes derivation. That derivation assumes
+    // FUNDING_INTERVAL_MS=8h (line 194) and produces a wrong "expected"
+    // time set for variable-interval funding symbols (e.g. 1h funding).
+    // For nos-rs's hot path the in-cycle window is always (target_cbt,
+    // target_cbt+HOUR_MS+1) — Binance returns at most one event per
+    // symbol per call regardless of interval, and the per-call cost is
+    // small. The historical cache is still WRITTEN by loadBulkFundingRates
+    // (line 169) for any future caller that wants point lookups via
+    // (symbol, fundingTime), but explicit windows no longer try to
+    // reconstruct expected timestamps a priori.
+    return loadBulkFundingRates(symbols, sinceMs, untilMs, limit);
   }
 
   private BulkFundingRateResponse loadBulkFundingRates(List<String> symbols, Long sinceMs, Long untilMs, int limit) {
@@ -172,46 +166,6 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       out.put(symbol, displayRows);
     }
     return new BulkFundingRateResponse(System.currentTimeMillis(), out);
-  }
-
-  private List<DisplayFundingRate> cachedHistoricalFundingRates(String symbol, long sinceMs, long untilMs, int limit) {
-    List<Long> expectedTimes = expectedFundingTimes(sinceMs, untilMs, limit);
-    List<DisplayFundingRate> rows = new ArrayList<>(expectedTimes.size());
-    for (Long fundingTime : expectedTimes) {
-      DisplayFundingRate row = bulkFundingHistoricalCache.getIfPresent(new HistoricalFundingKey(symbol, fundingTime));
-      if (row == null) {
-        return null;
-      }
-      rows.add(row);
-    }
-    return rows;
-  }
-
-  private List<Long> expectedFundingTimes(long sinceMs, long untilMs, int limit) {
-    if (untilMs <= sinceMs) {
-      return List.of();
-    }
-    long first = Math.floorDiv(sinceMs + FUNDING_INTERVAL_MS - 1, FUNDING_INTERVAL_MS) * FUNDING_INTERVAL_MS;
-    List<Long> times = new ArrayList<>();
-    for (long fundingTime = first; fundingTime < untilMs; fundingTime += FUNDING_INTERVAL_MS) {
-      times.add(fundingTime);
-    }
-    if (times.size() > limit) {
-      return new ArrayList<>(times.subList(times.size() - limit, times.size()));
-    }
-    return times;
-  }
-
-  private Map<String, List<DisplayFundingRate>> orderedBySymbols(
-      List<String> symbols, Map<String, List<DisplayFundingRate>> rowsBySymbol) {
-    Map<String, List<DisplayFundingRate>> ordered = new LinkedHashMap<>();
-    for (String symbol : symbols) {
-      List<DisplayFundingRate> rows = rowsBySymbol.get(symbol);
-      if (rows != null) {
-        ordered.put(symbol, rows);
-      }
-    }
-    return ordered;
   }
 
   private List<String> normalizeFundingSymbols(Collection<String> symbols) {
