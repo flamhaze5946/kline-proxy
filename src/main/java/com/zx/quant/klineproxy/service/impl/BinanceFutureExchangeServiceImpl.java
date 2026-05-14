@@ -111,7 +111,14 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
         MAX_BULK_FUNDING_LIMIT);
     List<String> realSymbols = normalizeFundingSymbols(symbols);
     if (sinceMs == null && untilMs == null) {
-      RecentFundingKey key = new RecentFundingKey(realSymbols, realLimit);
+      // R31-fix CRIT 2: include the current 8h funding boundary in the cache
+      // key so the 60s TTL window cannot serve a stale entry across a
+      // funding boundary. Without this, an entry populated 30s before the
+      // boundary would return the previous-event payload to the first
+      // post-boundary request, causing Rust scraper to write fr=0 on the
+      // funding candle.
+      long fundingBoundaryMs = Math.floorDiv(System.currentTimeMillis(), FUNDING_INTERVAL_MS) * FUNDING_INTERVAL_MS;
+      RecentFundingKey key = new RecentFundingKey(realSymbols, realLimit, fundingBoundaryMs);
       return bulkFundingRecentCache.get(key, ignored -> loadBulkFundingRates(realSymbols, null, null, realLimit));
     }
     return loadBulkFundingRatesWithHistoricalCache(realSymbols, sinceMs, untilMs, realLimit);
@@ -258,7 +265,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
     }
   }
 
-  private record RecentFundingKey(List<String> symbols, int limit) {
+  private record RecentFundingKey(List<String> symbols, int limit, long fundingBoundaryMs) {
   }
 
   private record HistoricalFundingKey(String symbol, long fundingTime) {
