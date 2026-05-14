@@ -408,7 +408,7 @@ public final class ConvertUtil {
     private Long time;
   }
 
-  private static DisplayFundingRate convertToDisplayFundingRate(FutureFundingRate fundingRate) {
+  public static DisplayFundingRate convertToDisplayFundingRate(FutureFundingRate fundingRate) {
     DisplayFundingRate displayFundingRate = new DisplayFundingRate();
     displayFundingRate.setSymbol(fundingRate.getSymbol());
     displayFundingRate.setFundingTime(fundingRate.getFundingTime());

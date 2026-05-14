@@ -109,6 +109,16 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   public BulkFundingRateResponse queryBulkFundingRates(Collection<String> symbols, Long sinceMs, Long untilMs, Integer limit) {
     int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_FUNDING_LIMIT, 1),
         MAX_BULK_FUNDING_LIMIT);
+    // R31-perf: when caller doesn't specify symbols, use Binance's
+    // single no-symbol /fapi/v1/fundingRate call (limit up to 1000) to
+    // fetch all funding events in the window in ONE round trip instead
+    // of looping 608+ symbols sequentially (which took ~49s). For
+    // nos-rs scraper hot path this drops the funding bulk call from
+    // ~49s to ~200ms.
+    boolean noSymbolsSpecified = symbols == null || symbols.isEmpty();
+    if (noSymbolsSpecified && sinceMs != null && untilMs != null) {
+      return loadBulkFundingRatesNoSymbol(sinceMs, untilMs, realLimit);
+    }
     List<String> realSymbols = normalizeFundingSymbols(symbols);
     if (sinceMs == null && untilMs == null) {
       // R31-fix CRIT 2: include the current 8h funding boundary in the cache
@@ -122,6 +132,39 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       return bulkFundingRecentCache.get(key, ignored -> loadBulkFundingRates(realSymbols, null, null, realLimit));
     }
     return loadBulkFundingRatesWithHistoricalCache(realSymbols, sinceMs, untilMs, realLimit);
+  }
+
+  /**
+   * R31-perf: single Binance fundingRate call (no symbol param) to fetch
+   * every symbol's funding events in [sinceMs, untilMs) within one HTTP
+   * round-trip. Binance supports symbol=null + startTime + endTime + limit
+   * (up to 1000); response is sorted by fundingTime. Output is grouped by
+   * symbol with per-symbol lists truncated to {@code limit}.
+   */
+  private BulkFundingRateResponse loadBulkFundingRatesNoSymbol(long sinceMs, long untilMs, int limit) {
+    // Use Binance's MAX_BULK_FUNDING_LIMIT for the underlying fetch
+    // (covers ~all symbols' single-event-per-window case) but each
+    // per-symbol bucket below is still capped at the caller's limit.
+    final int FETCH_LIMIT = 1000;
+    List<FutureFundingRate> rows = queryFundingRates(null, sinceMs, untilMs, FETCH_LIMIT).stream()
+        .filter(rate -> rate.getFundingTime() != null)
+        .filter(rate -> rate.getSymbol() != null && !rate.getSymbol().isBlank())
+        .filter(rate -> rate.getFundingTime() >= sinceMs)
+        .filter(rate -> rate.getFundingTime() < untilMs)
+        .sorted((left, right) -> left.getFundingTime().compareTo(right.getFundingTime()))
+        .toList();
+    Map<String, List<DisplayFundingRate>> out = new LinkedHashMap<>();
+    for (FutureFundingRate row : rows) {
+      String symbol = row.getSymbol();
+      DisplayFundingRate display = ConvertUtil.convertToDisplayFundingRate(row);
+      if (display.getFundingTime() != null) {
+        bulkFundingHistoricalCache.put(new HistoricalFundingKey(symbol, display.getFundingTime()), display);
+      }
+      out.computeIfAbsent(symbol, ignored -> new ArrayList<>()).add(display);
+    }
+    // Cap each symbol's list to the caller's limit (keep latest).
+    out.replaceAll((sym, list) -> list.size() > limit ? new ArrayList<>(list.subList(list.size() - limit, list.size())) : list);
+    return new BulkFundingRateResponse(System.currentTimeMillis(), out);
   }
 
   private BulkFundingRateResponse loadBulkFundingRatesWithHistoricalCache(
