@@ -3,8 +3,10 @@ package com.zx.quant.klineproxy.controller;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.springframework.http.MediaType;
 
 import com.zx.quant.klineproxy.config.GlobalExceptionConfig;
 import com.zx.quant.klineproxy.config.SerializeConfig;
@@ -157,6 +159,90 @@ class BinanceFutureControllerTest {
         .andExpect(jsonPath("$.fundingRates.BTCUSDT[0].fundingRate").value("0.0001"))
         .andExpect(jsonPath("$.fundingRates.BTCUSDT[0].markPrice").value("100"));
     verify(exchangeService).queryBulkFundingRates(List.of("BTCUSDT"), 10L, 20L, 3);
+  }
+
+  @Test
+  void postBulkKlinesShouldNormalizeSymbolsAndDelegate() throws Exception {
+    Map<String, List<Object[]>> rows = new LinkedHashMap<>();
+    rows.put("BTCUSDT", java.util.Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
+    given(klineService.queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT")))
+        .willReturn(new BulkKlinesResponse("1h", 123L, rows));
+
+    String body = "{\"interval\":\"1h\",\"limit\":5,\"closed_only\":true,"
+        + "\"symbols\":[\"ETHUSDT\",\"BTCUSDT\",\" BTCUSDT \",\" \",null]}";
+    mockMvc.perform(post("/fapi/v1/klines/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.interval").value("1h"))
+        .andExpect(jsonPath("$.ts_ms").value(123L))
+        .andExpect(jsonPath("$.klines.BTCUSDT[0][0]").value(1L));
+    // Sorted + deduped + trimmed = ["BTCUSDT","ETHUSDT"]; closed_only=true
+    verify(klineService).queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT"));
+  }
+
+  @Test
+  void postBulkKlinesShouldDefaultClosedOnlyToTrueWhenOmitted() throws Exception {
+    given(klineService.queryBulkKlines("1h", null, true, List.of()))
+        .willReturn(new BulkKlinesResponse("1h", 1L, new LinkedHashMap<>()));
+
+    String body = "{\"interval\":\"1h\"}";
+    mockMvc.perform(post("/fapi/v1/klines/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body))
+        .andExpect(status().isOk());
+    verify(klineService).queryBulkKlines("1h", null, true, List.of());
+  }
+
+  @Test
+  void postBulkKlinesShouldRejectMissingInterval() throws Exception {
+    mockMvc.perform(post("/fapi/v1/klines/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"limit\":5}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void postBulkKlinesShouldRejectBlankInterval() throws Exception {
+    mockMvc.perform(post("/fapi/v1/klines/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"interval\":\"  \"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void postBulkFundingRateShouldDelegateWithNormalizedSymbols() throws Exception {
+    FutureFundingRate fundingRate = new FutureFundingRate();
+    fundingRate.setSymbol("BTCUSDT");
+    fundingRate.setFundingTime(1L);
+    fundingRate.setFundingRate(new BigDecimal("0.0001"));
+    fundingRate.setMarkPrice(new BigDecimal("100"));
+    Map<String, List<ConvertUtil.DisplayFundingRate>> rows = new LinkedHashMap<>();
+    rows.put("BTCUSDT", ConvertUtil.convertToDisplayFundingRates(List.of(fundingRate)));
+    given(exchangeService.queryBulkFundingRates(List.of("BTCUSDT", "ETHUSDT"), 10L, 20L, 3))
+        .willReturn(new BulkFundingRateResponse(123L, rows));
+
+    String body = "{\"symbols\":[\" ETHUSDT \",\"BTCUSDT\",\"ETHUSDT\"],"
+        + "\"since_ms\":10,\"until_ms\":20,\"limit\":3}";
+    mockMvc.perform(post("/fapi/v1/fundingRate/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ts_ms").value(123L))
+        .andExpect(jsonPath("$.fundingRates.BTCUSDT[0].fundingRate").value("0.0001"));
+    verify(exchangeService).queryBulkFundingRates(List.of("BTCUSDT", "ETHUSDT"), 10L, 20L, 3);
+  }
+
+  @Test
+  void postBulkFundingRateShouldTreatEmptyBodyAsAllSymbols() throws Exception {
+    given(exchangeService.queryBulkFundingRates(List.of(), null, null, null))
+        .willReturn(new BulkFundingRateResponse(1L, new LinkedHashMap<>()));
+
+    mockMvc.perform(post("/fapi/v1/fundingRate/bulk")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isOk());
+    verify(exchangeService).queryBulkFundingRates(List.of(), null, null, null);
   }
 
   @Test

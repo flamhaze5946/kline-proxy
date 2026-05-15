@@ -3,7 +3,6 @@ package com.zx.quant.klineproxy.service.impl;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
-import com.google.common.collect.Lists;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.model.BinanceFutureExchange;
 import com.zx.quant.klineproxy.client.model.BinanceFutureSymbol;
@@ -86,6 +85,19 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   // every active symbol has fired at least once inside the window.
   private static final long LATEST_FUNDING_LOOKBACK_MS = 8L * 60L * 60L * 1000L;
 
+  // Threshold for routing a windowed funding query through the chunk
+  // cache vs the per-symbol REST loop. For "short" windows (default
+  // 8h, matches LATEST_FUNDING_LOOKBACK_MS), routing N symbols through
+  // the chunk cache is cheap: ~1 no-symbol Binance call per 1h chunk
+  // (cached), then post-filter by symbol in memory. The per-symbol loop
+  // costs weight 5 × N under the 35/sec rate limiter — e.g. 8 shards ×
+  // 70 symbols = 560 calls × weight 5 = 2800 weight units = ~80s
+  // throttled. For LONG windows (e.g. 30d backfill of one symbol), the
+  // per-symbol loop is still cheaper than ~720 cache fetches; keep
+  // that branch unchanged for long-window single-symbol callers.
+  private static final long FUNDING_CHUNK_CACHE_WINDOW_THRESHOLD_MS =
+      LATEST_FUNDING_LOOKBACK_MS;
+
   // Threshold at which fetchHistoricalChunk warns about a possibly
   // truncated response. A 1h chunk holds <= 1 event per symbol, so a
   // 1000-row response strongly suggests Binance hit its hard cap.
@@ -167,12 +179,22 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
     // Full window:
     //   - no symbols: chunk cache (fetches every symbol present in the
     //     window, one no-symbol Binance call per 1h chunk + cached).
-    //   - symbols: per-symbol loop. Routing by caller-supplied symbols
-    //     avoids paying N-hour chunk fetches for a single-symbol wide
-    //     historical window (e.g. 30 days = 720 chunks vs 1 per-symbol call).
+    //   - symbols + short window: route through chunk cache and post-
+    //     filter by symbol. For e.g. trader_calculator pulling the
+    //     just-closed candle's funding for ~70 symbols, 1 cached
+    //     chunk fetch is far cheaper than 70 per-symbol REST calls
+    //     under the 35/sec, weight=5 limiter (~10s throttled).
+    //   - symbols + long window: per-symbol loop. Avoids paying N
+    //     chunk fetches for a single-symbol multi-day historical
+    //     backfill (e.g. 30 days = 720 chunks vs 1 per-symbol call).
     if (sinceMs != null && untilMs != null) {
       if (noSymbolsSpecified) {
         return loadBulkFundingRatesViaChunkCache(null, sinceMs, untilMs, realLimit);
+      }
+      long windowMs = untilMs - sinceMs;
+      if (windowMs > 0 && windowMs <= FUNDING_CHUNK_CACHE_WINDOW_THRESHOLD_MS) {
+        return loadBulkFundingRatesViaChunkCache(
+            normalizeFundingSymbols(symbols), sinceMs, untilMs, realLimit);
       }
       return loadBulkFundingRates(normalizeFundingSymbols(symbols), sinceMs, untilMs, realLimit);
     }
