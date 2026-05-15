@@ -44,6 +44,6 @@ class BinanceFutureExchangeServiceImplTest {
     assertEquals(first.fundingRates(), second.fundingRates());
     verify(client, times(1)).getFundingRates("BTCUSDT", null, null, 1);
     verify(rateLimitManager, times(1))
-        .acquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1);
+        .acquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 5);
   }
 }

@@ -33,9 +33,11 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import retrofit2.Call;
 
@@ -43,6 +45,7 @@ import retrofit2.Call;
  * binance future exchange service impl
  * @author flamhaze5946
  */
+@Slf4j
 @Service("binanceFutureExchangeService")
 public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<BinanceFutureExchange>, InitializingBean {
 
@@ -50,11 +53,43 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   private static final String SERVER_TIME_REFRESHER_GROUP = "futureServerTimeRefresher";
 
+  // Re-warm the bulk-funding recent cache at the start of every integer
+  // hour, +1s buffer (matches FUNDING_PUBLICATION_GRACE_MS) so Binance
+  // has finished publishing the new boundary's events. Pinned to UTC
+  // because Binance funding boundaries are UTC-aligned.
+  private static final String FUNDING_RATE_REFRESH_CRON = "1 0 * * * *";
+
+  private static final String FUNDING_RATE_REFRESH_ZONE = "UTC";
+
   private static final int DEFAULT_BULK_FUNDING_LIMIT = 1;
 
   private static final int MAX_BULK_FUNDING_LIMIT = 100;
 
-  private static final long FUNDING_INTERVAL_MS = 8L * 60L * 60L * 1000L;
+  // Recent-cache key bucket: aligned to the integer hour so the cache
+  // self-invalidates at every funding boundary (Binance supports 1h /
+  // 4h / 8h intervals — 1h is the GCD that covers them all). At each
+  // hourly mark the key flips and the next request triggers a fresh
+  // fetch even if the 60s TTL has not expired yet.
+  private static final long RECENT_CACHE_BOUNDARY_MS = 60L * 60L * 1000L;
+
+  // Grace buffer for Binance publication latency. Binance publishes a
+  // boundary's funding events within ~1s of the boundary, so a 1s buffer
+  // is enough to prevent (a) locking an empty/partial just-finished chunk
+  // into historicalChunkCache, and (b) caching an aggregate missing
+  // late-publishing events for 60s in bulkFundingRecentCache. Bump only
+  // if fetchHistoricalChunk warn logs or scraper anomalies show
+  // publication routinely exceeding it.
+  private static final long FUNDING_PUBLICATION_GRACE_MS = 1_000L;
+
+  // Lookback for the "latest funding rate per symbol" query (no symbol,
+  // no time). Covers Binance's longest supported funding interval (8h) so
+  // every active symbol has fired at least once inside the window.
+  private static final long LATEST_FUNDING_LOOKBACK_MS = 8L * 60L * 60L * 1000L;
+
+  // Threshold at which fetchHistoricalChunk warns about a possibly
+  // truncated response. A 1h chunk holds <= 1 event per symbol, so a
+  // 1000-row response strongly suggests Binance hit its hard cap.
+  private static final int FUNDING_CHUNK_FETCH_LIMIT = 1000;
 
   private final ScheduledExecutorService serverTimeRefresher = new ScheduledThreadPoolExecutor(1,
       ThreadFactoryUtil.getNamedThreadFactory(SERVER_TIME_REFRESHER_GROUP));
@@ -66,8 +101,15 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       .maximumSize(64)
       .build();
 
-  private final Cache<HistoricalFundingKey, DisplayFundingRate> bulkFundingHistoricalCache = Caffeine.newBuilder()
-      .maximumSize(200_000)
+  // Historical chunk cache: each entry holds one 1h-aligned chunk
+  // (chunkStartMs -> symbol -> events in that chunk). Populated lazily
+  // by windowed queries via the no-symbol bulk Binance call (one HTTP
+  // round-trip per chunk). Past chunks are immutable so no TTL is set —
+  // LRU eviction caps memory. maximumSize ~ 720 covers ~30 days of 1h
+  // chunks. ~600 symbols * 1 event/chunk worst case fits in 1000-event
+  // fetch limit.
+  private final Cache<Long, Map<String, List<DisplayFundingRate>>> historicalChunkCache = Caffeine.newBuilder()
+      .maximumSize(720)
       .build();
 
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
@@ -80,8 +122,20 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Override
   public void afterPropertiesSet() throws Exception {
-    refreshServerTimeDelta();
+    // Wrap both startup fetches so Binance unreachability at boot does
+    // not break ApplicationContext init — both methods make blocking
+    // Binance calls and either side can fail independently.
+    new ExceptionSafeRunnable(this::refreshServerTimeDelta).run();
     serverTimeRefresher.scheduleAtFixedRate(new ExceptionSafeRunnable(this::refreshServerTimeDelta), 5, 3600, TimeUnit.SECONDS);
+
+    // Warm the bulk-funding recent cache on startup so the first request
+    // hits the cache. Hourly re-warming is handled by warmBulkFundingRatesCache().
+    new ExceptionSafeRunnable(this::warmBulkFundingRatesCache).run();
+  }
+
+  @Scheduled(cron = FUNDING_RATE_REFRESH_CRON, zone = FUNDING_RATE_REFRESH_ZONE)
+  public void warmBulkFundingRatesCache() {
+    queryBulkFundingRates(null, null, null, DEFAULT_BULK_FUNDING_LIMIT);
   }
 
   @Override
@@ -98,7 +152,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Override
   public List<FutureFundingRate> queryFundingRates(String symbol, Long startTime, Long endTime, Integer limit) {
-    rateLimitManager.acquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1);
+    rateLimitManager.acquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 5);
     Call<List<FutureFundingRate>> ratesCall = binanceFutureClient.getFundingRates(symbol, startTime, endTime, limit);
     List<FutureFundingRate> rates = ClientUtil.getResponseBody(ratesCall,
         () -> rateLimitManager.stopAcquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
@@ -109,78 +163,170 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   public BulkFundingRateResponse queryBulkFundingRates(Collection<String> symbols, Long sinceMs, Long untilMs, Integer limit) {
     int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_FUNDING_LIMIT, 1),
         MAX_BULK_FUNDING_LIMIT);
-    // R31-perf: when caller doesn't specify symbols, use Binance's
-    // single no-symbol /fapi/v1/fundingRate call (limit up to 1000) to
-    // fetch all funding events in the window in ONE round trip instead
-    // of looping 608+ symbols sequentially (which took ~49s). For
-    // nos-rs scraper hot path this drops the funding bulk call from
-    // ~49s to ~200ms.
     boolean noSymbolsSpecified = symbols == null || symbols.isEmpty();
-    if (noSymbolsSpecified && sinceMs != null && untilMs != null) {
-      return loadBulkFundingRatesNoSymbol(sinceMs, untilMs, realLimit);
+    // Full window:
+    //   - no symbols: chunk cache (fetches every symbol present in the
+    //     window, one no-symbol Binance call per 1h chunk + cached).
+    //   - symbols: per-symbol loop. Routing by caller-supplied symbols
+    //     avoids paying N-hour chunk fetches for a single-symbol wide
+    //     historical window (e.g. 30 days = 720 chunks vs 1 per-symbol call).
+    if (sinceMs != null && untilMs != null) {
+      if (noSymbolsSpecified) {
+        return loadBulkFundingRatesViaChunkCache(null, sinceMs, untilMs, realLimit);
+      }
+      return loadBulkFundingRates(normalizeFundingSymbols(symbols), sinceMs, untilMs, realLimit);
     }
-    List<String> realSymbols = normalizeFundingSymbols(symbols);
+    // No time at all: recent cache path. Cache key includes the hourly
+    // boundary so the 60s TTL cannot serve a stale entry across the
+    // funding boundary.
     if (sinceMs == null && untilMs == null) {
-      // R31-fix CRIT 2: include the current 8h funding boundary in the cache
-      // key so the 60s TTL window cannot serve a stale entry across a
-      // funding boundary. Without this, an entry populated 30s before the
-      // boundary would return the previous-event payload to the first
-      // post-boundary request, causing Rust scraper to write fr=0 on the
-      // funding candle.
-      long fundingBoundaryMs = Math.floorDiv(System.currentTimeMillis(), FUNDING_INTERVAL_MS) * FUNDING_INTERVAL_MS;
+      long now = System.currentTimeMillis();
+      long fundingBoundaryMs = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+      if (noSymbolsSpecified) {
+        // Binance's no-symbol /fapi/v1/fundingRate without start/endTime
+        // returns only the most recent 200 records globally (limit param
+        // does not lift this cap). For ~600 active USD-M symbols that
+        // means most symbols are missing from the response. Synthesize a
+        // window [now - 8h, now] (8h covers Binance's longest funding
+        // interval so every symbol has fired at least once) and route
+        // through the chunk cache, which paginates by 1h chunk so each
+        // call stays under the 1000-row hard cap.
+        boolean withinPublicationGrace = (now - fundingBoundaryMs) < FUNDING_PUBLICATION_GRACE_MS;
+        if (withinPublicationGrace) {
+          // Bypass the 60s aggregate cache while the just-passed boundary
+          // may still be publishing — caching an incomplete aggregate
+          // here would serve missing-symbol responses for up to 60s.
+          // Chunk cache still single-flights the cacheable past chunks;
+          // only the in-progress chunk is fetched per request.
+          return loadBulkFundingRatesViaChunkCache(null, now - LATEST_FUNDING_LOOKBACK_MS, now, realLimit);
+        }
+        RecentFundingKey key = new RecentFundingKey(List.of(), realLimit, fundingBoundaryMs);
+        return bulkFundingRecentCache.get(key, ignored -> {
+          long requestNow = System.currentTimeMillis();
+          return loadBulkFundingRatesViaChunkCache(null, requestNow - LATEST_FUNDING_LOOKBACK_MS, requestNow, realLimit);
+        });
+      }
+      List<String> realSymbols = normalizeFundingSymbols(symbols);
       RecentFundingKey key = new RecentFundingKey(realSymbols, realLimit, fundingBoundaryMs);
       return bulkFundingRecentCache.get(key, ignored -> loadBulkFundingRates(realSymbols, null, null, realLimit));
     }
-    return loadBulkFundingRatesWithHistoricalCache(realSymbols, sinceMs, untilMs, realLimit);
+    // Partial window (only sinceMs or only untilMs set): rare path, fall
+    // back to per-symbol loop with the partial bound forwarded to Binance.
+    return loadBulkFundingRates(normalizeFundingSymbols(symbols), sinceMs, untilMs, realLimit);
   }
 
   /**
-   * R31-perf: single Binance fundingRate call (no symbol param) to fetch
-   * every symbol's funding events in [sinceMs, untilMs) within one HTTP
-   * round-trip. Binance supports symbol=null + startTime + endTime + limit
-   * (up to 1000); response is sorted by fundingTime. Output is grouped by
-   * symbol with per-symbol lists truncated to {@code limit}.
+   * Chunk-cache windowed loader. Splits the requested window into 1h
+   * chunks aligned to {@link #RECENT_CACHE_BOUNDARY_MS}, fetches each
+   * eligible chunk once via the no-symbol bulk Binance call, and caches
+   * it in {@link #historicalChunkCache}. Chunks whose opening boundary
+   * is within the {@link #FUNDING_PUBLICATION_GRACE_MS} buffer of
+   * {@code now} are fetched but never cached — funding events fire AT
+   * the boundary and Binance can publish them a beat later, so only
+   * post-grace chunks are guaranteed complete. Subsequent queries that
+   * overlap already-finalized chunks are pure cache hits.
+   *
+   * @param symbols caller-requested symbols. {@code null} or empty
+   *                means "every symbol that appears in the fetched
+   *                chunks" — used by the no-symbol windowed path.
    */
-  private BulkFundingRateResponse loadBulkFundingRatesNoSymbol(long sinceMs, long untilMs, int limit) {
-    // Use Binance's MAX_BULK_FUNDING_LIMIT for the underlying fetch
-    // (covers ~all symbols' single-event-per-window case) but each
-    // per-symbol bucket below is still capped at the caller's limit.
-    final int FETCH_LIMIT = 1000;
-    List<FutureFundingRate> rows = queryFundingRates(null, sinceMs, untilMs, FETCH_LIMIT).stream()
-        .filter(rate -> rate.getFundingTime() != null)
-        .filter(rate -> rate.getSymbol() != null && !rate.getSymbol().isBlank())
-        .filter(rate -> rate.getFundingTime() >= sinceMs)
-        .filter(rate -> rate.getFundingTime() < untilMs)
-        .sorted((left, right) -> left.getFundingTime().compareTo(right.getFundingTime()))
-        .toList();
-    Map<String, List<DisplayFundingRate>> out = new LinkedHashMap<>();
-    for (FutureFundingRate row : rows) {
-      String symbol = row.getSymbol();
-      DisplayFundingRate display = ConvertUtil.convertToDisplayFundingRate(row);
-      if (display.getFundingTime() != null) {
-        bulkFundingHistoricalCache.put(new HistoricalFundingKey(symbol, display.getFundingTime()), display);
-      }
-      out.computeIfAbsent(symbol, ignored -> new ArrayList<>()).add(display);
+  private BulkFundingRateResponse loadBulkFundingRatesViaChunkCache(
+      List<String> symbols, long sinceMs, long untilMs, int limit) {
+    if (sinceMs >= untilMs) {
+      return new BulkFundingRateResponse(System.currentTimeMillis(), new LinkedHashMap<>());
     }
-    // Cap each symbol's list to the caller's limit (keep latest).
-    out.replaceAll((sym, list) -> list.size() > limit ? new ArrayList<>(list.subList(list.size() - limit, list.size())) : list);
+    long now = System.currentTimeMillis();
+    long firstChunkStart = Math.floorDiv(sinceMs, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long lastChunkStart = Math.floorDiv(untilMs - 1, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+
+    List<Map<String, List<DisplayFundingRate>>> chunksInWindow = new ArrayList<>();
+    for (long chunkStart = firstChunkStart; chunkStart <= lastChunkStart; chunkStart += RECENT_CACHE_BOUNDARY_MS) {
+      if (chunkStart >= now) {
+        break;
+      }
+      long chunkEnd = chunkStart + RECENT_CACHE_BOUNDARY_MS;
+      Map<String, List<DisplayFundingRate>> chunkData;
+      if (chunkStart + FUNDING_PUBLICATION_GRACE_MS > now) {
+        // Within grace of this chunk's opening boundary: fetch fresh,
+        // never cache. Funding events fire AT chunkStart (the boundary),
+        // not throughout the chunk, so once grace passes after chunkStart
+        // the chunk's contents are stable and cacheable for the entire
+        // hour — caching at chunkEnd would needlessly delay cache fill by
+        // a full hour without changing correctness.
+        chunkData = fetchHistoricalChunk(chunkStart, chunkEnd);
+      } else {
+        final long key = chunkStart;
+        chunkData = historicalChunkCache.get(key,
+            ck -> fetchHistoricalChunk(ck, ck + RECENT_CACHE_BOUNDARY_MS));
+      }
+      chunksInWindow.add(chunkData);
+    }
+
+    List<String> responseSymbols;
+    if (symbols == null || symbols.isEmpty()) {
+      responseSymbols = chunksInWindow.stream()
+          .flatMap(chunk -> chunk.keySet().stream())
+          .distinct()
+          .sorted()
+          .toList();
+    } else {
+      responseSymbols = symbols;
+    }
+
+    Map<String, List<DisplayFundingRate>> out = new LinkedHashMap<>();
+    for (String symbol : responseSymbols) {
+      List<DisplayFundingRate> events = new ArrayList<>();
+      for (Map<String, List<DisplayFundingRate>> chunk : chunksInWindow) {
+        List<DisplayFundingRate> bucket = chunk.get(symbol);
+        if (bucket == null) {
+          continue;
+        }
+        for (DisplayFundingRate event : bucket) {
+          Long fundingTime = event.getFundingTime();
+          if (fundingTime != null && fundingTime >= sinceMs && fundingTime < untilMs) {
+            events.add(event);
+          }
+        }
+      }
+      events.sort((left, right) -> left.getFundingTime().compareTo(right.getFundingTime()));
+      if (events.size() > limit) {
+        events = new ArrayList<>(events.subList(events.size() - limit, events.size()));
+      }
+      out.put(symbol, events);
+    }
     return new BulkFundingRateResponse(System.currentTimeMillis(), out);
   }
 
-  private BulkFundingRateResponse loadBulkFundingRatesWithHistoricalCache(
-      List<String> symbols, Long sinceMs, Long untilMs, int limit) {
-    // R31-fix-r2: explicit window queries skip the historical-cache
-    // expectedFundingTimes derivation. That derivation assumes
-    // FUNDING_INTERVAL_MS=8h (line 194) and produces a wrong "expected"
-    // time set for variable-interval funding symbols (e.g. 1h funding).
-    // For nos-rs's hot path the in-cycle window is always (target_cbt,
-    // target_cbt+HOUR_MS+1) — Binance returns at most one event per
-    // symbol per call regardless of interval, and the per-call cost is
-    // small. The historical cache is still WRITTEN by loadBulkFundingRates
-    // (line 169) for any future caller that wants point lookups via
-    // (symbol, fundingTime), but explicit windows no longer try to
-    // reconstruct expected timestamps a priori.
-    return loadBulkFundingRates(symbols, sinceMs, untilMs, limit);
+  private Map<String, List<DisplayFundingRate>> fetchHistoricalChunk(long chunkStart, long chunkEnd) {
+    // A 1h chunk holds at most one event per symbol (Binance funding
+    // intervals are >= 1h), so the per-call 1000-event cap comfortably
+    // covers all active USD-M futures symbols.
+    List<FutureFundingRate> rawRows = queryFundingRates(null, chunkStart, chunkEnd, FUNDING_CHUNK_FETCH_LIMIT);
+    if (rawRows.size() >= FUNDING_CHUNK_FETCH_LIMIT) {
+      // Binance's hard cap was hit, so some events for this hour were
+      // silently dropped. If this fires we need to paginate the chunk
+      // (split by time or by lastFundingTime cursor); for now surface it
+      // so the assumption can be re-validated against current symbol
+      // counts and funding cadence.
+      log.warn(
+          "fetchHistoricalChunk hit FUNDING_CHUNK_FETCH_LIMIT ({}) for chunk [{}, {}); response is likely truncated",
+          FUNDING_CHUNK_FETCH_LIMIT, chunkStart, chunkEnd);
+    }
+    List<FutureFundingRate> rows = rawRows.stream()
+        .filter(rate -> rate.getFundingTime() != null)
+        .filter(rate -> rate.getSymbol() != null && !rate.getSymbol().isBlank())
+        .filter(rate -> rate.getFundingTime() >= chunkStart)
+        .filter(rate -> rate.getFundingTime() < chunkEnd)
+        .toList();
+    Map<String, List<DisplayFundingRate>> chunkData = new LinkedHashMap<>();
+    for (FutureFundingRate row : rows) {
+      DisplayFundingRate display = ConvertUtil.convertToDisplayFundingRate(row);
+      chunkData.computeIfAbsent(row.getSymbol(), key -> new ArrayList<>()).add(display);
+    }
+    for (List<DisplayFundingRate> bucket : chunkData.values()) {
+      bucket.sort((left, right) -> left.getFundingTime().compareTo(right.getFundingTime()));
+    }
+    return chunkData;
   }
 
   private BulkFundingRateResponse loadBulkFundingRates(List<String> symbols, Long sinceMs, Long untilMs, int limit) {
@@ -201,11 +347,6 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
         }
       }
       List<DisplayFundingRate> displayRows = ConvertUtil.convertToDisplayFundingRates(rows);
-      for (DisplayFundingRate row : displayRows) {
-        if (row.getFundingTime() != null) {
-          bulkFundingHistoricalCache.put(new HistoricalFundingKey(symbol, row.getFundingTime()), row);
-        }
-      }
       out.put(symbol, displayRows);
     }
     return new BulkFundingRateResponse(System.currentTimeMillis(), out);
@@ -263,9 +404,6 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   }
 
   private record RecentFundingKey(List<String> symbols, int limit, long fundingBoundaryMs) {
-  }
-
-  private record HistoricalFundingKey(String symbol, long fundingTime) {
   }
 
   private LoadingCache<String, BinanceFutureExchange> buildExchangeCache() {
