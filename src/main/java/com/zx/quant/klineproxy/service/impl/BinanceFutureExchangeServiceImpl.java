@@ -216,6 +216,18 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   }
 
   /**
+   * Seed one 1h-aligned chunk into {@link #historicalChunkCache}. Used
+   * by external initializers (e.g. {@code BinanceVisionFundingHistoryLoader})
+   * to pre-fill historical funding data at startup. Uses
+   * {@code putIfAbsent} so a chunk already populated by the lazy loader
+   * (which carries markPrice from the Binance API) is preserved over the
+   * Vision-derived version (which omits markPrice).
+   */
+  public void seedHistoricalChunk(long chunkStart, Map<String, List<DisplayFundingRate>> chunkData) {
+    historicalChunkCache.asMap().putIfAbsent(chunkStart, chunkData);
+  }
+
+  /**
    * Chunk-cache windowed loader. Splits the requested window into 1h
    * chunks aligned to {@link #RECENT_CACHE_BOUNDARY_MS}, fetches each
    * eligible chunk once via the no-symbol bulk Binance call, and caches
