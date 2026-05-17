@@ -14,7 +14,7 @@ mvn clean package
 ### How to launch
 
 ```shell
-java $JAVA_OPTS -jar kline-proxy-1.7.9.jar --spring.config.location=file:/path/application.yaml
+java $JAVA_OPTS -jar kline-proxy-1.7.10.jar --spring.config.location=file:/path/application.yaml
 ```
 
 ### How to use

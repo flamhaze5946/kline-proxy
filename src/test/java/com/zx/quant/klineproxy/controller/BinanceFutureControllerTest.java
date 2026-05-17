@@ -20,6 +20,7 @@ import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,7 +121,7 @@ class BinanceFutureControllerTest {
   @Test
   void shouldReturnBulkKlinesAndPassNormalizedSymbols() throws Exception {
     Map<String, List<Object[]>> rows = new LinkedHashMap<>();
-    rows.put("BTCUSDT", java.util.Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
+    rows.put("BTCUSDT", Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
     given(klineService.queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT")))
         .willReturn(new BulkKlinesResponse("1h", 123L, rows));
 
@@ -164,7 +165,7 @@ class BinanceFutureControllerTest {
   @Test
   void postBulkKlinesShouldNormalizeSymbolsAndDelegate() throws Exception {
     Map<String, List<Object[]>> rows = new LinkedHashMap<>();
-    rows.put("BTCUSDT", java.util.Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
+    rows.put("BTCUSDT", Collections.singletonList(new Object[] {1L, "2", "3", "4", "5", "6", 7L, "8", 9, "10", "11", "0"}));
     given(klineService.queryBulkKlines("1h", 5, true, List.of("BTCUSDT", "ETHUSDT")))
         .willReturn(new BulkKlinesResponse("1h", 123L, rows));
 

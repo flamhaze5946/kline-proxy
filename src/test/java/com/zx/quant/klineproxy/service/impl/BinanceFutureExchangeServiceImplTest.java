@@ -52,14 +52,6 @@ class BinanceFutureExchangeServiceImplTest {
         .acquire(Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME, 5);
   }
 
-  /**
-   * Regression for ADR-004 D4: a windowed funding query for many symbols
-   * over a SHORT window (≤ 8h, e.g. trader_calculator pulling the
-   * just-closed candle's funding for ~70 symbols) MUST route through
-   * the chunk-cache path with a single no-symbol Binance call per 1h
-   * chunk, NOT through the per-symbol REST loop that would acquire
-   * weight 5 × N symbols against the 35/sec limiter.
-   */
   @Test
   void queryBulkFundingRatesShouldRouteShortWindowSymbolsThroughChunkCache() throws Exception {
     BinanceFutureExchangeServiceImpl service = new BinanceFutureExchangeServiceImpl();
@@ -75,20 +67,15 @@ class BinanceFutureExchangeServiceImplTest {
     fundingRate.setMarkPrice(new BigDecimal("100"));
     @SuppressWarnings("unchecked")
     Call<List<FutureFundingRate>> noSymbolCall = (Call<List<FutureFundingRate>>) mock(Call.class);
-    // Chunk-cache path calls with null symbol + chunk boundaries + 1000 limit.
     given(client.getFundingRates(isNull(), any(Long.class), any(Long.class), eq(1000)))
         .willReturn(noSymbolCall);
     given(noSymbolCall.execute()).willReturn(Response.success(List.of(fundingRate)));
 
-    // 1h window — well under the 8h chunk-cache threshold.
     long sinceMs = 0L;
     long untilMs = 60L * 60L * 1000L;
     var resp = service.queryBulkFundingRates(
         List.of("BTCUSDT", "ETHUSDT"), sinceMs, untilMs, 5);
 
-    // BTCUSDT should be present with the chunk's fundingRate value;
-    // ETHUSDT included in response keys but with empty rows (chunk had
-    // no ETHUSDT event, but caller asked for it).
     assertTrue(resp.fundingRates().containsKey("BTCUSDT"),
         "BTCUSDT must appear in chunk-cache filtered response");
     assertTrue(resp.fundingRates().containsKey("ETHUSDT"),
@@ -99,12 +86,8 @@ class BinanceFutureExchangeServiceImplTest {
     assertTrue(resp.fundingRates().get("ETHUSDT").isEmpty(),
         "ETHUSDT should have empty row list — chunk had no ETHUSDT event");
 
-    // Per-symbol REST loop would call getFundingRates("BTCUSDT", ...) and
-    // getFundingRates("ETHUSDT", ...). We must NOT see these.
     verify(client, never()).getFundingRates(eq("BTCUSDT"), any(), any(), any());
     verify(client, never()).getFundingRates(eq("ETHUSDT"), any(), any(), any());
-    // We MUST see exactly one no-symbol chunk fetch (1 chunk covers the
-    // 1h window, with the chunk-cache pinning the 1000-row limit).
     verify(client, times(1))
         .getFundingRates(isNull(), any(Long.class), any(Long.class), eq(1000));
   }

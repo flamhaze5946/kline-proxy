@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -91,7 +92,7 @@ class AbstractKlineServiceFillKlinesTest {
   @Test
   void updateKlinesShouldTrimSeriesWhenMaintainCountExceeded() {
     TestKlineService service = new TestKlineService();
-    List<Kline> klines = java.util.stream.IntStream.range(0, 60)
+    List<Kline> klines = IntStream.range(0, 60)
         .mapToObj(index -> buildKline(index * IntervalEnum.ONE_HOUR.getMills(), String.valueOf(index)))
         .map(Kline.class::cast)
         .toList();

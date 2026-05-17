@@ -43,14 +43,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Pre-fills {@link BinanceFutureExchangeServiceImpl}'s historical funding
- * chunk cache from Binance Vision monthly archives at startup. Vision
- * only publishes monthly funding-rate archives (no daily), and the latest
- * month is published a few days into the following month — so this
- * warm-up covers historical days for which Vision data is available, and
- * leaves the most-recent days (and the current month) to the existing
- * lazy chunk loader.
- *
+ * binance vision funding history loader
  * @author flamhaze5946
  */
 @Slf4j
@@ -72,17 +65,8 @@ public class BinanceVisionFundingHistoryLoader {
 
   private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
 
-  // Exact header the Vision archives have published consistently. We
-  // require an exact match (not just startsWith) so a column reorder
-  // such as `calc_time,last_funding_rate,funding_interval_hours` would
-  // fail the month rather than silently parse zero numeric values out
-  // of the wrong columns.
   private static final String EXPECTED_CSV_HEADER = "calc_time,funding_interval_hours,last_funding_rate";
 
-  // Wrap the shared named-thread factory to produce daemon threads, so a
-  // long-running warm-up cannot block JVM shutdown (the warm task uses an
-  // uninterruptible CompletableFuture.join, so non-daemon threads would
-  // hold the JVM alive past @PreDestroy.shutdownNow()).
   private final ExecutorService pool = Executors.newFixedThreadPool(
       DOWNLOAD_CONCURRENCY, daemonNamedThreadFactory(LOADER_THREAD_GROUP));
 
@@ -138,10 +122,6 @@ public class BinanceVisionFundingHistoryLoader {
         symbols.size(), months.size(), startDate, endDate);
 
     ConcurrentMap<Long, ConcurrentMap<String, List<DisplayFundingRate>>> staged = new ConcurrentHashMap<>();
-    // Months where at least one (symbol, ym) download or parse failed
-    // for reasons OTHER than 404 (404 = archive legitimately missing for
-    // that symbol). We skip seeding any chunk in a failed month so the
-    // lazy chunk loader can fetch the full set from Binance API.
     Set<YearMonth> failedMonths = ConcurrentHashMap.newKeySet();
 
     List<CompletableFuture<Void>> tasks = new ArrayList<>(symbols.size() * months.size());
@@ -186,8 +166,6 @@ public class BinanceVisionFundingHistoryLoader {
     Request request = new Request.Builder().url(url).get().build();
     try (Response resp = httpClient.newCall(request).execute()) {
       if (resp.code() == 404) {
-        // Missing archive: month not yet published, or symbol had no
-        // funding in that month. Not a failure for our purposes.
         return;
       }
       if (!resp.isSuccessful()) {
@@ -217,8 +195,6 @@ public class BinanceVisionFundingHistoryLoader {
       BufferedReader reader = new BufferedReader(new InputStreamReader(zin, StandardCharsets.UTF_8));
       String header = reader.readLine();
       if (header == null || !EXPECTED_CSV_HEADER.equals(header.trim())) {
-        // Strict match: column reorder, drift, BOM, or garbled content
-        // all fail the month so lazy-load takes over for those chunks.
         throw new IllegalStateException(
             "Unexpected Vision header for " + symbol + ": " + header);
       }
@@ -245,10 +221,6 @@ public class BinanceVisionFundingHistoryLoader {
         row.setFundingRate(rate);
         DisplayFundingRate display = ConvertUtil.convertToDisplayFundingRate(row);
         long chunkStart = Math.floorDiv(fundingTime, HOUR_MS) * HOUR_MS;
-        // synchronizedList guards against the hypothetical case where
-        // Vision duplicates a boundary funding event across adjacent
-        // monthly archives, which would briefly produce two writers per
-        // (chunkStart, symbol) slot when both month tasks run in parallel.
         staged.computeIfAbsent(chunkStart, k -> new ConcurrentHashMap<>())
             .computeIfAbsent(symbol, k -> Collections.synchronizedList(new ArrayList<>()))
             .add(display);

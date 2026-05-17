@@ -1,21 +1,16 @@
 package com.zx.quant.klineproxy.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Request body for {@code POST /fapi/v1/fundingRate/bulk}.
- *
- * <p>Mirrors the GET endpoint's query parameters, but accepts a JSON
- * body so callers can supply long symbol lists without URL length
- * limits.
- *
- * <p>Null/empty {@code symbols} preserves the existing GET behavior:
- * route through the chunk-cache for all symbols in the window.
+ * bulk funding rate request
+ * @author flamhaze5946
  */
 public record BulkFundingRateRequest(
     List<String> symbols,
-    Long since_ms,
-    Long until_ms,
+    @JsonProperty("since_ms") Long sinceMs,
+    @JsonProperty("until_ms") Long untilMs,
     Integer limit
 ) {
 }

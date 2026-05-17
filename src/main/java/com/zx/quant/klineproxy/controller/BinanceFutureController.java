@@ -16,6 +16,7 @@ import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.Serializer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -95,15 +96,8 @@ public class BinanceFutureController extends GenericController {
   }
 
   /**
-   * POST counterpart to {@link #queryBulkFundingRate}. Use this when the
-   * caller's symbol list is too long for a URL query string (Tomcat /
-   * common HTTP fronts cap query strings at ~8 KB — ~500 USDT symbols
-   * = ~5 KB CSV, near the limit).
-   *
-   * <p>Body shape: {@link BulkFundingRateRequest}. Semantics identical
-   * to the GET endpoint: null/empty {@code symbols} preserves "all
-   * symbols" behavior; null {@code since_ms}/{@code until_ms}/{@code
-   * limit} fall back to service defaults.
+   * bulk funding rate via post body
+   * @author flamhaze5946
    */
   @PostMapping("fundingRate/bulk")
   public BulkFundingRateResponse queryBulkFundingRatePost(
@@ -113,8 +107,8 @@ public class BinanceFutureController extends GenericController {
         : new BulkFundingRateRequest(null, null, null, null);
     return exchangeService.queryBulkFundingRates(
         normalizeSymbolList(req.symbols()),
-        req.since_ms(),
-        req.until_ms(),
+        req.sinceMs(),
+        req.untilMs(),
         req.limit());
   }
 
@@ -167,27 +161,17 @@ public class BinanceFutureController extends GenericController {
   }
 
   /**
-   * POST counterpart to {@link #queryBulkKlines}. Use when the
-   * caller's symbol list exceeds query-string limits.
-   *
-   * <p>Body shape: {@link BulkKlinesRequest}. Semantics identical to
-   * the GET endpoint: null/empty {@code symbols} returns all
-   * subscribed symbols on the interval; {@code closed_only} defaults
-   * to {@code true} when omitted.
-   *
-   * <p>{@code interval} is REQUIRED; a missing/blank value returns
-   * HTTP 400 (matches GET endpoint's @RequestParam required=true).
+   * bulk klines via post body
+   * @author flamhaze5946
    */
   @PostMapping("klines/bulk")
   public BulkKlinesResponse queryBulkKlinesPost(
       @RequestBody(required = false) BulkKlinesRequest body
   ) {
     if (body == null || StringUtils.isBlank(body.interval())) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, -1102,
-          "interval is required");
+      throw new ApiException(HttpStatus.BAD_REQUEST, -1102, "interval is required");
     }
-    boolean closedOnly = body.closed_only() == null
-        || Boolean.TRUE.equals(body.closed_only());
+    boolean closedOnly = body.closedOnly() == null || Boolean.TRUE.equals(body.closedOnly());
     return klineService.queryBulkKlines(
         body.interval(),
         body.limit(),
@@ -226,14 +210,6 @@ public class BinanceFutureController extends GenericController {
         .toList();
   }
 
-  /**
-   * Normalize a JSON body symbol list to the same shape that
-   * {@link #parseCsv(String)} produces from a CSV query string:
-   * trimmed, non-blank, distinct, sorted. Returning the same list
-   * shape lets POST + GET paths share the downstream service
-   * contract and lets test fixtures use {@code List.of(...)} on
-   * the service mock without re-sorting.
-   */
   private List<String> normalizeSymbolList(List<String> symbols) {
     if (symbols == null || symbols.isEmpty()) {
       return List.of();
@@ -251,7 +227,7 @@ public class BinanceFutureController extends GenericController {
     if (deduped.isEmpty()) {
       return List.of();
     }
-    List<String> out = new java.util.ArrayList<>(deduped);
+    List<String> out = new ArrayList<>(deduped);
     Collections.sort(out);
     return List.copyOf(out);
   }
