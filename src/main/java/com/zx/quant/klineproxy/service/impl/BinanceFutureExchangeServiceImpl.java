@@ -36,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import retrofit2.Call;
@@ -52,7 +53,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   private static final String SERVER_TIME_REFRESHER_GROUP = "futureServerTimeRefresher";
 
-  private static final String FUNDING_RATE_REFRESH_CRON = "1 0 * * * *";
+  private static final String FUNDING_RATE_REFRESH_CRON = "0 0 * * * *";
 
   private static final String FUNDING_RATE_REFRESH_ZONE = "UTC";
 
@@ -61,8 +62,6 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   private static final int MAX_BULK_FUNDING_LIMIT = 100;
 
   private static final long RECENT_CACHE_BOUNDARY_MS = 60L * 60L * 1000L;
-
-  private static final long FUNDING_PUBLICATION_GRACE_MS = 20L;
 
   private static final long LATEST_FUNDING_LOOKBACK_MS = 8L * 60L * 60L * 1000L;
 
@@ -92,6 +91,9 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   @Autowired
   private RateLimitManager rateLimitManager;
 
+  @Value("${funding.publicationGraceMs:50}")
+  private long fundingPublicationGraceMs;
+
   @Override
   public void afterPropertiesSet() throws Exception {
     new ExceptionSafeRunnable(this::refreshServerTimeDelta).run();
@@ -101,6 +103,18 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Scheduled(cron = FUNDING_RATE_REFRESH_CRON, zone = FUNDING_RATE_REFRESH_ZONE)
   public void warmBulkFundingRatesCache() {
+    long now = System.currentTimeMillis();
+    long boundary = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long target = boundary + fundingPublicationGraceMs + 1L;
+    long waitMs = target - now;
+    if (waitMs > 0) {
+      try {
+        Thread.sleep(waitMs);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
     queryBulkFundingRates(null, null, null, DEFAULT_BULK_FUNDING_LIMIT);
   }
 
@@ -145,7 +159,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       long now = System.currentTimeMillis();
       long fundingBoundaryMs = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
       if (noSymbolsSpecified) {
-        boolean withinPublicationGrace = (now - fundingBoundaryMs) < FUNDING_PUBLICATION_GRACE_MS;
+        boolean withinPublicationGrace = (now - fundingBoundaryMs) < fundingPublicationGraceMs;
         if (withinPublicationGrace) {
           return loadBulkFundingRatesViaChunkCache(null, now - LATEST_FUNDING_LOOKBACK_MS, now, realLimit);
         }
@@ -186,7 +200,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       }
       long chunkEnd = chunkStart + RECENT_CACHE_BOUNDARY_MS;
       Map<String, List<DisplayFundingRate>> chunkData;
-      if (chunkStart + FUNDING_PUBLICATION_GRACE_MS > now) {
+      if (chunkStart + fundingPublicationGraceMs > now) {
         chunkData = fetchHistoricalChunk(chunkStart, chunkEnd);
       } else {
         final long key = chunkStart;
