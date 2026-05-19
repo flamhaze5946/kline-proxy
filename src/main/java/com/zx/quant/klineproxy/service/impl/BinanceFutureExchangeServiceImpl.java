@@ -65,6 +65,8 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   private static final long RECENT_CACHE_BOUNDARY_MS = 60L * 60L * 1000L;
 
+  private static final long CRON_EARLY_FIRE_TOLERANCE_MS = 1000L;
+
   private static final long LATEST_FUNDING_LOOKBACK_MS = 8L * 60L * 60L * 1000L;
 
   private static final long FUNDING_CHUNK_CACHE_WINDOW_THRESHOLD_MS = LATEST_FUNDING_LOOKBACK_MS;
@@ -106,7 +108,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
   @Scheduled(cron = FUNDING_RATE_REFRESH_CRON, zone = FUNDING_RATE_REFRESH_ZONE)
   public void warmBulkFundingRatesCache() {
     long now = System.currentTimeMillis();
-    long boundary = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long boundary = resolveScheduledHourBoundary(now);
     long target = boundary + fundingPublicationGraceMs + 1L;
     long waitMs = target - now;
     if (waitMs > 0) {
@@ -122,10 +124,30 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Scheduled(cron = FUNDING_RATE_RETRY_CRON, zone = FUNDING_RATE_REFRESH_ZONE)
   public void retryBulkFundingRatesCache() {
-    long now = System.currentTimeMillis();
-    long boundary = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long boundary = resolveScheduledHourBoundary(System.currentTimeMillis());
     historicalChunkCache.invalidate(boundary);
+    int evictedRecent = evictRecentFundingCacheForBoundary(boundary);
+    log.info("retryBulkFundingRatesCache invalidated chunk for boundary={} and {} recent entries; refetching",
+        boundary, evictedRecent);
     queryBulkFundingRates(null, null, null, DEFAULT_BULK_FUNDING_LIMIT);
+  }
+
+  private long resolveScheduledHourBoundary(long now) {
+    long floor = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long ceil = floor + RECENT_CACHE_BOUNDARY_MS;
+    return (ceil - now) <= CRON_EARLY_FIRE_TOLERANCE_MS ? ceil : floor;
+  }
+
+  private int evictRecentFundingCacheForBoundary(long boundary) {
+    int[] evicted = {0};
+    bulkFundingRecentCache.asMap().keySet().removeIf(key -> {
+      if (key.fundingBoundaryMs() == boundary) {
+        evicted[0]++;
+        return true;
+      }
+      return false;
+    });
+    return evicted[0];
   }
 
   @Override
