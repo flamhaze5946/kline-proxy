@@ -55,6 +55,8 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   private static final String FUNDING_RATE_REFRESH_CRON = "0 0 * * * *";
 
+  private static final String FUNDING_RATE_RETRY_CRON = "0 5 * * * *";
+
   private static final String FUNDING_RATE_REFRESH_ZONE = "UTC";
 
   private static final int DEFAULT_BULK_FUNDING_LIMIT = 1;
@@ -115,6 +117,14 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
         return;
       }
     }
+    queryBulkFundingRates(null, null, null, DEFAULT_BULK_FUNDING_LIMIT);
+  }
+
+  @Scheduled(cron = FUNDING_RATE_RETRY_CRON, zone = FUNDING_RATE_REFRESH_ZONE)
+  public void retryBulkFundingRatesCache() {
+    long now = System.currentTimeMillis();
+    long boundary = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    historicalChunkCache.invalidate(boundary);
     queryBulkFundingRates(null, null, null, DEFAULT_BULK_FUNDING_LIMIT);
   }
 
