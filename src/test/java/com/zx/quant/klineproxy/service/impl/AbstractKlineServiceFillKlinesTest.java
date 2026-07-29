@@ -215,7 +215,8 @@ class AbstractKlineServiceFillKlinesTest {
     service.invokeWarmUpPersistedKlines(restoredKeys);
 
     assertEquals(Set.of(klineSetKey), restoredKeys);
-    assertEquals(4, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
+    // restore loads only the serving window (minMaintainCount=3), not the persistence depth
+    assertEquals(3, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
     assertEquals(List.of(
             new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 2, hour * 2, 1),
             new QueryKlineRequest("BTCUSDT", IntervalEnum.ONE_HOUR.code(), hour * 4, hour * 4, 1)),
@@ -247,14 +248,16 @@ class AbstractKlineServiceFillKlinesTest {
   }
 
   @Test
-  void restorePersistedKlinesShouldUseSymbolSpecificMaxStoreCountWhenConfigured() {
+  void restorePersistedKlinesShouldLoadOnlyMinMaintainCount() {
     TestKlineService service = new TestKlineService();
     RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
     service.configurePersistence(persistenceStore, 4, Map.of("BTCUSDT", 7));
 
     service.invokeRestorePersistedKlines(Set.of(new KlineSetKey("BTCUSDT", IntervalEnum.ONE_HOUR.code())));
 
-    assertEquals(7, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
+    // persistence store counts (interval 4 / symbol 7) govern the dump depth only;
+    // startup restore reads just the serving window (minMaintainCount=3)
+    assertEquals(3, persistenceStore.getLastLoadMaxStoreCount("spot", IntervalEnum.ONE_HOUR.code(), "BTCUSDT"));
   }
 
   @Test

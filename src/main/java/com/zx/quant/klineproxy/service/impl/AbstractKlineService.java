@@ -68,6 +68,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
@@ -122,6 +123,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private static final int SYMBOLS_PER_CONNECTION = 150;
 
   private static final int MAX_RPC_SYNC_WORKERS = 8;
+
+  private static final int RESTORE_WORKERS =
+      Math.max(2, Runtime.getRuntime().availableProcessors());
 
   private static final int MAX_MAKE_UP_WORKERS = 4;
 
@@ -182,6 +186,22 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private final AtomicLong lastAllMarketTicker24HrAccessTime = new AtomicLong(0L);
 
   private final Set<KlineSetKey> dirtyPersistenceKeys = ConcurrentHashMap.newKeySet();
+
+  private static final int PERSISTENCE_DUMP_LOCK_STRIPES = 64;
+
+  /**
+   * serializes reconcile / periodic / shutdown dumps and offline cleanup per key (they run
+   * on different threads); striped so the registry stays bounded under symbol churn
+   */
+  private final Object[] persistenceDumpLocks = buildPersistenceDumpLocks();
+
+  private static Object[] buildPersistenceDumpLocks() {
+    Object[] locks = new Object[PERSISTENCE_DUMP_LOCK_STRIPES];
+    for (int i = 0; i < locks.length; i++) {
+      locks[i] = new Object();
+    }
+    return locks;
+  }
 
   private volatile ExpectedTopicsSnapshot expectedTopicsSnapshot;
 
@@ -1580,30 +1600,50 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         || CollectionUtils.isEmpty(configuredKlineSetKeys)) {
       return Set.of();
     }
-    Set<KlineSetKey> restoredKeys = new HashSet<>();
-    for (KlineSetKey configuredKey : configuredKlineSetKeys) {
-      IntervalEnum intervalEnum = CommonUtil.getEnumByCode(configuredKey.getInterval(), IntervalEnum.class);
-      if (intervalEnum == null) {
-        continue;
-      }
-      int maxStoreCount = getPersistenceMaxStoreCount(configuredKey.getSymbol(), intervalEnum);
-      List<PersistedKlineRow> persistedRows = klinePersistenceStore.loadRows(
-          getPersistenceServiceCode(), configuredKey.getInterval(), configuredKey.getSymbol(), maxStoreCount);
-      if (CollectionUtils.isEmpty(persistedRows)) {
-        continue;
-      }
-      List<Kline> persistedKlines = persistedRows.stream()
-          .map(this::persistedRowToKline)
-          .filter(Objects::nonNull)
-          .toList();
-      if (CollectionUtils.isEmpty(persistedKlines)) {
-        continue;
-      }
-      restoreKlines(configuredKey, intervalEnum, persistedKlines);
-      restoredKeys.add(configuredKey);
+    long restoreStartTime = System.currentTimeMillis();
+    Set<KlineSetKey> restoredKeys = ConcurrentHashMap.newKeySet();
+    List<Runnable> restoreTasks = configuredKlineSetKeys.stream()
+        .<Runnable>map(configuredKey -> () -> {
+          IntervalEnum intervalEnum = CommonUtil.getEnumByCode(configuredKey.getInterval(), IntervalEnum.class);
+          if (intervalEnum == null) {
+            return;
+          }
+          // best-effort cache: one broken symbol dir must not abort startup for the rest
+          try {
+            // startup only needs the serving window; deeper disk data would just slow down boot
+            int restoreCount = getPersistenceRestoreCount(configuredKey.getSymbol(), intervalEnum);
+            List<PersistedKlineRow> persistedRows = klinePersistenceStore.loadRows(
+                getPersistenceServiceCode(), configuredKey.getInterval(), configuredKey.getSymbol(), restoreCount);
+            if (CollectionUtils.isEmpty(persistedRows)) {
+              return;
+            }
+            List<Kline> persistedKlines = persistedRows.stream()
+                .map(this::persistedRowToKline)
+                .filter(Objects::nonNull)
+                .toList();
+            if (CollectionUtils.isEmpty(persistedKlines)) {
+              return;
+            }
+            restoreKlines(configuredKey, intervalEnum, persistedKlines);
+            restoredKeys.add(configuredKey);
+          } catch (Exception e) {
+            log.warn("failed to restore persisted klines for symbol: {}, interval: {}, skipped.",
+                configuredKey.getSymbol(), configuredKey.getInterval(), e);
+          }
+        }).toList();
+    // dedicated pool: MANAGE_EXECUTOR only runs 5 core threads (queue absorbs the rest),
+    // which would cap restore parallelism regardless of RESTORE_WORKERS
+    ExecutorService restoreExecutor = Executors.newFixedThreadPool(
+        Math.max(1, Math.min(RESTORE_WORKERS, restoreTasks.size())),
+        ThreadFactoryUtil.getNamedThreadFactory("kline-restore"));
+    try {
+      runTasksWithLimitedWorkers(restoreTasks, RESTORE_WORKERS, restoreExecutor);
+    } finally {
+      restoreExecutor.shutdown();
     }
     if (CollectionUtils.isNotEmpty(restoredKeys)) {
-      log.info("restored {} persisted kline series for {}", restoredKeys.size(), getClass().getSimpleName());
+      log.info("restored {} persisted kline series for {} in {} ms",
+          restoredKeys.size(), getClass().getSimpleName(), System.currentTimeMillis() - restoreStartTime);
     }
     return restoredKeys;
   }
@@ -1618,9 +1658,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           if (intervalEnum == null) {
             return;
           }
-          int maxStoreCount = getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum);
+          // warm up the SAME window the restore loaded — a wider window would re-fetch
+          // bars from Binance that are already on disk but deliberately not loaded
+          int restoreCount = getPersistenceRestoreCount(klineSetKey.getSymbol(), intervalEnum);
           List<ImmutablePair<Long, Long>> makeUpTimeRanges = buildMakeUpTimeRanges(
-              klineSetKey.getSymbol(), null, getServerTime(), intervalEnum, maxStoreCount, true);
+              klineSetKey.getSymbol(), null, getServerTime(), intervalEnum, restoreCount, true);
           if (CollectionUtils.isEmpty(makeUpTimeRanges)) {
             return;
           }
@@ -1636,8 +1678,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     long currentTime = getServerTime();
     for (KlineSetKey klineSetKey : configuredKlineSetKeys) {
-      dumpPersistedKlineSet(klineSetKey, currentTime);
-      dirtyPersistenceKeys.remove(klineSetKey);
+      // runs inside the async warmup future: one failing key must not silently kill the rest
+      try {
+        dumpPersistedKlineSetTracked(klineSetKey, currentTime);
+      } catch (Exception e) {
+        log.warn("failed to reconcile persisted klines for symbol: {}, interval: {}, skipped.",
+            klineSetKey.getSymbol(), klineSetKey.getInterval(), e);
+      }
     }
   }
 
@@ -1651,26 +1698,75 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     long currentTime = getServerTime();
     for (KlineSetKey key : keys) {
-      dumpPersistedKlineSet(key, currentTime);
-      dirtyPersistenceKeys.remove(key);
+      // one failing symbol (e.g. transient IO error) must not skip the remaining dumps
+      try {
+        dumpPersistedKlineSetTracked(key, currentTime);
+      } catch (Exception e) {
+        log.warn("failed to dump persisted klines for symbol: {}, interval: {}, skipped.",
+            key.getSymbol(), key.getInterval(), e);
+      }
     }
   }
 
-  private void dumpPersistedKlineSet(KlineSetKey klineSetKey, long currentTime) {
+  /**
+   * remove-before-dump protocol: clearing the dirty flag AFTER the dump can erase a dirty
+   * signal raised by a concurrent updateKlines during the write. Removing it first means a
+   * concurrent update simply re-adds the key and the next cycle retries; on skip/failure
+   * the flag is restored.
+   */
+  private void dumpPersistedKlineSetTracked(KlineSetKey klineSetKey, long currentTime) {
+    boolean wasDirty = dirtyPersistenceKeys.remove(klineSetKey);
+    boolean dumped;
+    try {
+      dumped = dumpPersistedKlineSet(klineSetKey, currentTime);
+    } catch (Exception e) {
+      restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
+      throw e;
+    }
+    if (!dumped) {
+      restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
+    }
+  }
+
+  private void restoreDirtyFlagIfStillTracked(KlineSetKey klineSetKey, boolean wasDirty) {
+    // gate on klineSetMap membership: a key deleted by concurrent offline cleanup must not
+    // be re-added, or it would sit in dirtyPersistenceKeys retrying forever
+    if (wasDirty && klineSetMap.containsKey(klineSetKey)) {
+      dirtyPersistenceKeys.add(klineSetKey);
+    }
+  }
+
+  /**
+   * @return true when the key needs no further dumping (written, or nothing will ever be
+   *         persistable for it); false when the dump was SKIPPED and the dirty flag must
+   *         survive so the next cycle retries
+   */
+  private boolean dumpPersistedKlineSet(KlineSetKey klineSetKey, long currentTime) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
     if (intervalEnum == null) {
-      return;
+      return true;
     }
-    KlineSet klineSet = klineSetMap.get(klineSetKey);
-    Collection<Kline> sourceKlines = klineSet == null ? List.of() : klineSet.getKlineMap().values();
-    List<PersistedKlineRow> persistedRows = sourceKlines.stream()
-        .filter(kline -> isClosedKline(kline, currentTime))
-        .sorted(Comparator.comparingLong(Kline::getOpenTime))
-        .map(this::toPersistedKlineRow)
-        .toList();
-    klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
-        klineSetKey.getSymbol(), persistedRows,
-        getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), currentTime);
+    // snapshot INSIDE the lock: a delayed writer must never overwrite a newer snapshot,
+    // nor resurrect shards that concurrent offline cleanup just deleted
+    synchronized (getPersistenceDumpLock(klineSetKey)) {
+      KlineSet klineSet = klineSetMap.get(klineSetKey);
+      Collection<Kline> sourceKlines = klineSet == null ? List.of() : klineSet.getKlineMap().values();
+      List<PersistedKlineRow> persistedRows = sourceKlines.stream()
+          .filter(kline -> isClosedKline(kline, currentTime))
+          .sorted(Comparator.comparingLong(Kline::getOpenTime))
+          .map(this::toPersistedKlineRow)
+          .toList();
+      if (CollectionUtils.isEmpty(persistedRows)) {
+        // an empty in-memory set (failed restore, loadOnStartup=false, or only the open
+        // candle yet) must NOT wipe recoverable shards on disk; explicit deletion happens
+        // only through cleanupPersistedKlines when a symbol goes offline
+        return false;
+      }
+      klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
+          klineSetKey.getSymbol(), persistedRows,
+          getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), currentTime);
+      return true;
+    }
   }
 
   private void cleanupPersistedKlines(KlineSetKey klineSetKey) {
@@ -1681,10 +1777,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalEnum == null) {
       return;
     }
-    klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
-        klineSetKey.getSymbol(), List.of(),
-        getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), getServerTime());
+    synchronized (getPersistenceDumpLock(klineSetKey)) {
+      klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
+          klineSetKey.getSymbol(), List.of(),
+          getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), getServerTime());
+    }
     dirtyPersistenceKeys.remove(klineSetKey);
+  }
+
+  private Object getPersistenceDumpLock(KlineSetKey klineSetKey) {
+    return persistenceDumpLocks[Math.floorMod(klineSetKey.hashCode(), PERSISTENCE_DUMP_LOCK_STRIPES)];
   }
 
   private void restoreKlines(KlineSetKey klineSetKey, IntervalEnum intervalEnum, List<Kline> klines) {
@@ -1734,7 +1836,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         row.getActiveBuyVolume(),
         row.getActiveBuyQuoteVolume()
     };
-    return serverKlineToKline(serverKline);
+    // a single unparseable persisted row must not abort the whole restore
+    try {
+      return serverKlineToKline(serverKline);
+    } catch (Exception e) {
+      log.warn("failed to convert persisted kline row, openTime: {}, skipped.", row.getOpenTime(), e);
+      return null;
+    }
   }
 
   private Set<KlineSetKey> buildConfiguredKlineSetKeys() {
@@ -1746,6 +1854,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
     return configuredKeys;
+  }
+
+  private int getPersistenceRestoreCount(String symbol, IntervalEnum intervalEnum) {
+    IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code());
+    Integer minMaintainCount = intervalSyncConfig == null ? null : intervalSyncConfig.getMinMaintainCount();
+    if (minMaintainCount != null && minMaintainCount > 0) {
+      return minMaintainCount;
+    }
+    return getPersistenceMaxStoreCount(symbol, intervalEnum);
   }
 
   private int getPersistenceMaxStoreCount(String symbol, IntervalEnum intervalEnum) {

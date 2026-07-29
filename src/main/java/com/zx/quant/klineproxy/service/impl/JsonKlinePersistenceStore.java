@@ -56,6 +56,7 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
     if (!Files.isDirectory(symbolDir) || maxStoreCount <= 0) {
       return List.of();
     }
+    deleteLeftoverTempFiles(symbolDir);
     List<Path> shardFiles = listShardFiles(symbolDir);
     if (CollectionUtils.isEmpty(shardFiles)) {
       return List.of();
@@ -95,6 +96,7 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
       throw new RuntimeException(e);
     }
 
+    deleteLeftoverTempFiles(symbolDir);
     List<PersistedKlineRow> retainedRows = deduplicateAndTail(rows, maxStoreCount);
     if (CollectionUtils.isEmpty(retainedRows)) {
       deleteAllShardFiles(symbolDir);
@@ -107,6 +109,7 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
         .collect(Collectors.groupingBy(row -> dayString(row.getOpenTime()), LinkedHashMap::new, Collectors.toList()));
     String boundaryDay = rowsByDay.keySet().iterator().next();
     String activeDay = dayString(currentTime);
+    PersistedKlineManifest previousManifest = readJson(symbolDir.resolve(MANIFEST_FILE_NAME), PersistedKlineManifest.class);
     List<Path> existingShardFiles = listShardFiles(symbolDir);
     for (Path shardFile : existingShardFiles) {
       String fileName = shardFile.getFileName().toString();
@@ -116,11 +119,20 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
       }
     }
 
+    Map<String, Integer> dayRowCounts = new LinkedHashMap<>();
+    Map<String, Long> dayTradeNumSums = new LinkedHashMap<>();
+    rowsByDay.forEach((day, dayRows) -> {
+      dayRowCounts.put(day, dayRows.size());
+      dayTradeNumSums.put(day, dayRows.stream().mapToLong(PersistedKlineRow::getTradeNum).sum());
+    });
+
     rowsByDay.forEach((day, dayRows) -> {
       Path shardPath = symbolDir.resolve(day + ".json");
       boolean shouldRewrite = Objects.equals(day, boundaryDay)
           || Objects.equals(day, activeDay)
-          || !Files.exists(shardPath);
+          || !Files.exists(shardPath)
+          // sealed shard whose content drifted from memory (e.g. warmup backfilled a gap)
+          || sealedShardOutdated(previousManifest, day, dayRowCounts, dayTradeNumSums);
       if (!shouldRewrite) {
         return;
       }
@@ -141,11 +153,25 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
     manifest.setStoredCount(retainedRows.size());
     manifest.setBoundaryDay(boundaryDay);
     manifest.setActiveDay(activeDay);
+    manifest.setDayRowCounts(dayRowCounts);
+    manifest.setDayTradeNumSums(dayTradeNumSums);
     PersistedKlineRow lastRow = retainedRows.get(retainedRows.size() - 1);
     manifest.setLastDumpedCleanOpenTime(lastRow.getOpenTime());
     manifest.setLastDumpedCleanCloseTime(lastRow.getCloseTime());
     writeJsonAtomically(symbolDir.resolve(MANIFEST_FILE_NAME), manifest);
     cleanupEmptyDirectories(symbolDir);
+  }
+
+  private boolean sealedShardOutdated(PersistedKlineManifest previousManifest, String day,
+                                      Map<String, Integer> dayRowCounts, Map<String, Long> dayTradeNumSums) {
+    if (previousManifest == null
+        || previousManifest.getDayRowCounts() == null
+        || previousManifest.getDayTradeNumSums() == null) {
+      // legacy manifest without fingerprints: rewrite once to converge
+      return true;
+    }
+    return !Objects.equals(previousManifest.getDayRowCounts().get(day), dayRowCounts.get(day))
+        || !Objects.equals(previousManifest.getDayTradeNumSums().get(day), dayTradeNumSums.get(day));
   }
 
   private List<PersistedKlineRow> deduplicateAndTail(Collection<PersistedKlineRow> rows, int maxStoreCount) {
@@ -188,6 +214,27 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
     }
   }
 
+  /**
+   * temp files from crashed writes are never picked up by anyone: sweep them.
+   * Strictly best-effort — one undeletable temp file must not abort the load/dump.
+   */
+  private void deleteLeftoverTempFiles(Path symbolDir) {
+    if (!Files.isDirectory(symbolDir)) {
+      return;
+    }
+    try (DirectoryStream<Path> stream = Files.newDirectoryStream(symbolDir, "*.tmp")) {
+      for (Path tempFile : stream) {
+        try {
+          Files.deleteIfExists(tempFile);
+        } catch (Exception e) {
+          log.warn("failed to delete leftover temp file: {}", tempFile, e);
+        }
+      }
+    } catch (IOException e) {
+      log.warn("failed to sweep leftover temp files in: {}", symbolDir, e);
+    }
+  }
+
   private <T> T readJson(Path filePath, Class<T> clazz) {
     try {
       if (!Files.exists(filePath)) {
@@ -201,7 +248,9 @@ public class JsonKlinePersistenceStore implements KlinePersistenceStore {
   }
 
   private void writeJsonAtomically(Path targetPath, Object payload) {
-    Path tempPath = targetPath.resolveSibling(targetPath.getFileName() + ".tmp");
+    // unique temp name: concurrent writers of the same target must never share a temp file
+    Path tempPath = targetPath.resolveSibling(
+        targetPath.getFileName() + "." + Thread.currentThread().getId() + "-" + System.nanoTime() + ".tmp");
     try {
       Files.createDirectories(targetPath.getParent());
       Files.writeString(tempPath, serializer.toJsonString(payload), StandardCharsets.UTF_8);

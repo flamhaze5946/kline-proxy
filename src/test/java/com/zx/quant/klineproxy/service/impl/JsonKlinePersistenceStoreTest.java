@@ -75,6 +75,80 @@ class JsonKlinePersistenceStoreTest {
     assertEquals(firstModifiedTime, secondModifiedTime);
   }
 
+  @Test
+  void dumpRowsShouldRewriteSealedShardWhenRowCountChanges() throws Exception {
+    JsonKlinePersistenceStore store = buildStore();
+    long currentTime = dayStart("2026-03-30") + (12L * 3_600_000L);
+    // day 2026-03-29 sealed with a hole (only hour 0)
+    store.dumpRows("spot", "1h", "BTCUSDT", List.of(
+        buildRow("2026-03-28", 0),
+        buildRow("2026-03-29", 0),
+        buildRow("2026-03-30", 0)
+    ), 10, currentTime);
+    Path sealedShard = tempDir.resolve("spot").resolve("1h").resolve("BTCUSDT").resolve("2026-03-29.json");
+    Serializer serializer = new Serializer(new ObjectMapper());
+
+    // warmup backfilled hour 1 of the sealed day -> shard must be rewritten
+    store.dumpRows("spot", "1h", "BTCUSDT", List.of(
+        buildRow("2026-03-28", 0),
+        buildRow("2026-03-29", 0),
+        buildRow("2026-03-29", 1),
+        buildRow("2026-03-30", 0)
+    ), 10, currentTime);
+
+    var shard = serializer.fromJsonString(
+        Files.readString(sealedShard, StandardCharsets.UTF_8),
+        com.zx.quant.klineproxy.model.persistence.PersistedKlineShardFile.class);
+    assertEquals(2, shard.getRows().size());
+  }
+
+  @Test
+  void dumpRowsShouldRewriteSealedShardWhenTradeNumChangesWithSameCount() throws Exception {
+    JsonKlinePersistenceStore store = buildStore();
+    long currentTime = dayStart("2026-03-30") + (12L * 3_600_000L);
+    PersistedKlineRow placeholder = buildRow("2026-03-29", 0);
+    placeholder.setTradeNum(0);
+    store.dumpRows("spot", "1h", "BTCUSDT", List.of(
+        buildRow("2026-03-28", 0),
+        placeholder,
+        buildRow("2026-03-30", 0)
+    ), 10, currentTime);
+    Path sealedShard = tempDir.resolve("spot").resolve("1h").resolve("BTCUSDT").resolve("2026-03-29.json");
+    Serializer serializer = new Serializer(new ObjectMapper());
+
+    // same row count, but the filled placeholder got replaced by the real kline
+    PersistedKlineRow realRow = buildRow("2026-03-29", 0);
+    realRow.setTradeNum(42);
+    store.dumpRows("spot", "1h", "BTCUSDT", List.of(
+        buildRow("2026-03-28", 0),
+        realRow,
+        buildRow("2026-03-30", 0)
+    ), 10, currentTime);
+
+    var shard = serializer.fromJsonString(
+        Files.readString(sealedShard, StandardCharsets.UTF_8),
+        com.zx.quant.klineproxy.model.persistence.PersistedKlineShardFile.class);
+    assertEquals(42, shard.getRows().get(0).getTradeNum());
+  }
+
+  @Test
+  void loadRowsShouldSweepLeftoverTempFilesFromCrashedWrites() throws Exception {
+    JsonKlinePersistenceStore store = buildStore();
+    long currentTime = dayStart("2026-03-30") + (12L * 3_600_000L);
+    store.dumpRows("spot", "1h", "BTCUSDT", List.of(buildRow("2026-03-30", 0)), 5, currentTime);
+    Path symbolDir = tempDir.resolve("spot").resolve("1h").resolve("BTCUSDT");
+    Path crashTemp = symbolDir.resolve("2026-03-30.json.123-456.tmp");
+    Path manifestTemp = symbolDir.resolve("_meta.json.789-012.tmp");
+    Files.writeString(crashTemp, "partial", StandardCharsets.UTF_8);
+    Files.writeString(manifestTemp, "partial", StandardCharsets.UTF_8);
+
+    List<PersistedKlineRow> loadedRows = store.loadRows("spot", "1h", "BTCUSDT", 5);
+
+    assertEquals(1, loadedRows.size());
+    assertFalse(Files.exists(crashTemp));
+    assertFalse(Files.exists(manifestTemp));
+  }
+
   private JsonKlinePersistenceStore buildStore() {
     KlinePersistenceProperties properties = new KlinePersistenceProperties();
     properties.setRootDir(tempDir.toString());

@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.model.persistence;
 
+import java.util.Map;
 import lombok.Data;
 
 /**
@@ -28,4 +29,13 @@ public class PersistedKlineManifest {
   private Long lastDumpedCleanOpenTime;
 
   private Long lastDumpedCleanCloseTime;
+
+  /**
+   * per-day fingerprints of the dumped shards; a sealed shard is rewritten when the
+   * in-memory day content no longer matches (e.g. warmup backfilled a downtime gap).
+   * tradeNum sum catches equal-count replacements (filled placeholder -> real kline).
+   */
+  private Map<String, Integer> dayRowCounts;
+
+  private Map<String, Long> dayTradeNumSums;
 }
