@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -290,6 +291,39 @@ class ColdDataLoadIntegrationTest {
     Set<KlineSetKey> restored = thirdBoot.invokeRestorePersistedKlines(Set.of(key));
     assertEquals(1, restored.size(), "disk cache was wiped by reconcile over an unrestored key");
     assertEquals(6, displayKlines(thirdBoot, "BTCUSDT").size());
+  }
+
+  @Test
+  void intervalsNotListedInPersistenceConfigMustNotBePersisted() {
+    JsonKlinePersistenceStore store = buildStore();
+    // seed disk data through a service whose 1h interval IS opted in
+    HarnessKlineService writer = new HarnessKlineService("double", store);
+    List<Kline> sourceKlines = new ArrayList<>();
+    for (int i = 0; i < 4; i++) {
+      sourceKlines.add(writer.buildServerKline(BASE_TIME + i * HOUR, "700." + i, 10 + i));
+    }
+    writer.updateKlines("BTCUSDT", IntervalEnum.ONE_HOUR.code(), sourceKlines);
+    writer.setServerTime(BASE_TIME + 5 * HOUR);
+    writer.invokeDumpPersistedKlines(true);
+    assertTrue(Files.exists(tempDir.resolve("spot").resolve("1h").resolve("BTCUSDT")));
+
+    // a service whose interval is NOT opted in must neither restore nor dump it
+    // (day-sharded storage would write one file per day per symbol for e.g. "1d")
+    HarnessKlineService optedOut = new HarnessKlineService("double", store);
+    KlinePersistenceProperties optedOutProps = (KlinePersistenceProperties)
+        ReflectionTestUtils.getField(optedOut, "persistenceProperties");
+    assertNotNull(optedOutProps);
+    optedOutProps.getSpot().getIntervalConfigs().clear();
+
+    KlineSetKey key = new KlineSetKey("BTCUSDT", IntervalEnum.ONE_HOUR.code());
+    assertEquals(Set.of(), optedOut.invokeRestorePersistedKlines(Set.of(key)));
+    optedOut.updateKlines("ETHUSDT", IntervalEnum.ONE_HOUR.code(),
+        List.of(optedOut.buildServerKline(BASE_TIME, "800.0", 10)));
+    optedOut.setServerTime(BASE_TIME + 2 * HOUR);
+    optedOut.invokeDumpPersistedKlines(true);
+    optedOut.invokeReconcilePersistedKlines(Set.of(new KlineSetKey("ETHUSDT", IntervalEnum.ONE_HOUR.code())));
+    assertFalse(Files.exists(tempDir.resolve("spot").resolve("1h").resolve("ETHUSDT")),
+        "opted-out interval was persisted");
   }
 
   private NavigableMap<Long, Object[]> displayKlines(HarnessKlineService service, String symbol) {

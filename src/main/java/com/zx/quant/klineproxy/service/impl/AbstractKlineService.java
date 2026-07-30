@@ -484,7 +484,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
     trimKlinesIfNeeded(klineSet, intervalEnum);
-    if (updated && isPersistenceEnabled()) {
+    if (updated && isPersistenceEnabledFor(intervalEnum)) {
       dirtyPersistenceKeys.add(klineSetKey);
     }
   }
@@ -1583,6 +1583,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return persistenceProperties != null && persistenceProperties.isEnabled();
   }
 
+  /**
+   * only intervals explicitly listed under kline.persistence.&lt;service&gt;.intervalConfigs
+   * are persisted. Day-sharded storage writes ONE file per day per symbol, so persisting
+   * a "1d" series would explode into (maintainCount) tiny files per symbol — an interval
+   * must opt in deliberately.
+   */
+  private boolean isPersistenceEnabledFor(IntervalEnum intervalEnum) {
+    if (!isPersistenceEnabled() || intervalEnum == null) {
+      return false;
+    }
+    return getPersistenceServiceConfig().getIntervalConfigs().containsKey(intervalEnum.code());
+  }
+
   private void startPersistedKlineWarmup(Set<KlineSetKey> restoredKlineSetKeys,
                                          Set<KlineSetKey> configuredKlineSetKeys) {
     if (!isPersistenceEnabled() || CollectionUtils.isEmpty(restoredKlineSetKeys)
@@ -1605,7 +1618,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     List<Runnable> restoreTasks = configuredKlineSetKeys.stream()
         .<Runnable>map(configuredKey -> () -> {
           IntervalEnum intervalEnum = CommonUtil.getEnumByCode(configuredKey.getInterval(), IntervalEnum.class);
-          if (intervalEnum == null) {
+          if (!isPersistenceEnabledFor(intervalEnum)) {
             return;
           }
           // best-effort cache: one broken symbol dir must not abort startup for the rest
@@ -1743,7 +1756,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    */
   private boolean dumpPersistedKlineSet(KlineSetKey klineSetKey, long currentTime) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
-    if (intervalEnum == null) {
+    if (!isPersistenceEnabledFor(intervalEnum)) {
+      // nothing will ever be persisted for this key: drop any dirty flag
       return true;
     }
     // snapshot INSIDE the lock: a delayed writer must never overwrite a newer snapshot,
