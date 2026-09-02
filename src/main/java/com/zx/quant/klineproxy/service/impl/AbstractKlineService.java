@@ -34,6 +34,7 @@ import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.util.CommonUtil;
+import com.zx.quant.klineproxy.util.HourBoundaryGuard;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -1255,7 +1256,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         new ExceptionSafeRunnable(this::syncConfiguredKlinesOnce), 1000, 1000 * 60 * 5, TimeUnit.MILLISECONDS);
   }
 
+  /**
+   * Keep the ~90 s full RPC sync away from HH:00 (see {@link HourBoundaryGuard}): a sync
+   * straddling the boundary delayed the fleet's closed-bar reads by 0.2–1.1 s in ~25% of
+   * hours. Skipping is safe — the sync only back-fills gaps; the WebSocket stream keeps the
+   * live candle current — and the next fixed-delay tick (5 min) is outside the window.
+   */
+  @Value("${kline.rpcSync.hourBoundaryGuardBeforeMs:150000}")
+  private long rpcSyncHourBoundaryGuardBeforeMs = 150_000L;
+
+  @Value("${kline.rpcSync.hourBoundaryGuardAfterMs:30000}")
+  private long rpcSyncHourBoundaryGuardAfterMs = 30_000L;
+
   private void syncConfiguredKlinesOnce() {
+    long now = getServerTime();
+    if (HourBoundaryGuard.shouldSkip(now, rpcSyncHourBoundaryGuardBeforeMs, rpcSyncHourBoundaryGuardAfterMs)) {
+      log.info("klines rpc sync for {} skipped: {} ms into the hour is inside the hour-boundary guard (before={} ms, after={} ms)",
+          getClass().getSimpleName(), Math.floorMod(now, HourBoundaryGuard.HOUR_MS),
+          rpcSyncHourBoundaryGuardBeforeMs, rpcSyncHourBoundaryGuardAfterMs);
+      return;
+    }
     List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
     List<String> symbols = getSymbols();
     List<ImmutablePair<String, IntervalEnum>> symbolIntervals = new ArrayList<>();
