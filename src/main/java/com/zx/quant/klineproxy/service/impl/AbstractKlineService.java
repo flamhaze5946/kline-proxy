@@ -175,6 +175,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private final ConcurrentHashMap<BulkKlinesKey, CompletableFuture<BulkKlinesResponse>> bulkKlinesInFlight =
       new ConcurrentHashMap<>();
 
+  /** per interval: when did each symbol's closing update (x=true) for the latest boundary arrive */
+  private final ConcurrentHashMap<String, BoundarySettle> boundarySettles = new ConcurrentHashMap<>();
+  private static final long SETTLE_INCOMPLETE_LOG_AFTER_MS = 30_000L;
+  private static final int SETTLE_PENDING_LIST_LIMIT = 20;
+
   private final AtomicReference<AllMarketSnapshot<Ticker<?>>> allMarketTickerSnapshot =
       new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
 
@@ -608,7 +613,124 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     updateKlinesInternal(symbol, interval, Collections.singletonList(kline), false);
     if (closed) {
       markFinal(symbol, interval, kline.getOpenTime());
+      recordClosedBarArrival(symbol, interval, kline.getOpenTime());
     }
+  }
+
+  /**
+   * Answer "how long after the boundary is the previous bar available for every symbol":
+   * record the arrival (ms after the boundary) of each symbol's closing update, log
+   * {@code CLOSED_BAR_SETTLED} once every symbol that has a bar for that open time is final, or
+   * {@code CLOSED_BAR_SETTLE_INCOMPLETE} when some are still missing 30 s after the boundary.
+   */
+  private void recordClosedBarArrival(String symbol, String interval, long openTime) {
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
+    if (intervalEnum == null) {
+      return;
+    }
+    long boundary = openTime + intervalEnum.getMills();
+    long arrivalMs = getServerTime() - boundary;
+    BoundarySettle settle = boundarySettles.compute(interval, (key, current) -> {
+      if (current == null || current.boundary < boundary) {
+        if (current != null && !current.logged) {
+          logSettle(current, intervalEnum, true);
+        }
+        return new BoundarySettle(boundary);
+      }
+      return current;
+    });
+    if (settle.boundary != boundary) {
+      return; // a late closing update for an older bar (REST already covers it)
+    }
+    settle.arrivalMsBySymbol.putIfAbsent(symbol, arrivalMs);
+    if (!settle.logged && settle.arrivalMsBySymbol.size() >= countSymbolsWithBar(interval, openTime)) {
+      logSettle(settle, intervalEnum, false);
+    }
+  }
+
+  private int countSymbolsWithBar(String interval, long openTime) {
+    int count = 0;
+    for (Map.Entry<KlineSetKey, KlineSet> entry : klineSetMap.entrySet()) {
+      if (StringUtils.equals(entry.getKey().getInterval(), interval)
+          && entry.getValue().getKlineMap().containsKey(openTime)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** scheduled: flag boundaries whose closing updates never fully arrived */
+  void logIncompleteSettles() {
+    long now = getServerTime();
+    for (BoundarySettle settle : boundarySettles.values()) {
+      if (settle.logged || now - settle.boundary < SETTLE_INCOMPLETE_LOG_AFTER_MS) {
+        continue;
+      }
+      IntervalEnum intervalEnum = boundarySettles.entrySet().stream()
+          .filter(e -> e.getValue() == settle)
+          .map(e -> CommonUtil.getEnumByCode(e.getKey(), IntervalEnum.class))
+          .findFirst().orElse(null);
+      if (intervalEnum != null) {
+        logSettle(settle, intervalEnum, true);
+      }
+    }
+  }
+
+  private synchronized void logSettle(BoundarySettle settle, IntervalEnum intervalEnum, boolean incomplete) {
+    if (settle.logged) {
+      return;
+    }
+    settle.logged = true;
+    long openTime = settle.boundary - intervalEnum.getMills();
+    List<Map.Entry<String, Long>> arrivals = new ArrayList<>(settle.arrivalMsBySymbol.entrySet());
+    arrivals.sort(Map.Entry.comparingByValue());
+    int expected = countSymbolsWithBar(intervalEnum.code(), openTime);
+    int arrived = arrivals.size();
+    long first = arrived == 0 ? -1 : arrivals.get(0).getValue();
+    long p50 = arrived == 0 ? -1 : arrivals.get(Math.min(arrived - 1, arrived / 2)).getValue();
+    long p90 = arrived == 0 ? -1 : arrivals.get(Math.min(arrived - 1, (int) Math.floor(arrived * 0.9))).getValue();
+    long max = arrived == 0 ? -1 : arrivals.get(arrived - 1).getValue();
+    String last = arrived == 0 ? "-" : arrivals.get(arrived - 1).getKey();
+    settle.summary = new ClosedBarSettleSummary(intervalEnum.code(), settle.boundary, expected, arrived,
+        first, p50, p90, max, last, incomplete);
+    if (incomplete) {
+      List<String> pending = new ArrayList<>();
+      for (Map.Entry<KlineSetKey, KlineSet> entry : klineSetMap.entrySet()) {
+        if (StringUtils.equals(entry.getKey().getInterval(), intervalEnum.code())
+            && entry.getValue().getKlineMap().containsKey(openTime)
+            && !settle.arrivalMsBySymbol.containsKey(entry.getKey().getSymbol())) {
+          pending.add(entry.getKey().getSymbol());
+        }
+      }
+      Collections.sort(pending);
+      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={}",
+          intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, pending.size(),
+          pending.size() <= SETTLE_PENDING_LIST_LIMIT ? pending : pending.subList(0, SETTLE_PENDING_LIST_LIMIT));
+    } else {
+      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={}",
+          intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, last);
+    }
+  }
+
+  /** last settle summary for an interval (diagnostics/tests) */
+  public ClosedBarSettleSummary getLastClosedBarSettle(String interval) {
+    BoundarySettle settle = boundarySettles.get(interval);
+    return settle == null ? null : settle.summary;
+  }
+
+  private static final class BoundarySettle {
+    private final long boundary;
+    private final ConcurrentHashMap<String, Long> arrivalMsBySymbol = new ConcurrentHashMap<>();
+    private volatile boolean logged;
+    private volatile ClosedBarSettleSummary summary;
+
+    private BoundarySettle(long boundary) {
+      this.boundary = boundary;
+    }
+  }
+
+  public record ClosedBarSettleSummary(String interval, long boundary, int expected, int arrived,
+      long firstMs, long p50Ms, long p90Ms, long maxMs, String lastSymbol, boolean incomplete) {
   }
 
   private void updateKlinesInternal(String symbol, String interval, List<Kline> klines,
@@ -1217,6 +1339,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void startAllMarketSnapshotUpdater() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(new ExceptionSafeRunnable(this::logIncompleteSettles),
+        5_000L, 5_000L, TimeUnit.MILLISECONDS);
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           long now = System.currentTimeMillis();

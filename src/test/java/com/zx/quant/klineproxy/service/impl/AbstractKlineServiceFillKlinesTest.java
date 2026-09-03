@@ -553,6 +553,56 @@ class AbstractKlineServiceFillKlinesTest {
     assertThat(response.waitedMs()).isZero();
   }
 
+  @Test
+  void closedBarSettleSummaryReportsArrivalTimesAfterTheBoundary() {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary - 60_000, 8_000);
+    // pre-close snapshots (x=false) for four symbols during the hour
+    for (String symbol : List.of("AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT")) {
+      service.updateStreamKline(symbol, "1h", hourBar(boundary - H, 3, "1"), false);
+    }
+    // closing updates arrive 300 / 1200 / 4100 ms after the boundary
+    service.serverTime = boundary + 300;
+    service.updateStreamKline("AAAUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    service.serverTime = boundary + 1_200;
+    service.updateStreamKline("BBBUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    service.serverTime = boundary + 4_100;
+    service.updateStreamKline("CCCUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    // DDDUSDT has a bar but never closes: not settled yet, nothing logged
+    assertThat(service.getLastClosedBarSettle("1h")).isNull();
+    service.serverTime = boundary + 31_000;
+    service.logIncompleteSettles();
+    AbstractKlineService.ClosedBarSettleSummary summary = service.getLastClosedBarSettle("1h");
+    assertThat(summary).isNotNull();
+    assertThat(summary.incomplete()).isTrue();
+    assertThat(summary.expected()).isEqualTo(4);
+    assertThat(summary.arrived()).isEqualTo(3);
+    assertThat(summary.firstMs()).isEqualTo(300);
+    assertThat(summary.p50Ms()).isEqualTo(1_200);
+    assertThat(summary.maxMs()).isEqualTo(4_100);
+    assertThat(summary.lastSymbol()).isEqualTo("CCCUSDT");
+    // next boundary: all three close ⇒ complete summary, last = the slowest symbol
+    long next = boundary + H;
+    for (String symbol : List.of("AAAUSDT", "BBBUSDT", "CCCUSDT")) {
+      service.serverTime = next - 1_000;
+      service.updateStreamKline(symbol, "1h", hourBar(next - H, 2, "1"), false);
+    }
+    service.serverTime = next + 900;
+    service.updateStreamKline("BBBUSDT", "1h", hourBar(next - H, 2, "1"), true);
+    service.serverTime = next + 2_500;
+    service.updateStreamKline("AAAUSDT", "1h", hourBar(next - H, 2, "1"), true);
+    service.serverTime = next + 3_300;
+    service.updateStreamKline("CCCUSDT", "1h", hourBar(next - H, 2, "1"), true);
+    AbstractKlineService.ClosedBarSettleSummary complete = service.getLastClosedBarSettle("1h");
+    assertThat(complete.incomplete()).isFalse();
+    assertThat(complete.boundary()).isEqualTo(next);
+    assertThat(complete.expected()).isEqualTo(3);
+    assertThat(complete.arrived()).isEqualTo(3);
+    assertThat(complete.firstMs()).isEqualTo(900);
+    assertThat(complete.maxMs()).isEqualTo(3_300);
+    assertThat(complete.lastSymbol()).isEqualTo("CCCUSDT");
+  }
+
   private static class TestKlineService extends AbstractKlineService<WebSocketClient> {
 
     private final KlineSyncConfigProperties syncConfig;
