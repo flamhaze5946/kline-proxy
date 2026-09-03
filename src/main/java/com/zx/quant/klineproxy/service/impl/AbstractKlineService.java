@@ -435,7 +435,20 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     CompletableFuture<BulkKlinesResponse> flight = new CompletableFuture<>();
     CompletableFuture<BulkKlinesResponse> existing = bulkKlinesInFlight.putIfAbsent(cacheKey, flight);
     if (existing != null) {
-      return existing.join();
+      try {
+        return existing.join();
+      } catch (java.util.concurrent.CompletionException e) {
+        // leader/follower parity: surface the leader's own exception type (e.g. ApiException → its
+        // mapped HTTP status) instead of the CompletionException wrapper
+        Throwable cause = e.getCause();
+        if (cause instanceof RuntimeException runtime) {
+          throw runtime;
+        }
+        if (cause instanceof Error error) {
+          throw error;
+        }
+        throw e;
+      }
     }
     try {
       FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
