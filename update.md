@@ -1,4 +1,5 @@
 ## 1.7.15 (2026-09-03)
+- config fix: the embedded server is Undertow, so the 1.7.14 `server.tomcat.*` keys were inert; use `server.undertow.threads.worker` (400) / `server.undertow.threads.io` (4) so ~300 fleet requests can block concurrently at the boundary.
 - log `CLOSED_BAR_SETTLED interval boundary expected arrived first_ms p50_ms p90_ms max_ms last` once every symbol that has the just-closed bar received its closing update (`x=true`): `max_ms` = how long after the boundary the previous bar is available for ALL symbols; `CLOSED_BAR_SETTLE_INCOMPLETE … pending_symbols=[…]` when some closing updates are still missing 30 s after the boundary (checked every 5 s).
 
 ## 1.7.14 (2026-09-03)

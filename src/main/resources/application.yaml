@@ -76,6 +76,7 @@ ws:
 # `server:` already exist above and YAML forbids duplicate root keys.
 kline.bulk.finalWaitEnabled: true
 kline.bulk.finalWaitMaxMs: 8000
-# ~300 fleet requests block together at the boundary while a third-party tenant sends ~40 req/s
-server.tomcat.threads.max: 600
-server.tomcat.accept-count: 500
+# ~300 fleet requests block together at the boundary while a third-party tenant sends ~40 req/s.
+# The embedded server is UNDERTOW (starter-undertow; tomcat excluded): default worker threads = 8 × CPUs (16 on the VPS).
+server.undertow.threads.worker: 400
+server.undertow.threads.io: 4
