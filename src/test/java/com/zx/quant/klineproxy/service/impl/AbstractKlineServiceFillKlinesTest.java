@@ -603,6 +603,74 @@ class AbstractKlineServiceFillKlinesTest {
     assertThat(complete.lastSymbol()).isEqualTo("CCCUSDT");
   }
 
+  @Test
+  void symbolsThatAreNoLongerTradingAreNotWaitedForAndAreReported() {
+    long boundary = 20 * H;
+    TestKlineService service = finalWaitService(boundary - 60_000, 8_000);
+    // exchange info: only LIVEUSDT is TRADING; GONEUSDT was delisted mid-hour and its bar never closes
+    service.setSymbols(List.of("LIVEUSDT"));
+    service.updateStreamKline("LIVEUSDT", "1h", hourBar(boundary - H, 3, "1"), false);
+    service.updateStreamKline("GONEUSDT", "1h", hourBar(boundary - H, 3, "1"), false);
+    service.serverTime = boundary + 500;
+    service.updateStreamKline("LIVEUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    BulkKlinesResponse response = service.queryBulkKlines("1h", 1, true, List.of("LIVEUSDT", "GONEUSDT"));
+    assertThat(response.finalized()).isTrue();
+    assertThat(response.pending()).isEmpty();
+    assertThat(response.waitedMs()).isZero();
+    assertThat(response.notTrading()).containsExactly("GONEUSDT");
+    // the delisted symbol's last (partial) bar is still returned as-is
+    assertThat(response.klines()).containsKeys("LIVEUSDT", "GONEUSDT");
+    // a trading symbol with a non-final bar still blocks (and the cap still applies)
+    service.updateStreamKline("LIVEUSDT", "1h", hourBar(boundary, 1, "2"), false);
+    long next = boundary + H;
+    service.serverTime = next + 7_900;
+    service.updateStreamKline("LIVEUSDT", "1h", hourBar(next - H, 1, "2"), false);
+    BulkKlinesResponse capped = service.queryBulkKlines("1h", 1, true, List.of("LIVEUSDT", "GONEUSDT"));
+    assertThat(capped.finalized()).isFalse();
+    assertThat(capped.pending()).containsExactly("LIVEUSDT");
+    assertThat(capped.notTrading()).isEmpty();
+  }
+
+  @Test
+  void unknownTradingSetFallsBackToWaitingForEverySymbol() {
+    long boundary = 22 * H;
+    TestKlineService service = finalWaitService(boundary - 60_000, 8_000);
+    service.setSymbols(List.of()); // exchange info unknown/empty ⇒ no status filtering
+    service.updateStreamKline("ANYUSDT", "1h", hourBar(boundary - H, 3, "1"), false);
+    service.serverTime = boundary + 7_950;
+    BulkKlinesResponse response = service.queryBulkKlines("1h", 1, true, List.of("ANYUSDT"));
+    assertThat(response.finalized()).isFalse();
+    assertThat(response.pending()).containsExactly("ANYUSDT");
+    assertThat(response.notTrading()).isEmpty();
+  }
+
+  @Test
+  void closedBarSettleSummaryIgnoresSymbolsThatAreNotTrading() {
+    long boundary = 30 * H;
+    TestKlineService service = finalWaitService(boundary - 60_000, 8_000);
+    service.setSymbols(List.of("AAAUSDT", "BBBUSDT"));
+    for (String symbol : List.of("AAAUSDT", "BBBUSDT", "ZZZUSDT")) {
+      service.updateStreamKline(symbol, "1h", hourBar(boundary - H, 3, "1"), false);
+    }
+    // a closing update for the non-trading symbol neither counts nor settles anything
+    service.serverTime = boundary + 100;
+    service.updateStreamKline("ZZZUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    assertThat(service.getLastClosedBarSettle("1h")).isNull();
+    service.serverTime = boundary + 400;
+    service.updateStreamKline("AAAUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    assertThat(service.getLastClosedBarSettle("1h")).isNull();
+    service.serverTime = boundary + 900;
+    service.updateStreamKline("BBBUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    AbstractKlineService.ClosedBarSettleSummary summary = service.getLastClosedBarSettle("1h");
+    assertThat(summary).isNotNull();
+    assertThat(summary.incomplete()).isFalse();
+    assertThat(summary.expected()).isEqualTo(2);
+    assertThat(summary.arrived()).isEqualTo(2);
+    assertThat(summary.notTrading()).isEqualTo(1);
+    assertThat(summary.maxMs()).isEqualTo(900);
+    assertThat(summary.lastSymbol()).isEqualTo("BBBUSDT");
+  }
+
   private static class TestKlineService extends AbstractKlineService<WebSocketClient> {
 
     private final KlineSyncConfigProperties syncConfig;

@@ -474,8 +474,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   /**
-   * Block (bounded) until every requested symbol whose just-closed bar exists has received its
-   * final update. The window is measured from the interval boundary in server time; the actual
+   * Block (bounded) until every requested TRADING symbol whose just-closed bar exists has received
+   * its final update; symbols whose exchange status is no longer TRADING are skipped and reported. The window is measured from the interval boundary in server time; the actual
    * sleeping uses the wall clock so a frozen test clock cannot spin forever.
    */
   private FinalWaitOutcome awaitJustClosedBarsFinal(IntervalEnum intervalEnum, List<String> symbols,
@@ -487,9 +487,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (!closedOnly) {
       // closed_only=false callers get the forming bar too: finality is not their contract and the
       // response must keep being cached exactly as before this feature
-      return new FinalWaitOutcome(justClosedOpenTime, List.of(), 0L);
+      return new FinalWaitOutcome(justClosedOpenTime, List.of(), 0L, List.of());
     }
-    List<String> pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime);
+    // status != TRADING (SETTLING / CLOSE / BREAK …): the closing update may never come, so the
+    // symbol is not waited for; it is reported in not_trading instead of blocking until the cap
+    Set<String> trading = tradingSymbolsOrNull();
+    List<String> notTrading = notTradingSymbolsWithNonFinalBar(intervalEnum.code(), symbols, justClosedOpenTime, trading);
+    List<String> pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime, trading);
     int pendingInitial = pending.size();
     boolean shouldWait = props.isFinalWaitEnabled() && maxWaitMs > 0
         && sinceBoundary >= 0 && sinceBoundary <= maxWaitMs && !pending.isEmpty();
@@ -511,34 +515,73 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
             break;
           }
         }
-        pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime);
+        pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime, trading);
       }
       waitedMs = (System.nanoTime() - startNanos) / 1_000_000L;
       if (pending.isEmpty()) {
-        log.info("BULK_FINAL_WAIT interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after=0",
-            intervalEnum.code(), boundary, symbols.size(), pendingInitial, waitedMs);
+        log.info("BULK_FINAL_WAIT interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after=0 not_trading={}",
+            intervalEnum.code(), boundary, symbols.size(), pendingInitial, waitedMs, notTrading);
       } else {
-        log.warn("BULK_FINAL_WAIT_CAP interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after={} pending={}",
+        log.warn("BULK_FINAL_WAIT_CAP interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after={} pending={} not_trading={}",
             intervalEnum.code(), boundary, symbols.size(), pendingInitial, waitedMs, pending.size(),
-            pending.size() <= 20 ? pending : pending.subList(0, 20));
+            pending.size() <= 20 ? pending : pending.subList(0, 20), notTrading);
       }
     }
-    return new FinalWaitOutcome(justClosedOpenTime, pending, waitedMs);
+    return new FinalWaitOutcome(justClosedOpenTime, pending, waitedMs, notTrading);
   }
 
-  /** symbols whose just-closed bar EXISTS in memory but is not final yet (absent bars are not waited for) */
-  private List<String> pendingSymbols(String interval, List<String> symbols, long justClosedOpenTime) {
+  /**
+   * symbols whose just-closed bar EXISTS in memory but is not final yet and whose exchange status is
+   * TRADING (absent bars and non-trading symbols are not waited for)
+   */
+  private List<String> pendingSymbols(String interval, List<String> symbols, long justClosedOpenTime,
+      Set<String> trading) {
     List<String> pending = new ArrayList<>();
     for (String symbol : symbols) {
-      KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
-      if (klineSet == null) {
-        continue;
-      }
-      if (klineSet.getKlineMap().containsKey(justClosedOpenTime) && !klineSet.isFinal(justClosedOpenTime)) {
+      if (isTrading(trading, symbol) && hasNonFinalBar(symbol, interval, justClosedOpenTime)) {
         pending.add(symbol);
       }
     }
     return pending;
+  }
+
+  /** requested symbols that still carry a non-final just-closed bar but are no longer TRADING */
+  private List<String> notTradingSymbolsWithNonFinalBar(String interval, List<String> symbols,
+      long justClosedOpenTime, Set<String> trading) {
+    if (trading == null) {
+      return List.of();
+    }
+    List<String> notTrading = new ArrayList<>();
+    for (String symbol : symbols) {
+      if (!trading.contains(symbol) && hasNonFinalBar(symbol, interval, justClosedOpenTime)) {
+        notTrading.add(symbol);
+      }
+    }
+    return notTrading;
+  }
+
+  private boolean hasNonFinalBar(String symbol, String interval, long openTime) {
+    KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
+    return klineSet != null && klineSet.getKlineMap().containsKey(openTime) && !klineSet.isFinal(openTime);
+  }
+
+  /**
+   * Current TRADING symbols from exchange info, or {@code null} when unknown (exchange info
+   * unavailable or empty): callers then fall back to treating every symbol as trading, i.e. the
+   * pre-1.7.16 behaviour of waiting for all of them.
+   */
+  private Set<String> tradingSymbolsOrNull() {
+    try {
+      List<String> symbols = getSymbols();
+      return CollectionUtils.isEmpty(symbols) ? null : new HashSet<>(symbols);
+    } catch (RuntimeException e) {
+      log.warn("tradingSymbolsOrNull: exchange info unavailable, not filtering by symbol status: {}", e.toString());
+      return null;
+    }
+  }
+
+  private static boolean isTrading(Set<String> trading, String symbol) {
+    return trading == null || trading.contains(symbol);
   }
 
   private BulkKlinesResponse buildBulkKlinesResponse(String interval, int limit, boolean closedOnly,
@@ -564,10 +607,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       out.put(symbol, klines.stream().map(ConvertUtil::convertToDisplayKline).toList());
     }
     List<String> pending = List.copyOf(wait.pending());
-    return new BulkKlinesResponse(interval, now, out, pending.isEmpty(), pending, wait.waitedMs());
+    return new BulkKlinesResponse(interval, now, out, pending.isEmpty(), pending, wait.waitedMs(),
+        List.copyOf(wait.notTrading()));
   }
 
-  private record FinalWaitOutcome(long justClosedOpenTime, List<String> pending, long waitedMs) {
+  private record FinalWaitOutcome(long justClosedOpenTime, List<String> pending, long waitedMs,
+      List<String> notTrading) {
   }
 
   private List<String> normalizeBulkSymbols(Collection<String> symbols, IntervalEnum intervalEnum) {
@@ -628,6 +673,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (intervalEnum == null) {
       return;
     }
+    Set<String> trading = tradingSymbolsOrNull();
+    if (!isTrading(trading, symbol)) {
+      return; // delisted / halted symbols are outside the settle universe
+    }
     long boundary = openTime + intervalEnum.getMills();
     long arrivalMs = getServerTime() - boundary;
     BoundarySettle settle = boundarySettles.compute(interval, (key, current) -> {
@@ -643,20 +692,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return; // a late closing update for an older bar (REST already covers it)
     }
     settle.arrivalMsBySymbol.putIfAbsent(symbol, arrivalMs);
-    if (!settle.logged && settle.arrivalMsBySymbol.size() >= countSymbolsWithBar(interval, openTime)) {
+    if (!settle.logged && settle.arrivalMsBySymbol.size() >= symbolsWithBar(interval, openTime, trading, true).size()) {
       logSettle(settle, intervalEnum, false);
     }
   }
 
-  private int countSymbolsWithBar(String interval, long openTime) {
-    int count = 0;
+  /**
+   * symbols holding a bar for {@code openTime}, restricted to TRADING ones ({@code tradingOnly})
+   * or to the NON-trading ones (delisted / halted; empty when the trading set is unknown)
+   */
+  private List<String> symbolsWithBar(String interval, long openTime, Set<String> trading, boolean tradingOnly) {
+    List<String> out = new ArrayList<>();
+    if (!tradingOnly && trading == null) {
+      return out;
+    }
     for (Map.Entry<KlineSetKey, KlineSet> entry : klineSetMap.entrySet()) {
-      if (StringUtils.equals(entry.getKey().getInterval(), interval)
-          && entry.getValue().getKlineMap().containsKey(openTime)) {
-        count++;
+      if (!StringUtils.equals(entry.getKey().getInterval(), interval)
+          || !entry.getValue().getKlineMap().containsKey(openTime)) {
+        continue;
+      }
+      if (isTrading(trading, entry.getKey().getSymbol()) == tradingOnly) {
+        out.add(entry.getKey().getSymbol());
       }
     }
-    return count;
+    return out;
   }
 
   /** scheduled: flag boundaries whose closing updates never fully arrived */
@@ -684,7 +743,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     long openTime = settle.boundary - intervalEnum.getMills();
     List<Map.Entry<String, Long>> arrivals = new ArrayList<>(settle.arrivalMsBySymbol.entrySet());
     arrivals.sort(Map.Entry.comparingByValue());
-    int expected = countSymbolsWithBar(intervalEnum.code(), openTime);
+    Set<String> trading = tradingSymbolsOrNull();
+    List<String> expectedSymbols = symbolsWithBar(intervalEnum.code(), openTime, trading, true);
+    List<String> notTrading = symbolsWithBar(intervalEnum.code(), openTime, trading, false);
+    Collections.sort(notTrading);
+    int expected = expectedSymbols.size();
     int arrived = arrivals.size();
     long first = arrived == 0 ? -1 : arrivals.get(0).getValue();
     long p50 = arrived == 0 ? -1 : arrivals.get(Math.min(arrived - 1, arrived / 2)).getValue();
@@ -692,23 +755,25 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     long max = arrived == 0 ? -1 : arrivals.get(arrived - 1).getValue();
     String last = arrived == 0 ? "-" : arrivals.get(arrived - 1).getKey();
     settle.summary = new ClosedBarSettleSummary(intervalEnum.code(), settle.boundary, expected, arrived,
-        first, p50, p90, max, last, incomplete);
+        first, p50, p90, max, last, incomplete, notTrading.size());
+    List<String> notTradingShown = notTrading.size() <= SETTLE_PENDING_LIST_LIMIT
+        ? notTrading : notTrading.subList(0, SETTLE_PENDING_LIST_LIMIT);
     if (incomplete) {
       List<String> pending = new ArrayList<>();
-      for (Map.Entry<KlineSetKey, KlineSet> entry : klineSetMap.entrySet()) {
-        if (StringUtils.equals(entry.getKey().getInterval(), intervalEnum.code())
-            && entry.getValue().getKlineMap().containsKey(openTime)
-            && !settle.arrivalMsBySymbol.containsKey(entry.getKey().getSymbol())) {
-          pending.add(entry.getKey().getSymbol());
+      for (String symbol : expectedSymbols) {
+        if (!settle.arrivalMsBySymbol.containsKey(symbol)) {
+          pending.add(symbol);
         }
       }
       Collections.sort(pending);
-      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={}",
+      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={} not_trading={} not_trading_symbols={}",
           intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, pending.size(),
-          pending.size() <= SETTLE_PENDING_LIST_LIMIT ? pending : pending.subList(0, SETTLE_PENDING_LIST_LIMIT));
+          pending.size() <= SETTLE_PENDING_LIST_LIMIT ? pending : pending.subList(0, SETTLE_PENDING_LIST_LIMIT),
+          notTrading.size(), notTradingShown);
     } else {
-      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={}",
-          intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, last);
+      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={} not_trading={} not_trading_symbols={}",
+          intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, last,
+          notTrading.size(), notTradingShown);
     }
   }
 
@@ -730,7 +795,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   public record ClosedBarSettleSummary(String interval, long boundary, int expected, int arrived,
-      long firstMs, long p50Ms, long p90Ms, long maxMs, String lastSymbol, boolean incomplete) {
+      long firstMs, long p50Ms, long p90Ms, long maxMs, String lastSymbol, boolean incomplete,
+      /** symbols holding the bar whose exchange status is not TRADING (excluded from expected) */
+      int notTrading) {
   }
 
   private void updateKlinesInternal(String symbol, String interval, List<Kline> klines,

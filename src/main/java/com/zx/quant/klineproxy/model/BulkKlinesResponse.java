@@ -16,10 +16,20 @@ public record BulkKlinesResponse(
     boolean finalized,
     /** symbols whose just-closed bar existed but was still not final (empty when finalized) */
     List<String> pending,
-    @JsonProperty("waited_ms") long waitedMs
+    @JsonProperty("waited_ms") long waitedMs,
+    /**
+     * requested symbols whose just-closed bar is still non-final but whose exchange status is not
+     * TRADING (delisted / halted): not waited for, their last bar is returned as-is
+     */
+    @JsonProperty("not_trading") List<String> notTrading
 ) {
 
   public BulkKlinesResponse(String interval, long tsMs, Map<String, List<Object[]>> klines) {
-    this(interval, tsMs, klines, true, List.of(), 0L);
+    this(interval, tsMs, klines, true, List.of(), 0L, List.of());
+  }
+
+  public BulkKlinesResponse(String interval, long tsMs, Map<String, List<Object[]>> klines,
+      boolean finalized, List<String> pending, long waitedMs) {
+    this(interval, tsMs, klines, finalized, pending, waitedMs, List.of());
   }
 }
