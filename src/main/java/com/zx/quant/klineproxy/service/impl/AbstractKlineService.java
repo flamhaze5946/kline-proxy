@@ -172,6 +172,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .expireAfterWrite(BULK_KLINES_CACHE_TTL)
       .maximumSize(64)
       .build();
+  private final ConcurrentHashMap<BulkKlinesKey, CompletableFuture<BulkKlinesResponse>> bulkKlinesInFlight =
+      new ConcurrentHashMap<>();
 
   private final AtomicReference<AllMarketSnapshot<Ticker<?>>> allMarketTickerSnapshot =
       new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
@@ -427,14 +429,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (cached != null) {
       return cached;
     }
-    FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
-    BulkKlinesResponse response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
-        normalizedSymbols, wait);
-    // never cache a snapshot that still carries non-final just-closed bars
-    if (response.finalized()) {
-      bulkKlinesCache.put(cacheKey, response);
+    // single-flight per key: concurrent identical requests share one wait+build instead of each
+    // holding a Tomcat thread through the settling window (Caffeine's loader cannot skip caching
+    // a non-final result, hence the explicit in-flight map)
+    CompletableFuture<BulkKlinesResponse> flight = new CompletableFuture<>();
+    CompletableFuture<BulkKlinesResponse> existing = bulkKlinesInFlight.putIfAbsent(cacheKey, flight);
+    if (existing != null) {
+      return existing.join();
     }
-    return response;
+    try {
+      FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
+      BulkKlinesResponse response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
+          normalizedSymbols, wait);
+      // never cache a snapshot that still carries non-final just-closed bars
+      if (response.finalized()) {
+        bulkKlinesCache.put(cacheKey, response);
+      }
+      flight.complete(response);
+      return response;
+    } catch (RuntimeException | Error e) {
+      flight.completeExceptionally(e);
+      throw e;
+    } finally {
+      bulkKlinesInFlight.remove(cacheKey, flight);
+    }
   }
 
   /**
@@ -448,9 +466,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     long maxWaitMs = props.effectiveFinalWaitMaxMs();
     long justClosedOpenTime = boundary - intervalEnum.getMills();
     long sinceBoundary = now - boundary;
+    if (!closedOnly) {
+      // closed_only=false callers get the forming bar too: finality is not their contract and the
+      // response must keep being cached exactly as before this feature
+      return new FinalWaitOutcome(justClosedOpenTime, List.of(), 0L);
+    }
     List<String> pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime);
     int pendingInitial = pending.size();
-    boolean shouldWait = closedOnly && props.isFinalWaitEnabled() && maxWaitMs > 0
+    boolean shouldWait = props.isFinalWaitEnabled() && maxWaitMs > 0
         && sinceBoundary >= 0 && sinceBoundary <= maxWaitMs && !pending.isEmpty();
     long waitedMs = 0L;
     if (shouldWait) {
@@ -603,7 +626,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
       boolean synthetic = !inputOpenTimes.contains(kline.getOpenTime())
           && (existLastEntry == null || kline.getOpenTime() != existLastEntry.getKey());
-      boolean closedByRest = finalizeClosed && kline.getCloseTime() < now;
+      boolean closedByRest = finalizeClosed && kline.getCloseTime() <= now;
       // synthetic fills: nothing better will ever arrive for them; REST closed candles: final
       if ((synthetic || closedByRest) && klineSet.markFinal(kline.getOpenTime())) {
         anyFinal = true;
@@ -1981,7 +2004,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         klineMap.put(kline.getOpenTime(), kline);
       }
       // only closed bars are ever persisted; a restored closed bar is final
-      if (kline.getCloseTime() < now) {
+      if (kline.getCloseTime() <= now) {
         klineSet.markFinal(kline.getOpenTime());
       }
     }

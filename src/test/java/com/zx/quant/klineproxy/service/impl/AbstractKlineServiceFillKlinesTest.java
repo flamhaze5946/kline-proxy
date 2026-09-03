@@ -498,6 +498,31 @@ class AbstractKlineServiceFillKlinesTest {
     BulkKlinesResponse open = service.queryBulkKlines("1h", 1, false, List.of("SOLUSDT"));
     assertThat((System.nanoTime() - started) / 1_000_000L).isLessThan(500L);
     assertThat(open.waitedMs()).isZero();
+    // closed_only=false keeps its pre-1.7.14 contract: no finality semantics, cached as before
+    assertThat(open.finalized()).isTrue();
+    assertThat(open.pending()).isEmpty();
+    assertThat(service.queryBulkKlines("1h", 1, false, List.of("SOLUSDT"))).isSameAs(open);
+  }
+
+  @Test
+  void concurrentIdenticalRequestsShareOneWait() throws Exception {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 500, 5_000);
+    service.updateStreamKline("AVAXUSDT", "1h", hourBar(boundary - H, 7, "30"), false);
+    java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+    try {
+      java.util.concurrent.Future<BulkKlinesResponse> a = pool.submit(() -> service.queryBulkKlines("1h", 1, true, List.of("AVAXUSDT")));
+      java.util.concurrent.Future<BulkKlinesResponse> b = pool.submit(() -> service.queryBulkKlines("1h", 1, true, List.of("AVAXUSDT")));
+      Thread.sleep(150);
+      service.updateStreamKline("AVAXUSDT", "1h", hourBar(boundary - H, 7, "30"), true);
+      BulkKlinesResponse ra = a.get(3, TimeUnit.SECONDS);
+      BulkKlinesResponse rb = b.get(3, TimeUnit.SECONDS);
+      assertThat(ra.finalized()).isTrue();
+      // single-flight: the second caller joined the first computation
+      assertThat(rb).isSameAs(ra);
+    } finally {
+      pool.shutdownNow();
+    }
   }
 
   @Test
