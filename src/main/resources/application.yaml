@@ -71,3 +71,11 @@ ws:
       url: wss://stream.binance.com/ws
     binanceFuture:
       url: wss://fstream.binance.com/market/ws
+
+# 1.7.14: bulk closed-bar finality wait (see update.md). Dotted keys on purpose: `kline:` and
+# `server:` already exist above and YAML forbids duplicate root keys.
+kline.bulk.finalWaitEnabled: true
+kline.bulk.finalWaitMaxMs: 8000
+# ~300 fleet requests block together at the boundary while a third-party tenant sends ~40 req/s
+server.tomcat.threads.max: 600
+server.tomcat.accept-count: 500

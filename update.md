@@ -1,3 +1,6 @@
+## 1.7.14 (2026-09-03)
+- bulk klines (`closed_only=true`): the just-closed bar is only returned once every requested symbol that has a bar for it received its FINAL update (websocket `x=true`, REST sync, restore, or synthetic fill); requests inside the settling window block until then (cap `kline.bulk.finalWaitMaxMs`, default 8000 ms, measured from the boundary). Measured before the fix: at T+1 s 30–34% of symbols were served the pre-close snapshot (13–17% with a different close). Non-final responses are never cached; the cache key includes the interval boundary. Response gains `finalized`, `pending`, `waited_ms`. Config: `kline.bulk.finalWaitEnabled` (true), `kline.bulk.finalWaitMaxMs` (8000). Ops: raise `server.tomcat.threads.max` (600) because ~300 fleet requests block simultaneously at the boundary.
+
 # kline-proxy 1.7 更新日志
 
 对比版本：

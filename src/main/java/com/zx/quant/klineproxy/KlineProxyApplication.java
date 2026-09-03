@@ -3,6 +3,8 @@ package com.zx.quant.klineproxy;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
+import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -10,6 +12,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * @author flamhaze5946
  */
 @EnableScheduling
+@EnableConfigurationProperties(KlineBulkProperties.class)
 @SpringBootApplication(exclude = {RedisAutoConfiguration.class})
 public class KlineProxyApplication {
 

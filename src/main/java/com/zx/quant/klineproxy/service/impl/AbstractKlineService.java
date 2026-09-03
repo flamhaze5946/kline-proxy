@@ -23,6 +23,7 @@ import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
+import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
 import com.zx.quant.klineproxy.model.config.KlinePersistenceProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
@@ -221,6 +222,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Autowired
   private KlinePersistenceProperties persistenceProperties;
 
+  @Autowired(required = false)
+  private KlineBulkProperties bulkProperties;
+
+  private static final KlineBulkProperties DEFAULT_BULK_PROPERTIES = new KlineBulkProperties();
+
+  /** notified whenever any bar becomes final; bulk waiters block on it (25 ms poll fallback) */
+  private final Object finalSignal = new Object();
+
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
 
@@ -410,12 +419,89 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_KLINES_LIMIT, MIN_LIMIT),
         MAX_BULK_KLINES_LIMIT);
     List<String> normalizedSymbols = normalizeBulkSymbols(symbols, intervalEnum);
-    BulkKlinesKey cacheKey = new BulkKlinesKey(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols);
-    return bulkKlinesCache.get(cacheKey, key -> buildBulkKlinesResponse(key.interval(), key.limit(),
-        key.closedOnly(), key.symbols()));
+    long now = getServerTime();
+    long boundary = Math.floorDiv(now, intervalEnum.getMills()) * intervalEnum.getMills();
+    // the boundary is part of the key so a pre-boundary response can never be served after it
+    BulkKlinesKey cacheKey = new BulkKlinesKey(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols, boundary);
+    BulkKlinesResponse cached = bulkKlinesCache.getIfPresent(cacheKey);
+    if (cached != null) {
+      return cached;
+    }
+    FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
+    BulkKlinesResponse response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
+        normalizedSymbols, wait);
+    // never cache a snapshot that still carries non-final just-closed bars
+    if (response.finalized()) {
+      bulkKlinesCache.put(cacheKey, response);
+    }
+    return response;
   }
 
-  private BulkKlinesResponse buildBulkKlinesResponse(String interval, int limit, boolean closedOnly, List<String> symbols) {
+  /**
+   * Block (bounded) until every requested symbol whose just-closed bar exists has received its
+   * final update. The window is measured from the interval boundary in server time; the actual
+   * sleeping uses the wall clock so a frozen test clock cannot spin forever.
+   */
+  private FinalWaitOutcome awaitJustClosedBarsFinal(IntervalEnum intervalEnum, List<String> symbols,
+      boolean closedOnly, long now, long boundary) {
+    KlineBulkProperties props = getBulkProperties();
+    long maxWaitMs = props.effectiveFinalWaitMaxMs();
+    long justClosedOpenTime = boundary - intervalEnum.getMills();
+    long sinceBoundary = now - boundary;
+    List<String> pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime);
+    int pendingInitial = pending.size();
+    boolean shouldWait = closedOnly && props.isFinalWaitEnabled() && maxWaitMs > 0
+        && sinceBoundary >= 0 && sinceBoundary <= maxWaitMs && !pending.isEmpty();
+    long waitedMs = 0L;
+    if (shouldWait) {
+      long budgetNanos = (maxWaitMs - sinceBoundary) * 1_000_000L;
+      long startNanos = System.nanoTime();
+      while (!pending.isEmpty()) {
+        long remainingNanos = budgetNanos - (System.nanoTime() - startNanos);
+        if (remainingNanos <= 0) {
+          break;
+        }
+        long sleepMs = Math.max(1L, Math.min(25L, remainingNanos / 1_000_000L));
+        synchronized (finalSignal) {
+          try {
+            finalSignal.wait(sleepMs);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            break;
+          }
+        }
+        pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime);
+      }
+      waitedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+      if (pending.isEmpty()) {
+        log.info("BULK_FINAL_WAIT interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after=0",
+            intervalEnum.code(), boundary, symbols.size(), pendingInitial, waitedMs);
+      } else {
+        log.warn("BULK_FINAL_WAIT_CAP interval={} boundary={} requested={} pending_initial={} waited_ms={} pending_after={} pending={}",
+            intervalEnum.code(), boundary, symbols.size(), pendingInitial, waitedMs, pending.size(),
+            pending.size() <= 20 ? pending : pending.subList(0, 20));
+      }
+    }
+    return new FinalWaitOutcome(justClosedOpenTime, pending, waitedMs);
+  }
+
+  /** symbols whose just-closed bar EXISTS in memory but is not final yet (absent bars are not waited for) */
+  private List<String> pendingSymbols(String interval, List<String> symbols, long justClosedOpenTime) {
+    List<String> pending = new ArrayList<>();
+    for (String symbol : symbols) {
+      KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
+      if (klineSet == null) {
+        continue;
+      }
+      if (klineSet.getKlineMap().containsKey(justClosedOpenTime) && !klineSet.isFinal(justClosedOpenTime)) {
+        pending.add(symbol);
+      }
+    }
+    return pending;
+  }
+
+  private BulkKlinesResponse buildBulkKlinesResponse(String interval, int limit, boolean closedOnly,
+      List<String> symbols, FinalWaitOutcome wait) {
     long now = getServerTime();
     Map<String, List<Object[]>> out = new LinkedHashMap<>();
     for (String symbol : symbols) {
@@ -436,7 +522,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       Collections.reverse(klines);
       out.put(symbol, klines.stream().map(ConvertUtil::convertToDisplayKline).toList());
     }
-    return new BulkKlinesResponse(interval, now, out);
+    List<String> pending = List.copyOf(wait.pending());
+    return new BulkKlinesResponse(interval, now, out, pending.isEmpty(), pending, wait.waitedMs());
+  }
+
+  private record FinalWaitOutcome(long justClosedOpenTime, List<String> pending, long waitedMs) {
   }
 
   private List<String> normalizeBulkSymbols(Collection<String> symbols, IntervalEnum intervalEnum) {
@@ -457,11 +547,36 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         .toList();
   }
 
-  private record BulkKlinesKey(String interval, int limit, boolean closedOnly, List<String> symbols) {
+  private record BulkKlinesKey(String interval, int limit, boolean closedOnly, List<String> symbols,
+      long boundary) {
   }
 
+  /**
+   * REST callers (full sync, make-up, external callers): a REST candle whose close time has
+   * passed is final by definition, so it is marked final here.
+   */
   @Override
   public void updateKlines(String symbol, String interval, List<Kline> klines) {
+    updateKlinesInternal(symbol, interval, klines, true);
+  }
+
+  /**
+   * Websocket path: the bar is final only when Binance says so ({@code x=true}). A pre-close
+   * update must never mark the bar final — that is exactly the snapshot bulk callers must not
+   * receive as a closed bar.
+   */
+  protected void updateStreamKline(String symbol, String interval, Kline kline, boolean closed) {
+    if (kline == null) {
+      return;
+    }
+    updateKlinesInternal(symbol, interval, Collections.singletonList(kline), false);
+    if (closed) {
+      markFinal(symbol, interval, kline.getOpenTime());
+    }
+  }
+
+  private void updateKlinesInternal(String symbol, String interval, List<Kline> klines,
+      boolean finalizeClosed) {
     if (CollectionUtils.isEmpty(klines) || StringUtils.isBlank(symbol) || StringUtils.isBlank(interval)) {
       return;
     }
@@ -470,6 +585,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
     Entry<Long, Kline> existLastEntry = klineMap.lastEntry();
+    Set<Long> inputOpenTimes = klines.stream().map(Kline::getOpenTime).collect(Collectors.toSet());
     List<Kline> klinesToUpdate = new ArrayList<>();
     if (existLastEntry != null) {
       klinesToUpdate.add(existLastEntry.getValue());
@@ -477,17 +593,46 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     klinesToUpdate.addAll(klines);
     klinesToUpdate = fillKlines(klinesToUpdate, intervalEnum);
     boolean updated = false;
+    boolean anyFinal = false;
+    long now = getServerTime();
     for (Kline kline : klinesToUpdate) {
       Kline existKline = klineMap.get(kline.getOpenTime());
       if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
         klineMap.put(kline.getOpenTime(), kline);
         updated = true;
       }
+      boolean synthetic = !inputOpenTimes.contains(kline.getOpenTime())
+          && (existLastEntry == null || kline.getOpenTime() != existLastEntry.getKey());
+      boolean closedByRest = finalizeClosed && kline.getCloseTime() < now;
+      // synthetic fills: nothing better will ever arrive for them; REST closed candles: final
+      if ((synthetic || closedByRest) && klineSet.markFinal(kline.getOpenTime())) {
+        anyFinal = true;
+      }
     }
     trimKlinesIfNeeded(klineSet, intervalEnum);
     if (updated && isPersistenceEnabledFor(intervalEnum)) {
       dirtyPersistenceKeys.add(klineSetKey);
     }
+    if (anyFinal) {
+      signalFinal();
+    }
+  }
+
+  private void markFinal(String symbol, String interval, long openTime) {
+    KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
+    if (klineSet != null && klineSet.markFinal(openTime)) {
+      signalFinal();
+    }
+  }
+
+  private void signalFinal() {
+    synchronized (finalSignal) {
+      finalSignal.notifyAll();
+    }
+  }
+
+  protected KlineBulkProperties getBulkProperties() {
+    return bulkProperties != null ? bulkProperties : DEFAULT_BULK_PROPERTIES;
   }
 
   private List<Kline> fillKlines(List<Kline> klines, IntervalEnum intervalEnum) {
@@ -620,7 +765,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     Kline kline = convertToKline(eventKlineEvent);
     String symbol = eventKlineEvent.getSymbol();
     String interval = eventKlineEvent.getEventKline().getInterval();
-    updateKline(symbol, interval, kline);
+    updateStreamKline(symbol, interval, kline, eventKlineEvent.getEventKline().isClosed());
     monitorManager.incReceivedKlineMessage(getServiceType(), interval, symbol);
     return true;
   }
@@ -1403,6 +1548,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       while (klineMap.size() > minMaintainCount) {
         klineMap.pollFirstEntry();
       }
+      if (!klineMap.isEmpty()) {
+        klineSet.dropFinalBefore(klineMap.firstKey());
+      }
     }
   }
 
@@ -1826,10 +1974,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private void restoreKlines(KlineSetKey klineSetKey, IntervalEnum intervalEnum, List<Kline> klines) {
     KlineSet klineSet = klineSetMap.computeIfAbsent(klineSetKey, var -> new KlineSet(klineSetKey));
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
+    long now = getServerTime();
     for (Kline kline : klines) {
       Kline existKline = klineMap.get(kline.getOpenTime());
       if (existKline == null || existKline.getTradeNum() < kline.getTradeNum()) {
         klineMap.put(kline.getOpenTime(), kline);
+      }
+      // only closed bars are ever persisted; a restored closed bar is final
+      if (kline.getCloseTime() < now) {
+        klineSet.markFinal(kline.getOpenTime());
       }
     }
     trimKlinesIfNeeded(klineSet, intervalEnum);

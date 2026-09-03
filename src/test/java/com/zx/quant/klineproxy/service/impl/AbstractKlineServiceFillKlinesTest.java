@@ -1,5 +1,6 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -30,6 +31,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
+import com.zx.quant.klineproxy.model.BulkKlinesResponse;
+import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -267,7 +272,9 @@ class AbstractKlineServiceFillKlinesTest {
     RecordingPersistenceStore persistenceStore = new RecordingPersistenceStore();
     service.setSymbols(List.of("ETHUSDT"));
     service.configurePersistence(persistenceStore, 5, Map.of());
-    service.setServerTime((hour * 10) + 5_000L);
+    // 60 s after the boundary: outside HourBoundaryGuard's after-window (the 1.7.13 value of
+    // +5 s made the guard skip the sync and the test fail regardless of the code under test)
+    service.setServerTime((hour * 10) + 60_000L);
     service.putSymbolOnboardTime("ETHUSDT", 0L);
 
     service.invokeSyncConfiguredKlinesOnce();
@@ -377,6 +384,148 @@ class AbstractKlineServiceFillKlinesTest {
       lastDumpInvocations.put(new StoreKey(service, interval, symbol),
           new DumpInvocation(List.copyOf(rows), maxStoreCount, currentTime));
     }
+  }
+
+
+  // ---- 1.7.14 bulk closed-bar finality --------------------------------------------------------
+
+  private static final long H = IntervalEnum.ONE_HOUR.getMills();
+
+  private static StringKline hourBar(long openTime, int tradeNum, String close) {
+    StringKline bar = new StringKline();
+    bar.setOpenTime(openTime);
+    bar.setCloseTime(openTime + H - 1);
+    bar.setOpenPrice("100");
+    bar.setHighPrice("110");
+    bar.setLowPrice("90");
+    bar.setClosePrice(close);
+    bar.setTradeNum(tradeNum);
+    return bar;
+  }
+
+  private static KlineBulkProperties bulkProps(long maxWaitMs) {
+    KlineBulkProperties props = new KlineBulkProperties();
+    props.setFinalWaitEnabled(true);
+    props.setFinalWaitMaxMs(maxWaitMs);
+    return props;
+  }
+
+  private static TestKlineService finalWaitService(long serverTime, long maxWaitMs) {
+    TestKlineService service = new TestKlineService();
+    service.serverTime = serverTime;
+    ReflectionTestUtils.setField(service, "bulkProperties", bulkProps(maxWaitMs));
+    return service;
+  }
+
+  @Test
+  void streamBarIsFinalOnlyWhenBinanceSaysClosed() {
+    long boundary = 10 * H;
+    // 100 ms after the boundary with a 300 ms cap: the request must wait ~200 ms then give up
+    TestKlineService service = finalWaitService(boundary + 100, 300);
+    // pre-close snapshot of the just-closed bar (x=false) and the forming bar
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 5, "100"), false);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary, 1, "101"), false);
+    BulkKlinesResponse first = service.queryBulkKlines("1h", 2, true, List.of("BTCUSDT"));
+    assertThat(first.finalized()).isFalse();
+    assertThat(first.pending()).containsExactly("BTCUSDT");
+    assertThat(first.waitedMs()).isGreaterThanOrEqualTo(150);
+    // closing update (x=true) — same trade count is fine: the flag is what matters
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 5, "100"), true);
+    BulkKlinesResponse second = service.queryBulkKlines("1h", 2, true, List.of("BTCUSDT"));
+    assertThat(second.finalized()).isTrue();
+    assertThat(second.pending()).isEmpty();
+    assertThat(second.waitedMs()).isZero();
+    // the non-final response was not cached: the second answer differs
+    assertThat(second).isNotSameAs(first);
+  }
+
+  @Test
+  void bulkBlocksUntilTheClosingUpdateArrives() throws Exception {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 500, 5_000);
+    service.updateStreamKline("ETHUSDT", "1h", hourBar(boundary - H, 7, "200"), false);
+    service.updateStreamKline("ADAUSDT", "1h", hourBar(boundary - H, 3, "1"), true);
+    CountDownLatch released = new CountDownLatch(1);
+    Thread closer = new Thread(() -> {
+      try {
+        Thread.sleep(150);
+      } catch (InterruptedException ignored) {
+        return;
+      }
+      service.updateStreamKline("ETHUSDT", "1h", hourBar(boundary - H, 7, "200"), true);
+      released.countDown();
+    });
+    closer.start();
+    long started = System.nanoTime();
+    BulkKlinesResponse response = service.queryBulkKlines("1h", 1, true, List.of("ETHUSDT", "ADAUSDT"));
+    long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
+    assertThat(released.await(1, TimeUnit.SECONDS)).isTrue();
+    assertThat(response.finalized()).isTrue();
+    assertThat(response.pending()).isEmpty();
+    assertThat(response.waitedMs()).isBetween(100L, 4_000L);
+    assertThat(elapsedMs).isLessThan(4_000L);
+    assertThat(response.klines()).containsKeys("ETHUSDT", "ADAUSDT");
+  }
+
+  @Test
+  void symbolsWithoutTheJustClosedBarAreNotWaitedForAndRestBarsAreFinal() {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 1_000, 3_000);
+    // REST-synced closed bar: final; forming bar from REST: not final (irrelevant for closed_only)
+    service.updateKlines("BNBUSDT", "1h", List.of(hourBar(boundary - H, 9, "300"), hourBar(boundary, 1, "301")));
+    // XRP only has an older bar: nothing to wait for
+    service.updateStreamKline("XRPUSDT", "1h", hourBar(boundary - 2 * H, 4, "0.5"), false);
+    long started = System.nanoTime();
+    BulkKlinesResponse response = service.queryBulkKlines("1h", 3, true, List.of("BNBUSDT", "XRPUSDT"));
+    assertThat((System.nanoTime() - started) / 1_000_000L).isLessThan(500L);
+    assertThat(response.finalized()).isTrue();
+    assertThat(response.waitedMs()).isZero();
+  }
+
+  @Test
+  void outsideTheSettlingWindowAndWithClosedOnlyFalseThereIsNoWait() {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 9_000, 3_000);
+    service.updateStreamKline("SOLUSDT", "1h", hourBar(boundary - H, 2, "20"), false);
+    long started = System.nanoTime();
+    BulkKlinesResponse late = service.queryBulkKlines("1h", 1, true, List.of("SOLUSDT"));
+    assertThat((System.nanoTime() - started) / 1_000_000L).isLessThan(500L);
+    assertThat(late.finalized()).isFalse();
+    assertThat(late.pending()).containsExactly("SOLUSDT");
+    assertThat(late.waitedMs()).isZero();
+    service.serverTime = boundary + 1_000;
+    started = System.nanoTime();
+    BulkKlinesResponse open = service.queryBulkKlines("1h", 1, false, List.of("SOLUSDT"));
+    assertThat((System.nanoTime() - started) / 1_000_000L).isLessThan(500L);
+    assertThat(open.waitedMs()).isZero();
+  }
+
+  @Test
+  void cacheKeyIncludesTheBoundary() {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 1_000, 100);
+    service.updateStreamKline("DOGEUSDT", "1h", hourBar(boundary - H, 3, "0.1"), true);
+    BulkKlinesResponse first = service.queryBulkKlines("1h", 1, true, List.of("DOGEUSDT"));
+    assertThat(first.finalized()).isTrue();
+    assertThat(service.queryBulkKlines("1h", 1, true, List.of("DOGEUSDT"))).isSameAs(first);
+    // next hour: the new just-closed bar is not final yet; the old cached answer must not be served
+    service.serverTime = boundary + H + 1_000;
+    service.updateStreamKline("DOGEUSDT", "1h", hourBar(boundary, 4, "0.2"), false);
+    BulkKlinesResponse next = service.queryBulkKlines("1h", 1, true, List.of("DOGEUSDT"));
+    assertThat(next).isNotSameAs(first);
+    assertThat(next.finalized()).isFalse();
+    assertThat(next.pending()).containsExactly("DOGEUSDT");
+  }
+
+  @Test
+  void syntheticFillsAreFinal() {
+    long boundary = 10 * H;
+    TestKlineService service = finalWaitService(boundary + 1_000, 100);
+    // gap between two REST bars is filled synthetically; the fill for boundary-H must be final
+    service.updateKlines("LTCUSDT", "1h", List.of(hourBar(boundary - 2 * H, 6, "50"), hourBar(boundary, 1, "51")));
+    BulkKlinesResponse response = service.queryBulkKlines("1h", 2, true, List.of("LTCUSDT"));
+    assertThat(response.finalized()).isTrue();
+    assertThat(response.waitedMs()).isZero();
   }
 
   private static class TestKlineService extends AbstractKlineService<WebSocketClient> {
