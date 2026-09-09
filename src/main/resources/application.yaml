@@ -77,6 +77,16 @@ ws:
 kline.bulk.finalWaitEnabled: true
 kline.bulk.finalWaitMaxMs: 8000
 # ~300 fleet requests block together at the boundary while a third-party tenant sends ~40 req/s.
-# The embedded server is UNDERTOW (starter-undertow; tomcat excluded): default worker threads = 8 × CPUs (16 on the VPS).
-server.undertow.threads.worker: 400
-server.undertow.threads.io: 4
+# 1.8.0: the container is TOMCAT again (the undertow starter is gone, the tomcat exclusion with it).
+# The swap exists only so `spring.threads.virtual.enabled` can be used: Spring Boot's virtual-thread
+# support covers Tomcat and Jetty, not Undertow — measured 2026-09-09, a real-server test showed
+# requests still landing on `XNIO-N task-M` with every Undertow hook tried.
+#
+# Keep this at/above the number of requests that block together at the boundary. With platform
+# threads that is a hard cap: 289 fleet requests wait ~2.4 s each for the closed bar, so Tomcat's
+# default 200 would queue a third of the fleet behind the settle. Once virtual threads are on the
+# cap stops mattering, but it stays here as the fallback the flag can be turned off to.
+server.tomcat.threads.max: 400
+# Off on purpose for the first release: the container swap and the threading model are separate
+# risks and should fail separately. Flip to true only after a cycle has run green on Tomcat.
+spring.threads.virtual.enabled: false

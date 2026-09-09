@@ -64,6 +64,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -234,8 +236,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final KlineBulkProperties DEFAULT_BULK_PROPERTIES = new KlineBulkProperties();
 
-  /** notified whenever any bar becomes final; bulk waiters block on it (25 ms poll fallback) */
-  private final Object finalSignal = new Object();
+  /**
+   * Notified whenever any bar becomes final; bulk waiters block on it (25 ms poll fallback).
+   *
+   * <p>A {@link ReentrantLock} {@link Condition} rather than an object monitor, on purpose: a
+   * virtual thread that parks inside {@code synchronized} pins its carrier OS thread on JDK 21
+   * (JEP 444), which would make the whole point of running the bulk endpoint on virtual threads
+   * moot — the settle wait is exactly a park, and it lasts ~2.4 s at every hour boundary.
+   * {@code Condition.await} does not pin. JDK 24's JEP 491 removes the pinning, but keeping the
+   * lock means this also behaves on 21.
+   */
+  private final ReentrantLock finalLock = new ReentrantLock();
+
+  private final Condition finalSignal = finalLock.newCondition();
 
   @Autowired
   private List<T> webSocketClients = new ArrayList<>();
@@ -507,13 +520,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           break;
         }
         long sleepMs = Math.max(1L, Math.min(25L, remainingNanos / 1_000_000L));
-        synchronized (finalSignal) {
-          try {
-            finalSignal.wait(sleepMs);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            break;
-          }
+        finalLock.lock();
+        try {
+          finalSignal.await(sleepMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          break;
+        } finally {
+          finalLock.unlock();
         }
         pending = pendingSymbols(intervalEnum.code(), symbols, justClosedOpenTime, trading);
       }
@@ -851,8 +865,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void signalFinal() {
-    synchronized (finalSignal) {
-      finalSignal.notifyAll();
+    finalLock.lock();
+    try {
+      finalSignal.signalAll();
+    } finally {
+      finalLock.unlock();
     }
   }
 
