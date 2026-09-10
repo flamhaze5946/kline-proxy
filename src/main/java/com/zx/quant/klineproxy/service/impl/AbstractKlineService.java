@@ -666,13 +666,24 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    * receive as a closed bar.
    */
   protected void updateStreamKline(String symbol, String interval, Kline kline, boolean closed) {
+    updateStreamKline(symbol, interval, kline, closed, null);
+  }
+
+  /**
+   * @param eventTimeMs Binance's own {@code E} (when IT emitted the message), or null when the
+   *     caller has none. Recording it next to our local arrival time is what separates "Binance
+   *     published late" from "we received/processed it late" — the local-clock arrival alone
+   *     cannot tell those apart.
+   */
+  protected void updateStreamKline(String symbol, String interval, Kline kline, boolean closed,
+      Long eventTimeMs) {
     if (kline == null) {
       return;
     }
     updateKlinesInternal(symbol, interval, Collections.singletonList(kline), false);
     if (closed) {
       markFinal(symbol, interval, kline.getOpenTime());
-      recordClosedBarArrival(symbol, interval, kline.getOpenTime());
+      recordClosedBarArrival(symbol, interval, kline.getOpenTime(), eventTimeMs);
     }
   }
 
@@ -682,7 +693,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    * {@code CLOSED_BAR_SETTLED} once every symbol that has a bar for that open time is final, or
    * {@code CLOSED_BAR_SETTLE_INCOMPLETE} when some are still missing 30 s after the boundary.
    */
-  private void recordClosedBarArrival(String symbol, String interval, long openTime) {
+  private void recordClosedBarArrival(String symbol, String interval, long openTime,
+      Long eventTimeMs) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     if (intervalEnum == null) {
       return;
@@ -706,6 +718,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return; // a late closing update for an older bar (REST already covers it)
     }
     settle.arrivalMsBySymbol.putIfAbsent(symbol, arrivalMs);
+    if (eventTimeMs != null) {
+      settle.eventOffsetMsBySymbol.putIfAbsent(symbol, eventTimeMs - boundary);
+    }
     if (!settle.logged && settle.arrivalMsBySymbol.size() >= symbolsWithBar(interval, openTime, trading, true).size()) {
       logSettle(settle, intervalEnum, false);
     }
@@ -768,6 +783,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     long p90 = arrived == 0 ? -1 : arrivals.get(Math.min(arrived - 1, (int) Math.floor(arrived * 0.9))).getValue();
     long max = arrived == 0 ? -1 : arrivals.get(arrived - 1).getValue();
     String last = arrived == 0 ? "-" : arrivals.get(arrived - 1).getKey();
+    List<Long> eventOffsets = new ArrayList<>(settle.eventOffsetMsBySymbol.values());
+    Collections.sort(eventOffsets);
+    int evN = eventOffsets.size();
+    long evFirst = evN == 0 ? -1 : eventOffsets.get(0);
+    long evP50 = evN == 0 ? -1 : eventOffsets.get(Math.min(evN - 1, evN / 2));
+    long evP90 = evN == 0 ? -1 : eventOffsets.get(Math.min(evN - 1, (int) Math.floor(evN * 0.9)));
+    long evMax = evN == 0 ? -1 : eventOffsets.get(evN - 1);
     settle.summary = new ClosedBarSettleSummary(intervalEnum.code(), settle.boundary, expected, arrived,
         first, p50, p90, max, last, incomplete, notTrading.size());
     List<String> notTradingShown = notTrading.size() <= SETTLE_PENDING_LIST_LIMIT
@@ -780,14 +802,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }
       }
       Collections.sort(pending);
-      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={} not_trading={} not_trading_symbols={}",
+      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={}",
           intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, pending.size(),
           pending.size() <= SETTLE_PENDING_LIST_LIMIT ? pending : pending.subList(0, SETTLE_PENDING_LIST_LIMIT),
-          notTrading.size(), notTradingShown);
+          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax);
     } else {
-      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={} not_trading={} not_trading_symbols={}",
+      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={}",
           intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, last,
-          notTrading.size(), notTradingShown);
+          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax);
     }
   }
 
@@ -800,6 +822,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private static final class BoundarySettle {
     private final long boundary;
     private final ConcurrentHashMap<String, Long> arrivalMsBySymbol = new ConcurrentHashMap<>();
+    /** Binance's own emit time minus the boundary — publish-side delay, no local clock involved. */
+    private final ConcurrentHashMap<String, Long> eventOffsetMsBySymbol = new ConcurrentHashMap<>();
     private volatile boolean logged;
     private volatile ClosedBarSettleSummary summary;
 
@@ -1007,7 +1031,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     Kline kline = convertToKline(eventKlineEvent);
     String symbol = eventKlineEvent.getSymbol();
     String interval = eventKlineEvent.getEventKline().getInterval();
-    updateStreamKline(symbol, interval, kline, eventKlineEvent.getEventKline().isClosed());
+    Long eventTimeMs = null;
+    try {
+      String rawEventTime = eventKlineEvent.getEventTime();
+      if (StringUtils.isNotBlank(rawEventTime)) {
+        eventTimeMs = Long.parseLong(rawEventTime.trim());
+      }
+    } catch (NumberFormatException ignored) {
+      // diagnostics only: a malformed E must never drop a kline update
+    }
+    updateStreamKline(symbol, interval, kline, eventKlineEvent.getEventKline().isClosed(), eventTimeMs);
     monitorManager.incReceivedKlineMessage(getServiceType(), interval, symbol);
     return true;
   }
