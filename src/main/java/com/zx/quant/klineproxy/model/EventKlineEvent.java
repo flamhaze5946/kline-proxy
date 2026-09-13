@@ -22,6 +22,10 @@ public class EventKlineEvent<N, EKN extends EventKline<N>> {
   protected String eventTime;
   @JsonProperty("s")
   protected String symbol;
+  @JsonProperty("ps")
+  protected String pair;
+  @JsonProperty("ct")
+  protected String contractType;
   @JsonProperty("k")
   protected EKN eventKline;
 

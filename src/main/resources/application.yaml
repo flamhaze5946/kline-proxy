@@ -50,10 +50,13 @@ kline:
       intervalSyncConfigs:
         "1h":
           minMaintainCount: 9000
+          # true selects continuous-contract klines for perpetual futures
+          useContinuousKlineStream: false
           listenSymbolPatterns:
             - .*?USDT
         "1d":
           minMaintainCount: 1000
+          useContinuousKlineStream: false
           listenSymbolPatterns:
             - .*?USDT
 

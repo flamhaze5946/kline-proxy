@@ -7,11 +7,15 @@ import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.BinanceFutureKlineSyncConfigProperties;
+import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncFutureConfig;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
 import com.zx.quant.klineproxy.service.KlineService;
+import com.zx.quant.klineproxy.service.stream.AbstractBinanceKlineStream;
+import com.zx.quant.klineproxy.service.stream.BinanceContinuousKlineStream;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +52,23 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   @Autowired
   private BinanceFutureClient binanceFutureClient;
 
+  private final BinanceContinuousKlineStream continuousKlineStream =
+      new BinanceContinuousKlineStream(() -> exchangeService.queryExchange());
+
+  private final List<AbstractBinanceKlineStream> klineStreams =
+      List.of(ORDINARY_KLINE_STREAM, continuousKlineStream);
+
+  @Override
+  protected List<AbstractBinanceKlineStream> getKlineStreams() {
+    return klineStreams;
+  }
+
+  @Override
+  protected AbstractBinanceKlineStream getKlineStreamForInterval(String interval) {
+    Map<String, IntervalSyncFutureConfig> intervals = klineSyncConfigProperties.getIntervalSyncConfigs();
+    IntervalSyncFutureConfig config = intervals != null ? intervals.get(interval) : null;
+    return config != null && config.isUseContinuousKlineStream() ? continuousKlineStream : ORDINARY_KLINE_STREAM;
+  }
 
   @Override
   public List<Kline> queryKlines0(String symbol, String interval, Long startTime, Long endTime, Integer limit) {

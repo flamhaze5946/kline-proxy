@@ -40,6 +40,7 @@ public class KlineSyncConfigProperties<C extends IntervalSyncConfig> {
   @Data
   public static class IntervalSyncFutureConfig extends IntervalSyncConfig {
 
+    /** Select continuous-contract klines for this interval; false keeps the ordinary symbol stream. */
     private boolean useContinuousKlineStream;
   }
 }

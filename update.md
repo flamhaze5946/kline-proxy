@@ -1,3 +1,9 @@
+## Unreleased
+
+- 合约 K 线支持按周期选择流：`kline.binance.future.intervalSyncConfigs.<interval>.useContinuousKlineStream` 默认 `false`，使用原有 `<symbol>@kline_<interval>`；设为 `true` 后，永续合约使用 `<pair>_<contractType>@continuousKline_<interval>`。例如只为 `1h` 开启，`1d` 仍可保持普通流。
+- 普通流 `BinanceKlineStream` 与连续流 `BinanceContinuousKlineStream` 各自封装主题生成、解析及符号映射，共用 `AbstractBinanceKlineStream` 的解码流程；服务共用缓存、持久化和 `x=true` 收盘通知。支持原始消息及 combined stream 封装。
+- 连续流通过 exchange info 的 `pair + contractType` 映射到唯一、状态为 `TRADING` 的交易符号，支持 `PERPETUAL` / `TRADIFI_PERPETUAL`。交割合约、缺失或有歧义的映射继续使用普通流，避免把滚动连续序列写入单个交割合约的历史。订阅缓存会随模式或合约映射变化失效。
+
 ## 1.7.16 (2026-09-03)
 - delisted / halted symbols: the bulk finality wait (`closed_only=true`) only waits for symbols whose exchange status is `TRADING` (exchange info, refreshed every 5 min). A symbol delisted mid-hour whose closing update never arrives no longer holds the response until the 8 s cap; it is returned as-is and listed in the new response field `not_trading` (and in `BULK_FINAL_WAIT… not_trading=[…]`). `CLOSED_BAR_SETTLED` / `CLOSED_BAR_SETTLE_INCOMPLETE` count `expected`/`arrived`/`pending` over TRADING symbols only and add `not_trading=<n> not_trading_symbols=[…]`. When exchange info is unavailable/empty the filter is off (every symbol is waited for, as in 1.7.14).
 

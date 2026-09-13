@@ -34,6 +34,8 @@ import com.zx.quant.klineproxy.model.persistence.PersistedKlineRow;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import com.zx.quant.klineproxy.service.KlineService;
+import com.zx.quant.klineproxy.service.stream.AbstractBinanceKlineStream;
+import com.zx.quant.klineproxy.service.stream.BinanceKlineStream;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.HourBoundaryGuard;
 import com.zx.quant.klineproxy.util.ConvertUtil;
@@ -118,7 +120,9 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final IntervalEnum DEFAULT_TICKER_INTERVAL = IntervalEnum.ONE_HOUR;
 
-  private static final String KLINE_EVENT = "kline";
+  protected static final BinanceKlineStream ORDINARY_KLINE_STREAM = new BinanceKlineStream();
+
+  private static final List<AbstractBinanceKlineStream> DEFAULT_KLINE_STREAMS = List.of(ORDINARY_KLINE_STREAM);
 
   private static final String TICKER_24HR_EVENT = "24hrTicker";
 
@@ -1017,7 +1021,27 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected Function<ParsedWebSocketMessage, Boolean> getKlineEventMessageHandler() {
-    return parsedMessage -> doForKlineEvent(convertToEventKlineEvent(parsedMessage));
+    return parsedMessage -> {
+      AbstractBinanceKlineStream stream = getKlineStreamForEvent(parsedMessage.eventType());
+      return stream != null && doForKlineEvent(stream.parse(parsedMessage, getNumberType(), serializer));
+    };
+  }
+
+  protected List<AbstractBinanceKlineStream> getKlineStreams() {
+    return DEFAULT_KLINE_STREAMS;
+  }
+
+  protected AbstractBinanceKlineStream getKlineStreamForInterval(String interval) {
+    return ORDINARY_KLINE_STREAM;
+  }
+
+  private AbstractBinanceKlineStream getKlineStreamForEvent(String eventType) {
+    for (AbstractBinanceKlineStream stream : getKlineStreams()) {
+      if (stream.accepts(eventType)) {
+        return stream;
+      }
+    }
+    return null;
   }
 
   protected Function<ParsedWebSocketMessage, Boolean> getTicker24HrEventMessageHandler() {
@@ -1025,12 +1049,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent) {
-    if (eventKlineEvent == null || !StringUtils.equals(eventKlineEvent.getEventType(), KLINE_EVENT)) {
+    if (eventKlineEvent == null || getKlineStreamForEvent(eventKlineEvent.getEventType()) == null
+        || eventKlineEvent.getEventKline() == null) {
+      return false;
+    }
+    String symbol = eventKlineEvent.getSymbol();
+    String interval = eventKlineEvent.getEventKline().getInterval();
+    if (StringUtils.isBlank(symbol) || CommonUtil.getEnumByCode(interval, IntervalEnum.class) == null) {
       return false;
     }
     Kline kline = convertToKline(eventKlineEvent);
-    String symbol = eventKlineEvent.getSymbol();
-    String interval = eventKlineEvent.getEventKline().getInterval();
     Long eventTimeMs = null;
     try {
       String rawEventTime = eventKlineEvent.getEventTime();
@@ -1089,19 +1117,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Function<ParsedWebSocketMessage, String> getKlineEventMessageTopicExtractor() {
     return parsedMessage -> {
-      if (!StringUtils.equals(parsedMessage.eventType(), KLINE_EVENT)) {
-        return null;
-      }
-      if (StringUtils.isNotBlank(parsedMessage.stream())) {
-        return parsedMessage.stream();
-      }
-      JsonNode payloadNode = parsedMessage.payloadNode();
-      String symbol = extractTextField(payloadNode, "s");
-      String interval = extractTextField(payloadNode != null ? payloadNode.get("k") : null, "i");
-      if (StringUtils.isAnyBlank(symbol, interval)) {
-        return null;
-      }
-      return buildSymbolUpdateTopic(symbol, interval);
+      AbstractBinanceKlineStream stream = getKlineStreamForEvent(parsedMessage.eventType());
+      return stream != null ? stream.extractTopic(parsedMessage) : null;
     };
   }
 
@@ -1132,7 +1149,20 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected String buildSymbolUpdateTopic(String symbol, String interval) {
-    return StringUtils.lowerCase(symbol) + "@kline_" + interval;
+    return ORDINARY_KLINE_STREAM.subscriptionTopic(symbol, interval);
+  }
+
+  protected String buildKlineSubscriptionTopic(String symbol, String interval) {
+    String topic = getKlineStreamForInterval(interval).subscriptionTopic(symbol, interval);
+    // Unsupported or ambiguous metadata must not substitute another contract's history.
+    return topic != null ? topic : buildSymbolUpdateTopic(symbol, interval);
+  }
+
+  private Map<String, StreamSubscriptionState> getKlineSubscriptionState() {
+    return getSubscribeIntervals().stream().collect(Collectors.toUnmodifiableMap(IntervalEnum::code, interval -> {
+      AbstractBinanceKlineStream stream = getKlineStreamForInterval(interval.code());
+      return new StreamSubscriptionState(stream.eventType(), stream.subscriptionState());
+    }));
   }
 
   protected void start() {
@@ -1748,7 +1778,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       List<String> subscribeSymbols = getSubscribeSymbols(symbols,
           CommonUtil.getEnumByCode(interval, IntervalEnum.class));
       for (String symbol : subscribeSymbols) {
-        String topic = buildSymbolUpdateTopic(symbol, interval);
+        String topic = buildKlineSubscriptionTopic(symbol, interval);
         topics.add(topic);
       }
     }
@@ -1762,8 +1792,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     Set<String> symbols = new HashSet<>(getSymbols());
     Set<String> extraTopics = Set.copyOf(extraSubscribeTopics);
     Set<String> tickerTopics = Set.copyOf(getTicker24HrSubscribeTopics());
+    Map<String, StreamSubscriptionState> subscriptionState = getKlineSubscriptionState();
     ExpectedTopicsSnapshot snapshot = expectedTopicsSnapshot;
-    if (snapshot != null && snapshot.matches(symbols, subscribeIntervals, extraTopics, tickerTopics)) {
+    if (snapshot != null && snapshot.matches(symbols, subscribeIntervals, extraTopics, tickerTopics,
+        subscriptionState)) {
       return snapshot.expectedTopics();
     }
 
@@ -1772,7 +1804,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     expectTopics.addAll(buildNeedSubscribeKlineUpdateTopics(subscribeIntervals, symbols));
     Set<String> immutableExpectedTopics = Set.copyOf(expectTopics);
     expectedTopicsSnapshot = new ExpectedTopicsSnapshot(Set.copyOf(symbols),
-        Set.copyOf(subscribeIntervals), extraTopics, tickerTopics, immutableExpectedTopics);
+        Set.copyOf(subscribeIntervals), extraTopics, tickerTopics, subscriptionState, immutableExpectedTopics);
     return immutableExpectedTopics;
   }
 
@@ -1909,11 +1941,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
-  private EventKlineEvent<?, ?> convertToEventKlineEvent(ParsedWebSocketMessage parsedMessage) {
-    NumberTypeEnum numberTypeEnum = getNumberType();
-    return serializer.treeToValue(parsedMessage.payloadNode(), numberTypeEnum.eventKlineEventClass());
-  }
-
   private List<EventTicker24HrEvent> convertToEventTicker24HrEvent(ParsedWebSocketMessage parsedMessage) {
     JsonNode payloadNode = parsedMessage.payloadNode();
     if (payloadNode == null || payloadNode.isNull()) {
@@ -1955,20 +1982,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     CompletableFuture.allOf(workers).join();
   }
 
+  private record StreamSubscriptionState(String eventType, Object metadata) {
+  }
+
   private record ExpectedTopicsSnapshot(Set<String> symbols,
                                         Set<String> subscribeIntervals,
                                         Set<String> extraTopics,
                                         Set<String> tickerTopics,
+                                        Map<String, StreamSubscriptionState> subscriptionState,
                                         Set<String> expectedTopics) {
 
     private boolean matches(Set<String> currentSymbols,
                             Set<String> currentSubscribeIntervals,
                             Set<String> currentExtraTopics,
-                            Set<String> currentTickerTopics) {
+                            Set<String> currentTickerTopics,
+                            Map<String, StreamSubscriptionState> currentSubscriptionState) {
       return Objects.equals(symbols, currentSymbols)
           && Objects.equals(subscribeIntervals, currentSubscribeIntervals)
           && Objects.equals(extraTopics, currentExtraTopics)
-          && Objects.equals(tickerTopics, currentTickerTopics);
+          && Objects.equals(tickerTopics, currentTickerTopics)
+          && Objects.equals(subscriptionState, currentSubscriptionState);
     }
   }
 
