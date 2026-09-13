@@ -280,7 +280,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected abstract List<String> getSymbols();
 
-  protected abstract KlineSyncConfigProperties getSyncConfig();
+  protected abstract KlineSyncConfigProperties<? extends IntervalSyncConfig> getSyncConfig();
 
   protected abstract int getMakeUpKlinesLimit();
 
