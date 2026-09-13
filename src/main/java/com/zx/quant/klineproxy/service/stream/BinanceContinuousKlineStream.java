@@ -47,6 +47,19 @@ public final class BinanceContinuousKlineStream extends AbstractBinanceKlineStre
   }
 
   @Override
+  protected String resolveSymbol(BinanceKlineHeader header) {
+    return StringUtils.isAnyBlank(header.pair(), header.contractType()) ? null
+        : routes.byContract().get(new Contract(header.pair(), header.contractType()));
+  }
+
+  @Override
+  protected String rawTopic(BinanceKlineHeader header) {
+    return StringUtils.isAnyBlank(header.pair(), header.contractType(), header.interval())
+        || !CONTRACT_TYPES.contains(header.contractType()) ? null
+        : new Contract(header.pair(), header.contractType()).topic(header.interval());
+  }
+
+  @Override
   protected String rawTopic(JsonNode payload) {
     String pair = text(payload, "ps");
     String contractType = text(payload, "ct");

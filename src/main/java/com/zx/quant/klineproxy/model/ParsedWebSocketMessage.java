@@ -12,11 +12,23 @@ public record ParsedWebSocketMessage(
     JsonNode payloadNode,
     String stream,
     String eventType,
-    WebSocketMessageTiming timing) {
+    WebSocketMessageTiming timing,
+    long receiveSequence,
+    KlineDispatchMetadata dispatchMetadata) {
+
+  public ParsedWebSocketMessage(String rawMessage, JsonNode rootNode, JsonNode payloadNode,
+      String stream, String eventType, WebSocketMessageTiming timing, long receiveSequence) {
+    this(rawMessage, rootNode, payloadNode, stream, eventType, timing, receiveSequence, null);
+  }
+
+  public ParsedWebSocketMessage(String rawMessage, JsonNode rootNode, JsonNode payloadNode,
+      String stream, String eventType, WebSocketMessageTiming timing) {
+    this(rawMessage, rootNode, payloadNode, stream, eventType, timing, 0L, null);
+  }
 
   public ParsedWebSocketMessage(String rawMessage, JsonNode rootNode, JsonNode payloadNode,
       String stream, String eventType) {
-    this(rawMessage, rootNode, payloadNode, stream, eventType, null);
+    this(rawMessage, rootNode, payloadNode, stream, eventType, null, 0L, null);
   }
 
   public boolean combined() {

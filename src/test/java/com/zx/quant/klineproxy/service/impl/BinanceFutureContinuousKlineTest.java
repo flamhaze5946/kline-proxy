@@ -121,6 +121,29 @@ class BinanceFutureContinuousKlineTest {
   }
 
   @Test
+  void acceptedClosingFrameKeepsItsResolvedSymbolAcrossMetadataRefreshWhileQueued() throws Exception {
+    Fixture f = fixture(true, "string", List.of(symbol("ADAUSDT_ACTUAL", "ADAUSDT", "PERPETUAL")));
+    f.service.buildExpectedTopics(); // publishes the routes used by ingress classification
+    ObjectNode payload = fixtureMessage(true);
+    ((ObjectNode) payload.get("k")).put("x", true);
+    ParsedWebSocketMessage base = message(payload, false);
+    var metadata = f.service.getKlineMessageClassifier().apply(base.rawMessage());
+    assertThat(metadata).isNotNull();
+    var admitted = new ParsedWebSocketMessage(base.rawMessage(), base.rootNode(), base.payloadNode(),
+        base.stream(), base.eventType(), base.timing(), 1L, metadata);
+
+    BinanceFutureSymbol halted = symbol("ADAUSDT_ACTUAL", "ADAUSDT", "PERPETUAL");
+    halted.setStatus("SETTLING");
+    replaceExchange(f, List.of(halted));
+    f.service.getKlineStreams().forEach(stream -> stream.subscriptionState());
+
+    assertThat(f.service.getKlineEventMessageHandler().apply(admitted)).isTrue();
+    assertThat(f.service.klineSetMap.get(new KlineSetKey("ADAUSDT_ACTUAL", "1h"))
+        .isFinal(payload.path("k").path("t").asLong())).isTrue();
+    assertThat(f.service.klineSetMap).doesNotContainKey(new KlineSetKey("ADAUSDT", "1h"));
+  }
+
+  @Test
   void heartbeatUsesIncomingTopicRatherThanCurrentConfiguredMode() throws Exception {
     Fixture f = fixture(true, "string", List.of(symbol("ADAUSDT", "ADAUSDT", "PERPETUAL")));
     var extractor = f.service.getKlineEventMessageTopicExtractor();

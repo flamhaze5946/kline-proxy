@@ -24,6 +24,17 @@ public final class BinanceKlineStream extends AbstractBinanceKlineStream {
   }
 
   @Override
+  protected String resolveSymbol(BinanceKlineHeader header) {
+    return header.symbol();
+  }
+
+  @Override
+  protected String rawTopic(BinanceKlineHeader header) {
+    return StringUtils.isAnyBlank(header.symbol(), header.interval()) ? null
+        : subscriptionTopic(header.symbol(), header.interval());
+  }
+
+  @Override
   protected String rawTopic(JsonNode payload) {
     String symbol = text(payload, "s");
     String interval = interval(payload);

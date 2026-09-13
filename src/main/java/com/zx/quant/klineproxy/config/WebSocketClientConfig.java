@@ -3,6 +3,11 @@ package com.zx.quant.klineproxy.config;
 import com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceFutureWebSocketClient;
 import com.zx.quant.klineproxy.client.ws.client.BinanceSpotWebSocketClient;
+import com.zx.quant.klineproxy.client.ws.dispatch.KlineMessageDispatcher;
+import com.zx.quant.klineproxy.client.ws.dispatch.WebSocketIngressLifecycle;
+import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
+import com.zx.quant.klineproxy.model.config.KlineIngressProperties;
+import java.util.List;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import lombok.extern.slf4j.Slf4j;
@@ -15,13 +20,26 @@ import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
  * websocket client config
  * @author flamhaze5946
  */
 @Configuration
+@EnableConfigurationProperties(KlineIngressProperties.class)
 public class WebSocketClientConfig {
+
+  @Bean(destroyMethod = "close")
+  public KlineMessageDispatcher klineMessageDispatcher(KlineIngressProperties properties) {
+    return new KlineMessageDispatcher(properties);
+  }
+
+  @Bean
+  public WebSocketIngressLifecycle webSocketIngressLifecycle(List<WebSocketClient> clients,
+      KlineMessageDispatcher dispatcher) {
+    return new WebSocketIngressLifecycle(clients, dispatcher);
+  }
 
   @Bean
   public static ClientRegisterProcessor<BinanceSpotWebSocketClient> binanceSpotWebSocketClientBeanProcessor() {

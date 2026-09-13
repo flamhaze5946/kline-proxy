@@ -1,0 +1,4 @@
+# Keep generated replay evidence collapsed in code review.
+research/closed-bar-ingress/evidence/** linguist-generated=true
+# Unified patches require a space on empty context lines.
+research/closed-bar-ingress/*.patch -whitespace

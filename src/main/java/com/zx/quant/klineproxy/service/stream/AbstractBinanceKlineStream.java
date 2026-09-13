@@ -2,6 +2,7 @@ package com.zx.quant.klineproxy.service.stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
+import com.zx.quant.klineproxy.model.KlineDispatchMetadata;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -19,6 +20,24 @@ public abstract class AbstractBinanceKlineStream {
 
   protected abstract String rawTopic(JsonNode payload);
 
+  protected abstract String resolveSymbol(BinanceKlineHeader header);
+
+  protected abstract String rawTopic(BinanceKlineHeader header);
+
+  public final KlineDispatchMetadata dispatchMetadata(String market, BinanceKlineHeader header) {
+    if (!accepts(header.eventType())) {
+      return null;
+    }
+    String symbol = resolveSymbol(header);
+    String topic = rawTopic(header);
+    if (StringUtils.isAnyBlank(symbol, topic, header.interval())) {
+      return null;
+    }
+    return new KlineDispatchMetadata(new KlineDispatchMetadata.Series(market, symbol, header.interval()),
+        header.openTime(), header.closed(), header.tradeCount(), header.eventTime(),
+        StringUtils.isNotBlank(header.stream()) ? header.stream() : topic);
+  }
+
   public final boolean accepts(String eventType) {
     return eventType().equals(eventType);
   }
@@ -32,7 +51,9 @@ public abstract class AbstractBinanceKlineStream {
     if (event == null || event.getEventKline() == null) {
       return null;
     }
-    String symbol = resolveSymbol(event);
+    // Preserve the identity chosen before queueing even if exchange metadata refreshes meanwhile.
+    String symbol = message.dispatchMetadata() != null ? message.dispatchMetadata().series().symbol()
+        : resolveSymbol(event);
     if (StringUtils.isBlank(symbol)) {
       return null;
     }

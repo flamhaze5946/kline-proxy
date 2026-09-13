@@ -1,5 +1,8 @@
 ## Unreleased
 
+- 优化收盘热路径：按市场、symbol、interval 分片处理；同一 openTime 的排队 forming 保留最新有效快照，所有 `x=true` 单独进入有界优先队列，容量满时背压。新增 `kline.ingress.*` 配置和接纳、处理、合并、失败、背压指标。
+- WS、REST、恢复统一原子提交，修复相同成交笔数 final 未替换旧值及并发旧消息回写；final 修订会失效 bulk 缓存。WS 补洞占位不提前确认收盘，持久化只保存一致的已确认 final 快照；正常停机先停止收帧并排空消息，再持久化。
+- 收齐统计从逐消息扫描全部缓存改为边界计数，bulk 改为按 bar 定向通知；增加单条更新快速路径，减少 forming 诊断分配和版本元数据开销，修复 PING/PONG 名称误判与 Netty buffer 引用泄漏。[实现、回放结果和验证边界](docs/kline-ingress-implementation-20260913.md)。
 - 增加收盘消息分段耗时诊断，区分 Netty 帧回调、线程池排队、JSON / 协议解码、缓存更新、收盘通知和既有收齐统计；整点后 30 秒延后输出汇总、连接统计及最多 10 条尾部消息。默认开启，可用 `kline.diagnostics.closedBarLatencyEnabled=false` 停止收集和输出。口径见 [closed-bar-latency.md](docs/closed-bar-latency.md)。
 - 合约 K 线支持按周期选择流：`kline.binance.future.intervalSyncConfigs.<interval>.useContinuousKlineStream` 默认 `false`，使用原有 `<symbol>@kline_<interval>`；设为 `true` 后，永续合约使用 `<pair>_<contractType>@continuousKline_<interval>`。例如只为 `1h` 开启，`1d` 仍可保持普通流。
 - 普通流 `BinanceKlineStream` 与连续流 `BinanceContinuousKlineStream` 各自封装主题生成、解析及符号映射，共用 `AbstractBinanceKlineStream` 的解码流程；服务共用缓存、持久化和 `x=true` 收盘通知。支持原始消息及 combined stream 封装。
