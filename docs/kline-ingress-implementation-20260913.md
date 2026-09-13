@@ -1,5 +1,7 @@
 # Kline ingress 优化实现与验收（2026-09-13）
 
+部署状态更新：`407afae` 已于 2026-09-13 17:05 UTC 上线，17:09 完成验收；18:00 首个生产整点的合约全部 ready 为 T+200.545ms。实际 HTTP、CPU 和持久化结果见[部署实测报告](kline-ingress-deployment-20260913.md)。下文保留实现阶段的回放与验证记录。
+
 这次优化以 `1025516` 为基线，保留普通 K 线与连续合约 K 线的两个独立协议实现，减少整点收盘统计和重复 forming 消息占用的 CPU，并修复并发更新导致 final 数据回退的问题。`useContinuousKlineStream` 的默认值仍为 `false`，它只选择订阅协议，不控制调度优化。
 
 工作窗口从 14:47:54 UTC 开始，用户要求两小时内自行循环优化。各轮修改、测试和测量记录在 [OPTIMIZATION_LOG](../research/closed-bar-ingress/OPTIMIZATION_LOG.md)；实现前的定位过程和基线反例见 [研究报告](kline-ingress-optimization-20260913.md)。本次未修改策略、币池、交易过滤或收益计算。
@@ -104,4 +106,4 @@ Prometheus 新增 `websocket_kline_ingress_*`：`received_total{closed}` 为接�
 
 停机协调使用 [Spring SmartLifecycle](https://docs.spring.io/spring-framework/docs/6.1.15/javadoc-api/org/springframework/context/SmartLifecycle.html)，上下文关闭测试验证队列排空先于持久化销毁。另补充了“接纳的连续流 final 排队期间 exchange 状态刷新”测试，确认仍提交到接纳时解析出的实际 symbol。对新收到但已不可映射的合约，沿用原协议的拒绝规则，调度保障不等于可以恢复未知合约身份。
 
-安装包已由干净构建生成，SHA-256 见 [artifact.json](../research/closed-bar-ingress/evidence/implementation/artifact.json)。本次优化尚未部署到服务器；本报告中的生产日志均为旧版本参照。
+安装包已由干净构建生成，SHA-256 见 [artifact.json](../research/closed-bar-ingress/evidence/implementation/artifact.json)。实现验收结束时尚未部署；上文生产日志均为旧版本参照。随后上线的结果已单独记录在[部署实测报告](kline-ingress-deployment-20260913.md)。

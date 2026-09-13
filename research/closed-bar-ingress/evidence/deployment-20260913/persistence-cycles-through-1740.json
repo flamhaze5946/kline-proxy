@@ -1,0 +1,82 @@
+[
+  {
+    "start": "2026-09-13T17:10:35.452000+00:00",
+    "end": "2026-09-13T17:10:43.461000+00:00",
+    "seconds": 9.013776111,
+    "peak_cpu_percent": 91.92364048454439,
+    "jvm_cpu_seconds": 12.35,
+    "scheduled_cpu_seconds": 7.98,
+    "jit_cpu_seconds": 3.14,
+    "write_MiB": 21.49609375
+  },
+  {
+    "start": "2026-09-13T17:15:39.448000+00:00",
+    "end": "2026-09-13T17:15:48.447000+00:00",
+    "seconds": 10.000337586,
+    "peak_cpu_percent": 69.47806598300336,
+    "jvm_cpu_seconds": 9.51,
+    "scheduled_cpu_seconds": 7.3999999999999995,
+    "jit_cpu_seconds": 0.48,
+    "write_MiB": 22.41015625
+  },
+  {
+    "start": "2026-09-13T17:20:42.446000+00:00",
+    "end": "2026-09-13T17:20:52.446000+00:00",
+    "seconds": 10.999044751,
+    "peak_cpu_percent": 81.65488633625294,
+    "jvm_cpu_seconds": 8.59,
+    "scheduled_cpu_seconds": 6.96,
+    "jit_cpu_seconds": 0.3,
+    "write_MiB": 21.85546875
+  },
+  {
+    "start": "2026-09-13T17:25:45.448000+00:00",
+    "end": "2026-09-13T17:25:57.447000+00:00",
+    "seconds": 13.000324925,
+    "peak_cpu_percent": 88.71908689207282,
+    "jvm_cpu_seconds": 8.86,
+    "scheduled_cpu_seconds": 7.05,
+    "jit_cpu_seconds": 0.1,
+    "write_MiB": 22.0234375
+  },
+  {
+    "start": "2026-09-13T17:30:48.448000+00:00",
+    "end": "2026-09-13T17:30:51.447000+00:00",
+    "seconds": 4.000981225,
+    "peak_cpu_percent": 53.9606921719053,
+    "jvm_cpu_seconds": 3.0100000000000002,
+    "scheduled_cpu_seconds": 2.73,
+    "jit_cpu_seconds": 0.02,
+    "write_MiB": 8.1953125
+  },
+  {
+    "start": "2026-09-13T17:30:57.451000+00:00",
+    "end": "2026-09-13T17:31:01.454000+00:00",
+    "seconds": 5.007807549,
+    "peak_cpu_percent": 72.71613373847323,
+    "jvm_cpu_seconds": 5.2700000000000005,
+    "scheduled_cpu_seconds": 4.36,
+    "jit_cpu_seconds": 0.03,
+    "write_MiB": 13.4453125
+  },
+  {
+    "start": "2026-09-13T17:35:51.453000+00:00",
+    "end": "2026-09-13T17:35:53.457000+00:00",
+    "seconds": 3.00908502,
+    "peak_cpu_percent": 52.85113974856998,
+    "jvm_cpu_seconds": 3.05,
+    "scheduled_cpu_seconds": 2.74,
+    "jit_cpu_seconds": 0.01,
+    "write_MiB": 8.47265625
+  },
+  {
+    "start": "2026-09-13T17:36:02.448000+00:00",
+    "end": "2026-09-13T17:36:06.447000+00:00",
+    "seconds": 4.998893022,
+    "peak_cpu_percent": 54.99802931061375,
+    "jvm_cpu_seconds": 4.63,
+    "scheduled_cpu_seconds": 4.24,
+    "jit_cpu_seconds": 0.01,
+    "write_MiB": 13.0859375
+  }
+]

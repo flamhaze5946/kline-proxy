@@ -1,0 +1,19 @@
+{
+  "utc": "2026-09-13T17:58:30.230376+00:00",
+  "args": [
+    "/usr/lib/jvm/jdk-21-oracle-x64/bin/jcmd",
+    "517468",
+    "JFR.start",
+    "name=ingress_hour",
+    "settings=profile",
+    "duration=3m",
+    "maxsize=192m",
+    "dumponexit=true",
+    "filename=/opt/kline-proxy/deployments/20260913_ingress_407afae_retry/hour-1800-profile.jfr",
+    "jdk.FileWrite#threshold=0ms",
+    "jdk.ThreadCPULoad#period=1s",
+    "jdk.CPULoad#period=100ms"
+  ],
+  "stdout": "517468:\nStarted recording 2. The result will be written to:\n\n/opt/kline-proxy/deployments/20260913_ingress_407afae_retry/hour-1800-profile.jfr\n",
+  "stderr": ""
+}

@@ -1,0 +1,84 @@
+[
+  {
+    "label": "public-all",
+    "measurement_location": "local Mac via public HTTPS",
+    "boundary_ms": 1789318800000,
+    "request_wall_offset_ms": -165.375,
+    "request_corrected_offset_ms": 24.11328125,
+    "complete_response_corrected_offset_ms": 1513.35753125,
+    "duration_ms": 1489.24425,
+    "ttfb_ms": 973.832584,
+    "status": 200,
+    "bytes": 187164,
+    "clock_samples": [
+      {
+        "rtt_ms": 676.646240234375,
+        "offset_ms": 446.2041015625
+      },
+      {
+        "rtt_ms": 159.9189453125,
+        "offset_ms": 188.91650390625
+      },
+      {
+        "rtt_ms": 159.48193359375,
+        "offset_ms": 188.2099609375
+      },
+      {
+        "rtt_ms": 157.949951171875,
+        "offset_ms": 189.48828125
+      },
+      {
+        "rtt_ms": 182.760986328125,
+        "offset_ms": 177.12744140625
+      }
+    ],
+    "clock_offset_ms": 189.48828125,
+    "clock_half_rtt_ms": 78.9749755859375,
+    "finalized": true,
+    "pending": [],
+    "waited_ms": 834,
+    "symbols": 718,
+    "wrong_last_open_times": []
+  },
+  {
+    "label": "public-six",
+    "measurement_location": "local Mac via public HTTPS",
+    "boundary_ms": 1789318800000,
+    "request_wall_offset_ms": -169.514892578125,
+    "request_corrected_offset_ms": 23.630126953125,
+    "complete_response_corrected_offset_ms": 903.246126953125,
+    "duration_ms": 879.616,
+    "ttfb_ms": 879.572125,
+    "status": 200,
+    "bytes": 1756,
+    "clock_samples": [
+      {
+        "rtt_ms": 666.819091796875,
+        "offset_ms": 445.32275390625
+      },
+      {
+        "rtt_ms": 154.02392578125,
+        "offset_ms": 191.89599609375
+      },
+      {
+        "rtt_ms": 153.47021484375,
+        "offset_ms": 193.14501953125
+      },
+      {
+        "rtt_ms": 155.203125,
+        "offset_ms": 191.803466796875
+      },
+      {
+        "rtt_ms": 207.2548828125,
+        "offset_ms": 164.569580078125
+      }
+    ],
+    "clock_offset_ms": 193.14501953125,
+    "clock_half_rtt_ms": 76.735107421875,
+    "finalized": true,
+    "pending": [],
+    "waited_ms": 782,
+    "symbols": 6,
+    "wrong_last_open_times": []
+  }
+]

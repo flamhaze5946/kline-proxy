@@ -1,0 +1,36 @@
+{
+  "status": "verified",
+  "commit": "407afaedaa1bcad6ad10b363cf8d4bfdf66b8325",
+  "started_utc": "2026-09-13T17:05:04.303860+00:00",
+  "backup": "/opt/kline-proxy/deployments/20260913_ingress_407afae_retry",
+  "old_jar": "/opt/kline-proxy/kline-proxy-1.8.1-1025516.jar",
+  "new_jar": "/opt/kline-proxy/kline-proxy-1.8.1-407afae.jar",
+  "old_sha256": "291be9fbaf1a292d8a8d295fd38e58c57178ee139a5243c134eaafb4a1e8cc89",
+  "new_sha256": "19390b7aba219a8807c1fa2c62d4ad801d999390d987a05ee181aa098c50ae12",
+  "config_before_sha256": "e488babe1d81c8dfec31e72a99050c7c53f5126a4e87e9ec1229718e407bec8c",
+  "old_pid": "517054",
+  "log_offset": 401597889,
+  "completed_utc": "2026-09-13T17:09:33.358880+00:00",
+  "new_pid": "517468",
+  "health_seconds": 247.33,
+  "config_after_sha256": "ecb785ee235f6c9efb1ddb482146d8a8c8e89a2a4e4b8f6c0ed47d192ab0a547",
+  "ingress": {
+    "workers": 4,
+    "finalQueueCapacityPerWorker": 2048,
+    "formingQueueCapacityPerWorker": 4096,
+    "closedKeyCapacityPerWorker": 2048,
+    "coalesceFormingUpdates": true
+  },
+  "continuous_1h": true,
+  "historical_comparison": {
+    "1h": {
+      "symbols": 718,
+      "equal": true
+    },
+    "1d": {
+      "symbols": 718,
+      "equal": true
+    }
+  },
+  "external_https_seconds": 0.201
+}

@@ -1,0 +1,10 @@
+{
+  "samples": 3143,
+  "first_utc": "2026-09-13T17:09:38.454000+00:00",
+  "last_utc": "2026-09-13T18:01:59.451000+00:00",
+  "seconds": 3142.0022616749998,
+  "observer_cpu_seconds": 33.09,
+  "jvm_cpu_seconds": 370.82,
+  "observer_max_collection_ms": 33.22365,
+  "observer_cpu_capacity_percent": 0.5265750506232886
+}

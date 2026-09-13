@@ -1,0 +1,22 @@
+{
+  "utc": "2026-09-13T18:02:59.891479+00:00",
+  "systemd": "MainPID=517468\nNRestarts=0\nActiveState=active\n",
+  "observers": "    PID STAT     ELAPSED COMMAND\n",
+  "cpu_sampler_log": "{\"status\": \"complete\", \"output\": \"/opt/kline-proxy/deployments/20260913_ingress_407afae_retry/cpu-io.jsonl\"}\n",
+  "observer_last_line": "{\"stage\": \"observed\", \"utc\": \"2026-09-13T18:00:42.024454+00:00\", \"output\": \"/opt/kline-proxy/deployments/20260913_ingress_407afae_retry/observation-1800.json\", \"closed_lines\": 39, \"bulk_lines\": 2, \"warning_error_lines\": 5}",
+  "jfr_check": "517468:\nNo available recordings.\n\nUse jcmd 517468 JFR.start to start a recording.\n",
+  "ingress": [
+    "websocket_kline_ingress_received_total{closed=\"true\",} 1208.0",
+    "websocket_kline_ingress_received_total{closed=\"false\",} 1254448.0",
+    "websocket_kline_ingress_processed_total{closed=\"true\",} 1208.0",
+    "websocket_kline_ingress_processed_total{closed=\"false\",} 1254448.0",
+    "websocket_kline_ingress_coalesced_total{reason=\"superseded\",} 0.0",
+    "websocket_kline_ingress_coalesced_total{reason=\"stale\",} 0.0",
+    "websocket_kline_ingress_queue{closed=\"true\",} 0.0",
+    "websocket_kline_ingress_queue{closed=\"false\",} 0.0",
+    "websocket_kline_ingress_failures_total 0.0",
+    "websocket_kline_ingress_backpressure_total 0.0",
+    "websocket_kline_ingress_backpressure_seconds_total 0.0",
+    "websocket_kline_ingress_active_workers 0.0"
+  ]
+}

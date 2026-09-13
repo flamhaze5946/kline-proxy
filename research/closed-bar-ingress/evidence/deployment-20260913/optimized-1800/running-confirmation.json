@@ -1,0 +1,13 @@
+{
+  "checked_utc": "2026-09-13T17:31:37.457360+00:00",
+  "systemd": "MainPID=517468\nNRestarts=0\nExecStart={ path=/usr/lib/jvm/jdk-21-oracle-x64/bin/java ; argv[]=/usr/lib/jvm/jdk-21-oracle-x64/bin/java -Xms1g -Xmx2g -Xlog:gc*,safepoint:file=/opt/kline-proxy/gc.log:time,uptime,level,tags:filecount=5,filesize=50M -jar /opt/kline-proxy/kline-proxy-1.8.1-407afae.jar --spring.config.location=file:/opt/kline-proxy/application.yaml ; ignore_errors=no ; start_time=[Sun 2026-09-13 17:05:26 UTC] ; stop_time=[n/a] ; pid=517468 ; code=(null) ; status=0/0 }\nActiveState=active\n",
+  "jar_sha256": "19390b7aba219a8807c1fa2c62d4ad801d999390d987a05ee181aa098c50ae12",
+  "continuous_1h": true,
+  "ingress": {
+    "kline.ingress.workers": 4,
+    "kline.ingress.finalQueueCapacityPerWorker": 2048,
+    "kline.ingress.formingQueueCapacityPerWorker": 4096,
+    "kline.ingress.closedKeyCapacityPerWorker": 2048,
+    "kline.ingress.coalesceFormingUpdates": true
+  }
+}

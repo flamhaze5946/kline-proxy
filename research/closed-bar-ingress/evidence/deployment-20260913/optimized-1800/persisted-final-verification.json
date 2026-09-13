@@ -1,0 +1,41 @@
+{
+  "captured_utc": "2026-09-13T18:08:18.375969+00:00",
+  "scope": "Five futures symbols: persisted final row versus captured HTTP close",
+  "results": [
+    {
+      "symbol": "BTCUSDT",
+      "openTime": 1789318800000,
+      "mtime_utc": "2026-09-13T18:06:29.222655+00:00",
+      "mismatches": [],
+      "equal": true
+    },
+    {
+      "symbol": "ETHUSDT",
+      "openTime": 1789318800000,
+      "mtime_utc": "2026-09-13T18:06:31.454666+00:00",
+      "mismatches": [],
+      "equal": true
+    },
+    {
+      "symbol": "RAREUSDT",
+      "openTime": 1789318800000,
+      "mtime_utc": "2026-09-13T18:06:27.938648+00:00",
+      "mismatches": [],
+      "equal": true
+    },
+    {
+      "symbol": "UNITREEUSDT",
+      "openTime": 1789318800000,
+      "mtime_utc": "2026-09-13T18:06:31.558667+00:00",
+      "mismatches": [],
+      "equal": true
+    },
+    {
+      "symbol": "ZKUSDT",
+      "openTime": 1789318800000,
+      "mtime_utc": "2026-09-13T18:06:30.358660+00:00",
+      "mismatches": [],
+      "equal": true
+    }
+  ]
+}

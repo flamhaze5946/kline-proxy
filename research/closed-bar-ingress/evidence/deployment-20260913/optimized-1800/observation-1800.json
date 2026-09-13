@@ -1,0 +1,3101 @@
+{
+  "source_host": "kline-proxy",
+  "source_log": "/opt/kline-proxy/kline-proxy.log",
+  "captured_utc": "2026-09-13T18:00:42.010972+00:00",
+  "deployment": {
+    "status": "verified",
+    "commit": "407afaedaa1bcad6ad10b363cf8d4bfdf66b8325",
+    "started_utc": "2026-09-13T17:05:04.303860+00:00",
+    "backup": "/opt/kline-proxy/deployments/20260913_ingress_407afae_retry",
+    "old_jar": "/opt/kline-proxy/kline-proxy-1.8.1-1025516.jar",
+    "new_jar": "/opt/kline-proxy/kline-proxy-1.8.1-407afae.jar",
+    "old_sha256": "291be9fbaf1a292d8a8d295fd38e58c57178ee139a5243c134eaafb4a1e8cc89",
+    "new_sha256": "19390b7aba219a8807c1fa2c62d4ad801d999390d987a05ee181aa098c50ae12",
+    "config_before_sha256": "e488babe1d81c8dfec31e72a99050c7c53f5126a4e87e9ec1229718e407bec8c",
+    "old_pid": "517054",
+    "log_offset": 401597889,
+    "completed_utc": "2026-09-13T17:09:33.358880+00:00",
+    "new_pid": "517468",
+    "health_seconds": 247.33,
+    "config_after_sha256": "ecb785ee235f6c9efb1ddb482146d8a8c8e89a2a4e4b8f6c0ed47d192ab0a547",
+    "ingress": {
+      "workers": 4,
+      "finalQueueCapacityPerWorker": 2048,
+      "formingQueueCapacityPerWorker": 4096,
+      "closedKeyCapacityPerWorker": 2048,
+      "coalesceFormingUpdates": true
+    },
+    "continuous_1h": true,
+    "historical_comparison": {
+      "1h": {
+        "symbols": 718,
+        "equal": true
+      },
+      "1d": {
+        "symbols": 718,
+        "equal": true
+      }
+    },
+    "external_https_seconds": 0.201
+  },
+  "boundary_ms": 1789322400000,
+  "clock_ticks_per_second": 100,
+  "cpu_count": 2,
+  "cpu_samples": [
+    {
+      "wall_ms": 1789322395028,
+      "monotonic_ns": 2819937090629052,
+      "cpu": [
+        22051279,
+        12616,
+        7095061,
+        527987860,
+        70643,
+        0,
+        4797498,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47694,
+        "stime": 7688,
+        "threads": 184
+      },
+      "loadavg": "0.06 0.16 0.18 1/335 518224"
+    },
+    {
+      "wall_ms": 1789322396028,
+      "monotonic_ns": 2819938090969410,
+      "cpu": [
+        22051284,
+        12616,
+        7095065,
+        527988050,
+        70643,
+        0,
+        4797501,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47697,
+        "stime": 7692,
+        "threads": 184
+      },
+      "loadavg": "0.06 0.16 0.18 1/335 518224"
+    },
+    {
+      "wall_ms": 1789322397028,
+      "monotonic_ns": 2819939091477350,
+      "cpu": [
+        22051290,
+        12616,
+        7095067,
+        527988239,
+        70643,
+        0,
+        4797503,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47702,
+        "stime": 7694,
+        "threads": 184
+      },
+      "loadavg": "0.06 0.16 0.18 1/335 518224"
+    },
+    {
+      "wall_ms": 1789322398029,
+      "monotonic_ns": 2819940091924626,
+      "cpu": [
+        22051298,
+        12616,
+        7095070,
+        527988429,
+        70643,
+        0,
+        4797505,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47707,
+        "stime": 7696,
+        "threads": 184
+      },
+      "loadavg": "0.05 0.15 0.18 1/335 518224"
+    },
+    {
+      "wall_ms": 1789322399030,
+      "monotonic_ns": 2819941092608058,
+      "cpu": [
+        22051305,
+        12616,
+        7095073,
+        527988618,
+        70643,
+        0,
+        4797508,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47713,
+        "stime": 7698,
+        "threads": 184
+      },
+      "loadavg": "0.05 0.15 0.18 1/335 518224"
+    },
+    {
+      "wall_ms": 1789322400030,
+      "monotonic_ns": 2819942093002789,
+      "cpu": [
+        22051321,
+        12616,
+        7095075,
+        527988799,
+        70643,
+        0,
+        4797511,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47728,
+        "stime": 7700,
+        "threads": 184
+      },
+      "loadavg": "0.05 0.15 0.18 6/335 518224"
+    },
+    {
+      "wall_ms": 1789322401030,
+      "monotonic_ns": 2819943093526149,
+      "cpu": [
+        22051458,
+        12616,
+        7095081,
+        527988849,
+        70643,
+        0,
+        4797517,
+        299658,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47860,
+        "stime": 7710,
+        "threads": 203
+      },
+      "loadavg": "0.05 0.15 0.18 13/354 518244"
+    },
+    {
+      "wall_ms": 1789322402031,
+      "monotonic_ns": 2819944094094881,
+      "cpu": [
+        22051608,
+        12616,
+        7095099,
+        527988866,
+        70643,
+        0,
+        4797529,
+        299660,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 47992,
+        "stime": 7725,
+        "threads": 236
+      },
+      "loadavg": "0.05 0.15 0.18 11/387 518277"
+    },
+    {
+      "wall_ms": 1789322403035,
+      "monotonic_ns": 2819945098201387,
+      "cpu": [
+        22051732,
+        12616,
+        7095110,
+        527988919,
+        70643,
+        0,
+        4797538,
+        299666,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48108,
+        "stime": 7738,
+        "threads": 236
+      },
+      "loadavg": "0.53 0.25 0.21 4/387 518277"
+    },
+    {
+      "wall_ms": 1789322404036,
+      "monotonic_ns": 2819946098925483,
+      "cpu": [
+        22051824,
+        12616,
+        7095112,
+        527989020,
+        70643,
+        0,
+        4797542,
+        299669,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48201,
+        "stime": 7740,
+        "threads": 236
+      },
+      "loadavg": "0.53 0.25 0.21 12/387 518277"
+    },
+    {
+      "wall_ms": 1789322405037,
+      "monotonic_ns": 2819947099731333,
+      "cpu": [
+        22051879,
+        12616,
+        7095116,
+        527989158,
+        70643,
+        0,
+        4797544,
+        299669,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48254,
+        "stime": 7744,
+        "threads": 236
+      },
+      "loadavg": "0.53 0.25 0.21 1/387 518277"
+    },
+    {
+      "wall_ms": 1789322406037,
+      "monotonic_ns": 2819948100227060,
+      "cpu": [
+        22051929,
+        12616,
+        7095120,
+        527989305,
+        70643,
+        0,
+        4797547,
+        299669,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48300,
+        "stime": 7748,
+        "threads": 236
+      },
+      "loadavg": "0.53 0.25 0.21 1/387 518277"
+    },
+    {
+      "wall_ms": 1789322407038,
+      "monotonic_ns": 2819949100745312,
+      "cpu": [
+        22051943,
+        12616,
+        7095122,
+        527989485,
+        70643,
+        0,
+        4797551,
+        299670,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48313,
+        "stime": 7752,
+        "threads": 236
+      },
+      "loadavg": "0.53 0.25 0.21 1/387 518277"
+    },
+    {
+      "wall_ms": 1789322408038,
+      "monotonic_ns": 2819950101253300,
+      "cpu": [
+        22051951,
+        12616,
+        7095126,
+        527989667,
+        70643,
+        0,
+        4797553,
+        299671,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48323,
+        "stime": 7754,
+        "threads": 236
+      },
+      "loadavg": "0.49 0.25 0.21 1/387 518277"
+    },
+    {
+      "wall_ms": 1789322409039,
+      "monotonic_ns": 2819951101786870,
+      "cpu": [
+        22051967,
+        12616,
+        7095130,
+        527989845,
+        70643,
+        0,
+        4797557,
+        299671,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48333,
+        "stime": 7758,
+        "threads": 236
+      },
+      "loadavg": "0.49 0.25 0.21 1/389 518279"
+    },
+    {
+      "wall_ms": 1789322410039,
+      "monotonic_ns": 2819952102338298,
+      "cpu": [
+        22051980,
+        12616,
+        7095133,
+        527990027,
+        70643,
+        0,
+        4797561,
+        299671,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48344,
+        "stime": 7761,
+        "threads": 236
+      },
+      "loadavg": "0.49 0.25 0.21 1/389 518279"
+    },
+    {
+      "wall_ms": 1789322411040,
+      "monotonic_ns": 2819953102775868,
+      "cpu": [
+        22051992,
+        12616,
+        7095136,
+        527990211,
+        70643,
+        0,
+        4797564,
+        299671,
+        0,
+        0
+      ],
+      "process": {
+        "comm": "java",
+        "utime": 48352,
+        "stime": 7762,
+        "threads": 236
+      },
+      "loadavg": "0.49 0.25 0.21 1/389 518286"
+    }
+  ],
+  "threads_before": {
+    "517468": {
+      "comm": "java",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517469": {
+      "comm": "java",
+      "utime": 516,
+      "stime": 20,
+      "threads": 184
+    },
+    "517470": {
+      "comm": "GC Thread#0",
+      "utime": 482,
+      "stime": 9,
+      "threads": 184
+    },
+    "517471": {
+      "comm": "G1 Main Marker",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517472": {
+      "comm": "G1 Conc#0",
+      "utime": 2270,
+      "stime": 37,
+      "threads": 184
+    },
+    "517473": {
+      "comm": "G1 Refine#0",
+      "utime": 160,
+      "stime": 20,
+      "threads": 184
+    },
+    "517474": {
+      "comm": "G1 Service",
+      "utime": 5,
+      "stime": 5,
+      "threads": 184
+    },
+    "517475": {
+      "comm": "VM Periodic Tas",
+      "utime": 83,
+      "stime": 80,
+      "threads": 184
+    },
+    "517476": {
+      "comm": "VM Thread",
+      "utime": 64,
+      "stime": 12,
+      "threads": 184
+    },
+    "517477": {
+      "comm": "Reference Handl",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517478": {
+      "comm": "Finalizer",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517479": {
+      "comm": "Signal Dispatch",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517480": {
+      "comm": "Service Thread",
+      "utime": 3,
+      "stime": 0,
+      "threads": 184
+    },
+    "517481": {
+      "comm": "Monitor Deflati",
+      "utime": 17,
+      "stime": 15,
+      "threads": 184
+    },
+    "517482": {
+      "comm": "C2 CompilerThre",
+      "utime": 6987,
+      "stime": 77,
+      "threads": 184
+    },
+    "517483": {
+      "comm": "C1 CompilerThre",
+      "utime": 860,
+      "stime": 46,
+      "threads": 184
+    },
+    "517484": {
+      "comm": "Notification Th",
+      "utime": 15,
+      "stime": 2,
+      "threads": 184
+    },
+    "517485": {
+      "comm": "Common-Cleaner",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517486": {
+      "comm": "Cleaner-0",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517487": {
+      "comm": "GC Thread#1",
+      "utime": 483,
+      "stime": 11,
+      "threads": 184
+    },
+    "517490": {
+      "comm": "Catalina-utilit",
+      "utime": 17,
+      "stime": 0,
+      "threads": 184
+    },
+    "517491": {
+      "comm": "Catalina-utilit",
+      "utime": 14,
+      "stime": 1,
+      "threads": 184
+    },
+    "517492": {
+      "comm": "container-0",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517493": {
+      "comm": "rate-limit-time",
+      "utime": 178,
+      "stime": 73,
+      "threads": 184
+    },
+    "517494": {
+      "comm": "OkHttp api.bina",
+      "utime": 98,
+      "stime": 42,
+      "threads": 184
+    },
+    "517497": {
+      "comm": "Okio Watchdog",
+      "utime": 8,
+      "stime": 5,
+      "threads": 184
+    },
+    "517499": {
+      "comm": "spotServerTimeR",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517500": {
+      "comm": "ForkJoinPool.co",
+      "utime": 22,
+      "stime": 6,
+      "threads": 184
+    },
+    "517503": {
+      "comm": "BinanceSpotWebS",
+      "utime": 168,
+      "stime": 59,
+      "threads": 184
+    },
+    "517504": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 184
+    },
+    "517505": {
+      "comm": "websocket-subsc",
+      "utime": 9,
+      "stime": 2,
+      "threads": 184
+    },
+    "517506": {
+      "comm": "BinanceSpotWebS",
+      "utime": 109,
+      "stime": 43,
+      "threads": 184
+    },
+    "517507": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 184
+    },
+    "517508": {
+      "comm": "websocket-subsc",
+      "utime": 5,
+      "stime": 4,
+      "threads": 184
+    },
+    "517509": {
+      "comm": "BinanceSpotWebS",
+      "utime": 232,
+      "stime": 118,
+      "threads": 184
+    },
+    "517510": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517511": {
+      "comm": "websocket-subsc",
+      "utime": 7,
+      "stime": 2,
+      "threads": 184
+    },
+    "517512": {
+      "comm": "BinanceSpotWebS",
+      "utime": 98,
+      "stime": 37,
+      "threads": 184
+    },
+    "517513": {
+      "comm": "websocket-monit",
+      "utime": 7,
+      "stime": 3,
+      "threads": 184
+    },
+    "517514": {
+      "comm": "websocket-subsc",
+      "utime": 8,
+      "stime": 1,
+      "threads": 184
+    },
+    "517515": {
+      "comm": "BinanceSpotWebS",
+      "utime": 121,
+      "stime": 49,
+      "threads": 184
+    },
+    "517516": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517517": {
+      "comm": "websocket-subsc",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517518": {
+      "comm": "BinanceSpotWebS",
+      "utime": 185,
+      "stime": 91,
+      "threads": 184
+    },
+    "517519": {
+      "comm": "websocket-monit",
+      "utime": 4,
+      "stime": 5,
+      "threads": 184
+    },
+    "517520": {
+      "comm": "websocket-subsc",
+      "utime": 5,
+      "stime": 3,
+      "threads": 184
+    },
+    "517521": {
+      "comm": "BinanceSpotWebS",
+      "utime": 160,
+      "stime": 63,
+      "threads": 184
+    },
+    "517522": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517523": {
+      "comm": "websocket-subsc",
+      "utime": 5,
+      "stime": 3,
+      "threads": 184
+    },
+    "517524": {
+      "comm": "symbols-sync-1",
+      "utime": 1932,
+      "stime": 265,
+      "threads": 184
+    },
+    "517525": {
+      "comm": "kline-manage-1",
+      "utime": 321,
+      "stime": 43,
+      "threads": 184
+    },
+    "517526": {
+      "comm": "symbols-sync-2",
+      "utime": 1237,
+      "stime": 169,
+      "threads": 184
+    },
+    "517527": {
+      "comm": "symbols-sync-3",
+      "utime": 1459,
+      "stime": 218,
+      "threads": 184
+    },
+    "517528": {
+      "comm": "symbols-sync-4",
+      "utime": 2077,
+      "stime": 316,
+      "threads": 184
+    },
+    "517529": {
+      "comm": "kline-manage-2",
+      "utime": 426,
+      "stime": 65,
+      "threads": 184
+    },
+    "517530": {
+      "comm": "kline-manage-3",
+      "utime": 76,
+      "stime": 2,
+      "threads": 184
+    },
+    "517531": {
+      "comm": "kline-manage-4",
+      "utime": 31,
+      "stime": 1,
+      "threads": 184
+    },
+    "517532": {
+      "comm": "kline-manage-5",
+      "utime": 56,
+      "stime": 0,
+      "threads": 184
+    },
+    "517535": {
+      "comm": "futureServerTim",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517538": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517539": {
+      "comm": "BinanceFutureWe",
+      "utime": 620,
+      "stime": 353,
+      "threads": 184
+    },
+    "517540": {
+      "comm": "websocket-monit",
+      "utime": 12,
+      "stime": 2,
+      "threads": 184
+    },
+    "517541": {
+      "comm": "websocket-subsc",
+      "utime": 24,
+      "stime": 11,
+      "threads": 184
+    },
+    "517542": {
+      "comm": "BinanceFutureWe",
+      "utime": 695,
+      "stime": 424,
+      "threads": 184
+    },
+    "517543": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517544": {
+      "comm": "websocket-subsc",
+      "utime": 20,
+      "stime": 12,
+      "threads": 184
+    },
+    "517545": {
+      "comm": "BinanceFutureWe",
+      "utime": 473,
+      "stime": 302,
+      "threads": 184
+    },
+    "517546": {
+      "comm": "websocket-monit",
+      "utime": 5,
+      "stime": 3,
+      "threads": 184
+    },
+    "517547": {
+      "comm": "websocket-subsc",
+      "utime": 23,
+      "stime": 10,
+      "threads": 184
+    },
+    "517548": {
+      "comm": "BinanceFutureWe",
+      "utime": 623,
+      "stime": 404,
+      "threads": 184
+    },
+    "517549": {
+      "comm": "websocket-monit",
+      "utime": 7,
+      "stime": 2,
+      "threads": 184
+    },
+    "517550": {
+      "comm": "websocket-subsc",
+      "utime": 16,
+      "stime": 15,
+      "threads": 184
+    },
+    "517551": {
+      "comm": "BinanceFutureWe",
+      "utime": 471,
+      "stime": 274,
+      "threads": 184
+    },
+    "517552": {
+      "comm": "websocket-monit",
+      "utime": 5,
+      "stime": 3,
+      "threads": 184
+    },
+    "517553": {
+      "comm": "websocket-subsc",
+      "utime": 16,
+      "stime": 10,
+      "threads": 184
+    },
+    "517554": {
+      "comm": "BinanceFutureWe",
+      "utime": 621,
+      "stime": 394,
+      "threads": 184
+    },
+    "517555": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 184
+    },
+    "517556": {
+      "comm": "websocket-subsc",
+      "utime": 21,
+      "stime": 5,
+      "threads": 184
+    },
+    "517557": {
+      "comm": "BinanceFutureWe",
+      "utime": 726,
+      "stime": 400,
+      "threads": 184
+    },
+    "517558": {
+      "comm": "websocket-monit",
+      "utime": 5,
+      "stime": 5,
+      "threads": 184
+    },
+    "517559": {
+      "comm": "websocket-subsc",
+      "utime": 15,
+      "stime": 9,
+      "threads": 184
+    },
+    "517560": {
+      "comm": "BinanceFutureWe",
+      "utime": 813,
+      "stime": 494,
+      "threads": 184
+    },
+    "517561": {
+      "comm": "websocket-monit",
+      "utime": 12,
+      "stime": 3,
+      "threads": 184
+    },
+    "517562": {
+      "comm": "websocket-subsc",
+      "utime": 13,
+      "stime": 11,
+      "threads": 184
+    },
+    "517563": {
+      "comm": "BinanceFutureWe",
+      "utime": 634,
+      "stime": 403,
+      "threads": 184
+    },
+    "517564": {
+      "comm": "websocket-monit",
+      "utime": 3,
+      "stime": 6,
+      "threads": 184
+    },
+    "517565": {
+      "comm": "websocket-subsc",
+      "utime": 15,
+      "stime": 9,
+      "threads": 184
+    },
+    "517566": {
+      "comm": "BinanceFutureWe",
+      "utime": 483,
+      "stime": 300,
+      "threads": 184
+    },
+    "517567": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 184
+    },
+    "517568": {
+      "comm": "websocket-subsc",
+      "utime": 17,
+      "stime": 7,
+      "threads": 184
+    },
+    "517569": {
+      "comm": "http-nio-1888-e",
+      "utime": 254,
+      "stime": 29,
+      "threads": 184
+    },
+    "517570": {
+      "comm": "http-nio-1888-e",
+      "utime": 236,
+      "stime": 30,
+      "threads": 184
+    },
+    "517571": {
+      "comm": "http-nio-1888-e",
+      "utime": 256,
+      "stime": 24,
+      "threads": 184
+    },
+    "517572": {
+      "comm": "http-nio-1888-e",
+      "utime": 232,
+      "stime": 22,
+      "threads": 184
+    },
+    "517573": {
+      "comm": "http-nio-1888-e",
+      "utime": 247,
+      "stime": 17,
+      "threads": 184
+    },
+    "517574": {
+      "comm": "http-nio-1888-e",
+      "utime": 231,
+      "stime": 23,
+      "threads": 184
+    },
+    "517575": {
+      "comm": "http-nio-1888-e",
+      "utime": 250,
+      "stime": 23,
+      "threads": 184
+    },
+    "517576": {
+      "comm": "http-nio-1888-e",
+      "utime": 227,
+      "stime": 23,
+      "threads": 184
+    },
+    "517577": {
+      "comm": "http-nio-1888-e",
+      "utime": 234,
+      "stime": 32,
+      "threads": 184
+    },
+    "517578": {
+      "comm": "http-nio-1888-e",
+      "utime": 249,
+      "stime": 25,
+      "threads": 184
+    },
+    "517579": {
+      "comm": "http-nio-1888-P",
+      "utime": 122,
+      "stime": 140,
+      "threads": 184
+    },
+    "517580": {
+      "comm": "http-nio-1888-A",
+      "utime": 217,
+      "stime": 125,
+      "threads": 184
+    },
+    "517581": {
+      "comm": "scheduling-1",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517582": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517583": {
+      "comm": "websocket-contr",
+      "utime": 164,
+      "stime": 6,
+      "threads": 184
+    },
+    "517584": {
+      "comm": "visionFundingLo",
+      "utime": 5,
+      "stime": 0,
+      "threads": 184
+    },
+    "517585": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517586": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517587": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517588": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517589": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517590": {
+      "comm": "visionFundingLo",
+      "utime": 3,
+      "stime": 0,
+      "threads": 184
+    },
+    "517591": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517592": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517593": {
+      "comm": "visionFundingLo",
+      "utime": 3,
+      "stime": 0,
+      "threads": 184
+    },
+    "517594": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517595": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517596": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517597": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517598": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517599": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 184
+    },
+    "517611": {
+      "comm": "websocket-messa",
+      "utime": 1339,
+      "stime": 178,
+      "threads": 184
+    },
+    "517612": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517613": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517614": {
+      "comm": "websocket-messa",
+      "utime": 1376,
+      "stime": 198,
+      "threads": 184
+    },
+    "517615": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517616": {
+      "comm": "websocket-contr",
+      "utime": 160,
+      "stime": 4,
+      "threads": 184
+    },
+    "517617": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517618": {
+      "comm": "websocket-messa",
+      "utime": 922,
+      "stime": 130,
+      "threads": 184
+    },
+    "517619": {
+      "comm": "websocket-messa",
+      "utime": 1133,
+      "stime": 169,
+      "threads": 184
+    },
+    "517620": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517621": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517622": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517623": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517624": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517625": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517626": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517627": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517628": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517629": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517630": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517631": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 1,
+      "threads": 184
+    },
+    "517632": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517633": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517634": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517635": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517636": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 184
+    },
+    "517637": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517638": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517639": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517640": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517641": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517642": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517643": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517660": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517661": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517662": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "517663": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "517705": {
+      "comm": "Attach Listener",
+      "utime": 31,
+      "stime": 1,
+      "threads": 184
+    },
+    "517736": {
+      "comm": "JFR Recorder Th",
+      "utime": 20,
+      "stime": 6,
+      "threads": 184
+    },
+    "517737": {
+      "comm": "JFR Periodic Ta",
+      "utime": 110,
+      "stime": 62,
+      "threads": 184
+    },
+    "517738": {
+      "comm": "JFR Thread Samp",
+      "utime": 331,
+      "stime": 65,
+      "threads": 184
+    },
+    "517740": {
+      "comm": "JFR Recording S",
+      "utime": 0,
+      "stime": 1,
+      "threads": 184
+    },
+    "517892": {
+      "comm": "kline-fetch-17",
+      "utime": 171,
+      "stime": 3,
+      "threads": 184
+    },
+    "517893": {
+      "comm": "kline-fetch-18",
+      "utime": 171,
+      "stime": 3,
+      "threads": 184
+    },
+    "517894": {
+      "comm": "kline-fetch-19",
+      "utime": 164,
+      "stime": 6,
+      "threads": 184
+    },
+    "517895": {
+      "comm": "kline-fetch-20",
+      "utime": 164,
+      "stime": 5,
+      "threads": 184
+    },
+    "517896": {
+      "comm": "kline-fetch-21",
+      "utime": 170,
+      "stime": 4,
+      "threads": 184
+    },
+    "517897": {
+      "comm": "kline-fetch-22",
+      "utime": 169,
+      "stime": 5,
+      "threads": 184
+    },
+    "517898": {
+      "comm": "kline-fetch-23",
+      "utime": 167,
+      "stime": 5,
+      "threads": 184
+    },
+    "517899": {
+      "comm": "kline-fetch-24",
+      "utime": 165,
+      "stime": 6,
+      "threads": 184
+    },
+    "518136": {
+      "comm": "OkHttp fapi.bin",
+      "utime": 1,
+      "stime": 0,
+      "threads": 184
+    },
+    "518151": {
+      "comm": "kline-fetch-25",
+      "utime": 14,
+      "stime": 0,
+      "threads": 184
+    },
+    "518152": {
+      "comm": "kline-fetch-26",
+      "utime": 14,
+      "stime": 0,
+      "threads": 184
+    },
+    "518153": {
+      "comm": "kline-fetch-27",
+      "utime": 13,
+      "stime": 0,
+      "threads": 184
+    },
+    "518154": {
+      "comm": "kline-fetch-28",
+      "utime": 13,
+      "stime": 0,
+      "threads": 184
+    },
+    "518155": {
+      "comm": "kline-fetch-29",
+      "utime": 13,
+      "stime": 0,
+      "threads": 184
+    },
+    "518156": {
+      "comm": "kline-fetch-30",
+      "utime": 12,
+      "stime": 0,
+      "threads": 184
+    },
+    "518157": {
+      "comm": "kline-fetch-31",
+      "utime": 13,
+      "stime": 0,
+      "threads": 184
+    },
+    "518158": {
+      "comm": "kline-fetch-32",
+      "utime": 13,
+      "stime": 0,
+      "threads": 184
+    },
+    "518172": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "518209": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "518223": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    },
+    "518224": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 184
+    }
+  },
+  "threads_after": {
+    "517468": {
+      "comm": "java",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517469": {
+      "comm": "java",
+      "utime": 516,
+      "stime": 20,
+      "threads": 236
+    },
+    "517470": {
+      "comm": "GC Thread#0",
+      "utime": 482,
+      "stime": 9,
+      "threads": 236
+    },
+    "517471": {
+      "comm": "G1 Main Marker",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517472": {
+      "comm": "G1 Conc#0",
+      "utime": 2270,
+      "stime": 37,
+      "threads": 236
+    },
+    "517473": {
+      "comm": "G1 Refine#0",
+      "utime": 162,
+      "stime": 20,
+      "threads": 236
+    },
+    "517474": {
+      "comm": "G1 Service",
+      "utime": 5,
+      "stime": 6,
+      "threads": 236
+    },
+    "517475": {
+      "comm": "VM Periodic Tas",
+      "utime": 83,
+      "stime": 81,
+      "threads": 236
+    },
+    "517476": {
+      "comm": "VM Thread",
+      "utime": 64,
+      "stime": 12,
+      "threads": 236
+    },
+    "517477": {
+      "comm": "Reference Handl",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517478": {
+      "comm": "Finalizer",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517479": {
+      "comm": "Signal Dispatch",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517480": {
+      "comm": "Service Thread",
+      "utime": 3,
+      "stime": 0,
+      "threads": 236
+    },
+    "517481": {
+      "comm": "Monitor Deflati",
+      "utime": 17,
+      "stime": 15,
+      "threads": 236
+    },
+    "517482": {
+      "comm": "C2 CompilerThre",
+      "utime": 7349,
+      "stime": 83,
+      "threads": 236
+    },
+    "517483": {
+      "comm": "C1 CompilerThre",
+      "utime": 905,
+      "stime": 51,
+      "threads": 236
+    },
+    "517484": {
+      "comm": "Notification Th",
+      "utime": 15,
+      "stime": 2,
+      "threads": 236
+    },
+    "517485": {
+      "comm": "Common-Cleaner",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517486": {
+      "comm": "Cleaner-0",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517487": {
+      "comm": "GC Thread#1",
+      "utime": 483,
+      "stime": 11,
+      "threads": 236
+    },
+    "517490": {
+      "comm": "Catalina-utilit",
+      "utime": 17,
+      "stime": 0,
+      "threads": 236
+    },
+    "517491": {
+      "comm": "Catalina-utilit",
+      "utime": 14,
+      "stime": 1,
+      "threads": 236
+    },
+    "517492": {
+      "comm": "container-0",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517493": {
+      "comm": "rate-limit-time",
+      "utime": 180,
+      "stime": 74,
+      "threads": 236
+    },
+    "517494": {
+      "comm": "OkHttp api.bina",
+      "utime": 98,
+      "stime": 42,
+      "threads": 236
+    },
+    "517497": {
+      "comm": "Okio Watchdog",
+      "utime": 8,
+      "stime": 5,
+      "threads": 236
+    },
+    "517499": {
+      "comm": "spotServerTimeR",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517500": {
+      "comm": "ForkJoinPool.co",
+      "utime": 24,
+      "stime": 7,
+      "threads": 236
+    },
+    "517503": {
+      "comm": "BinanceSpotWebS",
+      "utime": 170,
+      "stime": 60,
+      "threads": 236
+    },
+    "517504": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 236
+    },
+    "517505": {
+      "comm": "websocket-subsc",
+      "utime": 9,
+      "stime": 2,
+      "threads": 236
+    },
+    "517506": {
+      "comm": "BinanceSpotWebS",
+      "utime": 110,
+      "stime": 44,
+      "threads": 236
+    },
+    "517507": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 236
+    },
+    "517508": {
+      "comm": "websocket-subsc",
+      "utime": 6,
+      "stime": 4,
+      "threads": 236
+    },
+    "517509": {
+      "comm": "BinanceSpotWebS",
+      "utime": 235,
+      "stime": 119,
+      "threads": 236
+    },
+    "517510": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517511": {
+      "comm": "websocket-subsc",
+      "utime": 7,
+      "stime": 2,
+      "threads": 236
+    },
+    "517512": {
+      "comm": "BinanceSpotWebS",
+      "utime": 99,
+      "stime": 38,
+      "threads": 236
+    },
+    "517513": {
+      "comm": "websocket-monit",
+      "utime": 7,
+      "stime": 3,
+      "threads": 236
+    },
+    "517514": {
+      "comm": "websocket-subsc",
+      "utime": 8,
+      "stime": 1,
+      "threads": 236
+    },
+    "517515": {
+      "comm": "BinanceSpotWebS",
+      "utime": 124,
+      "stime": 49,
+      "threads": 236
+    },
+    "517516": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517517": {
+      "comm": "websocket-subsc",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517518": {
+      "comm": "BinanceSpotWebS",
+      "utime": 187,
+      "stime": 92,
+      "threads": 236
+    },
+    "517519": {
+      "comm": "websocket-monit",
+      "utime": 4,
+      "stime": 5,
+      "threads": 236
+    },
+    "517520": {
+      "comm": "websocket-subsc",
+      "utime": 5,
+      "stime": 3,
+      "threads": 236
+    },
+    "517521": {
+      "comm": "BinanceSpotWebS",
+      "utime": 162,
+      "stime": 63,
+      "threads": 236
+    },
+    "517522": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517523": {
+      "comm": "websocket-subsc",
+      "utime": 5,
+      "stime": 3,
+      "threads": 236
+    },
+    "517524": {
+      "comm": "symbols-sync-1",
+      "utime": 1932,
+      "stime": 265,
+      "threads": 236
+    },
+    "517525": {
+      "comm": "kline-manage-1",
+      "utime": 321,
+      "stime": 43,
+      "threads": 236
+    },
+    "517526": {
+      "comm": "symbols-sync-2",
+      "utime": 1237,
+      "stime": 169,
+      "threads": 236
+    },
+    "517527": {
+      "comm": "symbols-sync-3",
+      "utime": 1459,
+      "stime": 218,
+      "threads": 236
+    },
+    "517528": {
+      "comm": "symbols-sync-4",
+      "utime": 2078,
+      "stime": 316,
+      "threads": 236
+    },
+    "517529": {
+      "comm": "kline-manage-2",
+      "utime": 426,
+      "stime": 65,
+      "threads": 236
+    },
+    "517530": {
+      "comm": "kline-manage-3",
+      "utime": 76,
+      "stime": 2,
+      "threads": 236
+    },
+    "517531": {
+      "comm": "kline-manage-4",
+      "utime": 31,
+      "stime": 1,
+      "threads": 236
+    },
+    "517532": {
+      "comm": "kline-manage-5",
+      "utime": 56,
+      "stime": 0,
+      "threads": 236
+    },
+    "517535": {
+      "comm": "futureServerTim",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517538": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517539": {
+      "comm": "BinanceFutureWe",
+      "utime": 625,
+      "stime": 355,
+      "threads": 236
+    },
+    "517540": {
+      "comm": "websocket-monit",
+      "utime": 12,
+      "stime": 2,
+      "threads": 236
+    },
+    "517541": {
+      "comm": "websocket-subsc",
+      "utime": 24,
+      "stime": 11,
+      "threads": 236
+    },
+    "517542": {
+      "comm": "BinanceFutureWe",
+      "utime": 700,
+      "stime": 426,
+      "threads": 236
+    },
+    "517543": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517544": {
+      "comm": "websocket-subsc",
+      "utime": 20,
+      "stime": 12,
+      "threads": 236
+    },
+    "517545": {
+      "comm": "BinanceFutureWe",
+      "utime": 476,
+      "stime": 305,
+      "threads": 236
+    },
+    "517546": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517547": {
+      "comm": "websocket-subsc",
+      "utime": 23,
+      "stime": 11,
+      "threads": 236
+    },
+    "517548": {
+      "comm": "BinanceFutureWe",
+      "utime": 629,
+      "stime": 407,
+      "threads": 236
+    },
+    "517549": {
+      "comm": "websocket-monit",
+      "utime": 7,
+      "stime": 2,
+      "threads": 236
+    },
+    "517550": {
+      "comm": "websocket-subsc",
+      "utime": 16,
+      "stime": 15,
+      "threads": 236
+    },
+    "517551": {
+      "comm": "BinanceFutureWe",
+      "utime": 474,
+      "stime": 276,
+      "threads": 236
+    },
+    "517552": {
+      "comm": "websocket-monit",
+      "utime": 5,
+      "stime": 3,
+      "threads": 236
+    },
+    "517553": {
+      "comm": "websocket-subsc",
+      "utime": 16,
+      "stime": 11,
+      "threads": 236
+    },
+    "517554": {
+      "comm": "BinanceFutureWe",
+      "utime": 625,
+      "stime": 399,
+      "threads": 236
+    },
+    "517555": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 2,
+      "threads": 236
+    },
+    "517556": {
+      "comm": "websocket-subsc",
+      "utime": 21,
+      "stime": 5,
+      "threads": 236
+    },
+    "517557": {
+      "comm": "BinanceFutureWe",
+      "utime": 731,
+      "stime": 404,
+      "threads": 236
+    },
+    "517558": {
+      "comm": "websocket-monit",
+      "utime": 5,
+      "stime": 5,
+      "threads": 236
+    },
+    "517559": {
+      "comm": "websocket-subsc",
+      "utime": 15,
+      "stime": 9,
+      "threads": 236
+    },
+    "517560": {
+      "comm": "BinanceFutureWe",
+      "utime": 819,
+      "stime": 498,
+      "threads": 236
+    },
+    "517561": {
+      "comm": "websocket-monit",
+      "utime": 12,
+      "stime": 3,
+      "threads": 236
+    },
+    "517562": {
+      "comm": "websocket-subsc",
+      "utime": 13,
+      "stime": 12,
+      "threads": 236
+    },
+    "517563": {
+      "comm": "BinanceFutureWe",
+      "utime": 641,
+      "stime": 406,
+      "threads": 236
+    },
+    "517564": {
+      "comm": "websocket-monit",
+      "utime": 3,
+      "stime": 6,
+      "threads": 236
+    },
+    "517565": {
+      "comm": "websocket-subsc",
+      "utime": 16,
+      "stime": 9,
+      "threads": 236
+    },
+    "517566": {
+      "comm": "BinanceFutureWe",
+      "utime": 488,
+      "stime": 302,
+      "threads": 236
+    },
+    "517567": {
+      "comm": "websocket-monit",
+      "utime": 6,
+      "stime": 3,
+      "threads": 236
+    },
+    "517568": {
+      "comm": "websocket-subsc",
+      "utime": 17,
+      "stime": 7,
+      "threads": 236
+    },
+    "517569": {
+      "comm": "http-nio-1888-e",
+      "utime": 255,
+      "stime": 29,
+      "threads": 236
+    },
+    "517570": {
+      "comm": "http-nio-1888-e",
+      "utime": 239,
+      "stime": 30,
+      "threads": 236
+    },
+    "517571": {
+      "comm": "http-nio-1888-e",
+      "utime": 257,
+      "stime": 24,
+      "threads": 236
+    },
+    "517572": {
+      "comm": "http-nio-1888-e",
+      "utime": 236,
+      "stime": 23,
+      "threads": 236
+    },
+    "517573": {
+      "comm": "http-nio-1888-e",
+      "utime": 250,
+      "stime": 17,
+      "threads": 236
+    },
+    "517574": {
+      "comm": "http-nio-1888-e",
+      "utime": 234,
+      "stime": 23,
+      "threads": 236
+    },
+    "517575": {
+      "comm": "http-nio-1888-e",
+      "utime": 252,
+      "stime": 23,
+      "threads": 236
+    },
+    "517576": {
+      "comm": "http-nio-1888-e",
+      "utime": 235,
+      "stime": 23,
+      "threads": 236
+    },
+    "517577": {
+      "comm": "http-nio-1888-e",
+      "utime": 237,
+      "stime": 32,
+      "threads": 236
+    },
+    "517578": {
+      "comm": "http-nio-1888-e",
+      "utime": 250,
+      "stime": 26,
+      "threads": 236
+    },
+    "517579": {
+      "comm": "http-nio-1888-P",
+      "utime": 125,
+      "stime": 143,
+      "threads": 236
+    },
+    "517580": {
+      "comm": "http-nio-1888-A",
+      "utime": 219,
+      "stime": 127,
+      "threads": 236
+    },
+    "517581": {
+      "comm": "scheduling-1",
+      "utime": 3,
+      "stime": 0,
+      "threads": 236
+    },
+    "517582": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517583": {
+      "comm": "websocket-contr",
+      "utime": 165,
+      "stime": 6,
+      "threads": 236
+    },
+    "517584": {
+      "comm": "visionFundingLo",
+      "utime": 5,
+      "stime": 0,
+      "threads": 236
+    },
+    "517585": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517586": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517587": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517588": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517589": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517590": {
+      "comm": "visionFundingLo",
+      "utime": 3,
+      "stime": 0,
+      "threads": 236
+    },
+    "517591": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517592": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517593": {
+      "comm": "visionFundingLo",
+      "utime": 3,
+      "stime": 0,
+      "threads": 236
+    },
+    "517594": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517595": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517596": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517597": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517598": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517599": {
+      "comm": "visionFundingLo",
+      "utime": 4,
+      "stime": 0,
+      "threads": 236
+    },
+    "517611": {
+      "comm": "websocket-messa",
+      "utime": 1354,
+      "stime": 181,
+      "threads": 236
+    },
+    "517612": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517613": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517614": {
+      "comm": "websocket-messa",
+      "utime": 1391,
+      "stime": 201,
+      "threads": 236
+    },
+    "517615": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517616": {
+      "comm": "websocket-contr",
+      "utime": 161,
+      "stime": 4,
+      "threads": 236
+    },
+    "517617": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517618": {
+      "comm": "websocket-messa",
+      "utime": 933,
+      "stime": 131,
+      "threads": 236
+    },
+    "517619": {
+      "comm": "websocket-messa",
+      "utime": 1149,
+      "stime": 170,
+      "threads": 236
+    },
+    "517620": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517621": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517622": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517623": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517624": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517625": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517626": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517627": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517628": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517629": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517630": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517631": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 1,
+      "threads": 236
+    },
+    "517632": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517633": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517634": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517635": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517636": {
+      "comm": "websocket-commo",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "517637": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517638": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517639": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517640": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517641": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517642": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517643": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517660": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517661": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517662": {
+      "comm": "websocket-commo",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "517663": {
+      "comm": "websocket-commo",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "517705": {
+      "comm": "Attach Listener",
+      "utime": 31,
+      "stime": 1,
+      "threads": 236
+    },
+    "517736": {
+      "comm": "JFR Recorder Th",
+      "utime": 22,
+      "stime": 6,
+      "threads": 236
+    },
+    "517737": {
+      "comm": "JFR Periodic Ta",
+      "utime": 110,
+      "stime": 62,
+      "threads": 236
+    },
+    "517738": {
+      "comm": "JFR Thread Samp",
+      "utime": 347,
+      "stime": 68,
+      "threads": 236
+    },
+    "517740": {
+      "comm": "JFR Recording S",
+      "utime": 0,
+      "stime": 1,
+      "threads": 236
+    },
+    "517892": {
+      "comm": "kline-fetch-17",
+      "utime": 171,
+      "stime": 3,
+      "threads": 236
+    },
+    "517893": {
+      "comm": "kline-fetch-18",
+      "utime": 171,
+      "stime": 3,
+      "threads": 236
+    },
+    "517894": {
+      "comm": "kline-fetch-19",
+      "utime": 164,
+      "stime": 6,
+      "threads": 236
+    },
+    "517895": {
+      "comm": "kline-fetch-20",
+      "utime": 164,
+      "stime": 5,
+      "threads": 236
+    },
+    "517896": {
+      "comm": "kline-fetch-21",
+      "utime": 170,
+      "stime": 4,
+      "threads": 236
+    },
+    "517897": {
+      "comm": "kline-fetch-22",
+      "utime": 169,
+      "stime": 5,
+      "threads": 236
+    },
+    "517898": {
+      "comm": "kline-fetch-23",
+      "utime": 167,
+      "stime": 5,
+      "threads": 236
+    },
+    "517899": {
+      "comm": "kline-fetch-24",
+      "utime": 165,
+      "stime": 6,
+      "threads": 236
+    },
+    "518136": {
+      "comm": "OkHttp fapi.bin",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518151": {
+      "comm": "kline-fetch-25",
+      "utime": 14,
+      "stime": 0,
+      "threads": 236
+    },
+    "518152": {
+      "comm": "kline-fetch-26",
+      "utime": 14,
+      "stime": 0,
+      "threads": 236
+    },
+    "518153": {
+      "comm": "kline-fetch-27",
+      "utime": 13,
+      "stime": 0,
+      "threads": 236
+    },
+    "518154": {
+      "comm": "kline-fetch-28",
+      "utime": 13,
+      "stime": 0,
+      "threads": 236
+    },
+    "518155": {
+      "comm": "kline-fetch-29",
+      "utime": 13,
+      "stime": 0,
+      "threads": 236
+    },
+    "518156": {
+      "comm": "kline-fetch-30",
+      "utime": 12,
+      "stime": 0,
+      "threads": 236
+    },
+    "518157": {
+      "comm": "kline-fetch-31",
+      "utime": 13,
+      "stime": 0,
+      "threads": 236
+    },
+    "518158": {
+      "comm": "kline-fetch-32",
+      "utime": 13,
+      "stime": 0,
+      "threads": 236
+    },
+    "518172": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518209": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518223": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518224": {
+      "comm": "OkHttp TaskRunn",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518226": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518227": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518228": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518229": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518230": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518231": {
+      "comm": "http-nio-1888-e",
+      "utime": 3,
+      "stime": 0,
+      "threads": 236
+    },
+    "518232": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518233": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518234": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518235": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518236": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518237": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518238": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 1,
+      "threads": 236
+    },
+    "518239": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518240": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518241": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518242": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518243": {
+      "comm": "http-nio-1888-e",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "518244": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518245": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518246": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518247": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518248": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518249": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518250": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518251": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518252": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518253": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518254": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518255": {
+      "comm": "http-nio-1888-e",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "518256": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518257": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518258": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518259": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518260": {
+      "comm": "http-nio-1888-e",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "518261": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518262": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518263": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518264": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518265": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518266": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518267": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518268": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518269": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518270": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518271": {
+      "comm": "http-nio-1888-e",
+      "utime": 2,
+      "stime": 0,
+      "threads": 236
+    },
+    "518272": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518273": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518274": {
+      "comm": "http-nio-1888-e",
+      "utime": 0,
+      "stime": 0,
+      "threads": 236
+    },
+    "518275": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518276": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    },
+    "518277": {
+      "comm": "http-nio-1888-e",
+      "utime": 1,
+      "stime": 0,
+      "threads": 236
+    }
+  },
+  "metrics_before": "jvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"Compressed Class Space\",} 7731016.0\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'non-profiled nmethods'\",} 1.1888256E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'non-nmethods'\",} 1799936.0\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Survivor Space\",} 2.359296E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Eden Space\",} 9.32184064E8\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Old Gen\",} 6.05422304E8\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"Metaspace\",} 6.858136E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'profiled nmethods'\",} 6000768.0\nprocess_uptime_seconds{application=\"kline-proxy\",} 3268.93\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 170.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 4.202\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 1.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 0.062\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 18.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 0.44\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 1.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 0.038\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 2.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 0.075\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 0.0\nwebsocket_kline_ingress_received_total{closed=\"true\",} 0.0\nwebsocket_kline_ingress_received_total{closed=\"false\",} 1167013.0\nwebsocket_kline_ingress_processed_total{closed=\"true\",} 0.0\nwebsocket_kline_ingress_processed_total{closed=\"false\",} 1167013.0\nwebsocket_kline_ingress_coalesced_total{reason=\"superseded\",} 0.0\nwebsocket_kline_ingress_coalesced_total{reason=\"stale\",} 0.0\nwebsocket_kline_ingress_queue{closed=\"true\",} 0.0\nwebsocket_kline_ingress_queue{closed=\"false\",} 0.0\nwebsocket_kline_ingress_failures_total 0.0\nwebsocket_kline_ingress_backpressure_total 0.0\nwebsocket_kline_ingress_backpressure_seconds_total 0.0\nwebsocket_kline_ingress_active_workers 0.0\nsystem_cpu_usage{application=\"kline-proxy\",} 0.05100502512562814\nprocess_cpu_usage{application=\"kline-proxy\",} 0.035175879396984924",
+  "metrics_after": "jvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"Compressed Class Space\",} 7784712.0\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'non-profiled nmethods'\",} 1.3301248E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'non-nmethods'\",} 1809792.0\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Survivor Space\",} 2.359296E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Eden Space\",} 1.133510656E9\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"heap\",id=\"G1 Old Gen\",} 6.1171376E8\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"Metaspace\",} 6.8983616E7\njvm_memory_used_bytes{application=\"kline-proxy\",area=\"nonheap\",id=\"CodeHeap 'profiled nmethods'\",} 8323328.0\nprocess_uptime_seconds{application=\"kline-proxy\",} 3285.987\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 170.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 4.202\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 1.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 0.062\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 18.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 0.44\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 1.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 0.038\njvm_gc_pause_seconds_count{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 2.0\njvm_gc_pause_seconds_sum{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 0.075\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Evacuation Pause\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"Metadata GC Threshold\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"G1 Humongous Allocation\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"CodeCache GC Threshold\",gc=\"G1 Young Generation\",} 0.0\njvm_gc_pause_seconds_max{action=\"end of minor GC\",application=\"kline-proxy\",cause=\"GCLocker Initiated GC\",gc=\"G1 Young Generation\",} 0.0\nwebsocket_kline_ingress_received_total{closed=\"true\",} 1208.0\nwebsocket_kline_ingress_received_total{closed=\"false\",} 1175793.0\nwebsocket_kline_ingress_processed_total{closed=\"true\",} 1208.0\nwebsocket_kline_ingress_processed_total{closed=\"false\",} 1175793.0\nwebsocket_kline_ingress_coalesced_total{reason=\"superseded\",} 0.0\nwebsocket_kline_ingress_coalesced_total{reason=\"stale\",} 0.0\nwebsocket_kline_ingress_queue{closed=\"true\",} 0.0\nwebsocket_kline_ingress_queue{closed=\"false\",} 0.0\nwebsocket_kline_ingress_failures_total 0.0\nwebsocket_kline_ingress_backpressure_total 0.0\nwebsocket_kline_ingress_backpressure_seconds_total 0.0\nwebsocket_kline_ingress_active_workers 0.0\nsystem_cpu_usage{application=\"kline-proxy\",} 0.25578669791971875\nprocess_cpu_usage{application=\"kline-proxy\",} 0.2179900380896572",
+  "clock_samples": [
+    {
+      "rtt_ms": 8.33154296875,
+      "offset_ms": -7.268310546875
+    },
+    {
+      "rtt_ms": 1.201171875,
+      "offset_ms": -7.14892578125
+    },
+    {
+      "rtt_ms": 1.099609375,
+      "offset_ms": -7.416015625
+    },
+    {
+      "rtt_ms": 1.01025390625,
+      "offset_ms": -7.602294921875
+    },
+    {
+      "rtt_ms": 1.02197265625,
+      "offset_ms": -7.732666015625
+    }
+  ],
+  "probe_clock_offset_ms": -7.602294921875,
+  "http_probes": [
+    {
+      "label": "loopback-all",
+      "http_status": 200,
+      "request_offset_ms": 20.158935546875,
+      "first_headers_offset_ms": 239.221230546875,
+      "body_received_offset_ms": 242.069797546875,
+      "duration_ms": 221.910862,
+      "bytes": 186701,
+      "finalized": true,
+      "pending": [],
+      "waited_ms": 152,
+      "not_trading": [],
+      "symbols": 718,
+      "wrong_last_open_times": []
+    },
+    {
+      "label": "loopback-six",
+      "http_status": 200,
+      "request_offset_ms": 21.506103515625,
+      "first_headers_offset_ms": 187.672629515625,
+      "body_received_offset_ms": 187.855607515625,
+      "duration_ms": 166.349504,
+      "bytes": 1754,
+      "finalized": true,
+      "pending": [],
+      "waited_ms": 161,
+      "not_trading": [],
+      "symbols": 6,
+      "wrong_last_open_times": []
+    }
+  ],
+  "closed_bar_logs": [
+    "2026-09-13T18:00:00.228Z  INFO 517468 --- [kline-proxy] [handler-kline-0] c.z.q.k.monitor.ClosedBarArrivalTracker  : CLOSED_BAR_SETTLED interval=1h boundary=1789322400000 expected=718 arrived=718 first_ms=7 p50_ms=157 p90_ms=180 max_ms=200 last=SMHUSDT not_trading=0 not_trading_symbols=[] ev_n=718 ev_first_ms=1 ev_p50_ms=108 ev_p90_ms=108 ev_max_ms=108 service=binanceFuture",
+    "2026-09-13T18:00:00.233Z  INFO 517468 --- [kline-proxy] [handler-kline-1] c.z.q.k.monitor.ClosedBarArrivalTracker  : CLOSED_BAR_SETTLED interval=1h boundary=1789322400000 expected=490 arrived=490 first_ms=19 p50_ms=82 p90_ms=162 max_ms=178 last=JASMYUSDT not_trading=0 not_trading_symbols=[] ev_n=490 ev_first_ms=33 ev_p50_ms=65 ev_p90_ms=113 ev_max_ms=115 service=binanceSpot",
+    "2026-09-13T18:00:34.066Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY service=binanceFuture interval=1h boundary=1789322400000 n=718 ev_n=718 overflow=0 flush_offset_ms=34015 event_offset_ms_p50=108.0 event_offset_ms_p90=108.0 event_offset_ms_max=108.0 event_to_receive_ms_p50=15.0 event_to_receive_ms_p90=33.0 event_to_receive_ms_max=37.0 receive_offset_ms_p50=123.0 receive_offset_ms_p90=141.0 receive_offset_ms_max=145.0 frame_to_enqueue_ms_p50=0.01 frame_to_enqueue_ms_p90=0.027 frame_to_enqueue_ms_max=9.192 queue_ms_p50=33.503 queue_ms_p90=47.328 queue_ms_max=63.344 json_ms_p50=0.006 json_ms_p90=0.015 json_ms_max=10.141 dispatch_ms_p50=0.014 dispatch_ms_p90=0.03 dispatch_ms_max=15.821 decode_ms_p50=0.009 decode_ms_p90=0.017 decode_ms_max=4.236 cache_ms_p50=0.006 cache_ms_p90=0.013 cache_ms_max=2.896 finalize_ms_p50=0.009 finalize_ms_p90=0.019 finalize_ms_max=10.079 settle_ms_p50=0.003 settle_ms_p90=0.005 settle_ms_max=25.467 monitor_ms_p50=0.003 monitor_ms_p90=0.007 monitor_ms_max=7.086 processing_ms_p50=0.05 processing_ms_p90=0.115 processing_ms_max=26.017 ready_offset_ms_p50=156.955 ready_offset_ms_p90=179.602 ready_offset_ms_max=200.545 done_offset_ms_p50=156.96 done_offset_ms_p90=179.612 done_offset_ms_max=221.654 clock_offset_ms_p50=-7.0 clock_offset_ms_p90=-7.0 clock_offset_ms_max=-7.0 clock_sample_span_ms_p50=0.0 clock_sample_span_ms_p90=0.0 clock_sample_span_ms_max=0.0 queued_at_receive_p50=379.0 queued_at_receive_p90=694.0 queued_at_receive_max=734.0 queued_at_start_p50=445.0 queued_at_start_p90=698.0 queued_at_start_max=736.0 active_threads_p50=4.0 active_threads_p90=4.0 active_threads_max=4.0 pool_size_p50=4.0 pool_size_p90=4.0 pool_size_max=4.0 dropped_total_p50=0.0 dropped_total_p90=0.0 dropped_total_max=0.0",
+    "2026-09-13T18:00:34.069Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-1 n=74 receive_offset_ms_p50=125.0 receive_offset_ms_max=128.0 queue_ms_p50=42.787 queue_ms_max=63.344 ready_offset_ms_p50=166.845 ready_offset_ms_max=189.641 queued_at_receive_p50=405.0 queued_at_receive_max=572.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.069Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-10 n=77 receive_offset_ms_p50=131.0 receive_offset_ms_max=141.0 queue_ms_p50=32.374 queue_ms_max=42.354 ready_offset_ms_p50=163.429 ready_offset_ms_max=183.589 queued_at_receive_p50=600.0 queued_at_receive_max=714.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.072Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-2 n=75 receive_offset_ms_p50=144.0 receive_offset_ms_max=145.0 queue_ms_p50=38.64 queue_ms_max=55.501 ready_offset_ms_p50=183.506 ready_offset_ms_max=200.545 queued_at_receive_p50=707.0 queued_at_receive_max=734.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.077Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-3 n=67 receive_offset_ms_p50=117.0 receive_offset_ms_max=123.0 queue_ms_p50=31.703 queue_ms_max=35.993 ready_offset_ms_p50=146.664 ready_offset_ms_max=157.077 queued_at_receive_p50=179.0 queued_at_receive_max=336.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.077Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-4 n=58 receive_offset_ms_p50=118.0 receive_offset_ms_max=127.0 queue_ms_p50=25.162 queue_ms_max=35.584 ready_offset_ms_p50=143.184 ready_offset_ms_max=161.257 queued_at_receive_p50=216.0 queued_at_receive_max=534.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.077Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-5 n=46 receive_offset_ms_p50=120.0 receive_offset_ms_max=123.0 queue_ms_p50=34.051 queue_ms_max=40.854 ready_offset_ms_p50=153.421 ready_offset_ms_max=163.912 queued_at_receive_p50=252.0 queued_at_receive_max=339.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.078Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-6 n=84 receive_offset_ms_p50=131.0 receive_offset_ms_max=141.0 queue_ms_p50=33.247 queue_ms_max=42.857 ready_offset_ms_p50=170.696 ready_offset_ms_max=183.512 queued_at_receive_p50=637.0 queued_at_receive_max=708.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.078Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-7 n=80 receive_offset_ms_p50=123.0 receive_offset_ms_max=126.0 queue_ms_p50=33.969 queue_ms_max=53.381 ready_offset_ms_p50=157.018 ready_offset_ms_max=178.435 queued_at_receive_p50=334.0 queued_at_receive_max=454.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.078Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-8 n=78 receive_offset_ms_p50=127.0 receive_offset_ms_max=127.0 queue_ms_p50=29.669 queue_ms_max=42.122 ready_offset_ms_p50=156.696 ready_offset_ms_max=161.494 queued_at_receive_p50=497.0 queued_at_receive_max=530.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.078Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceFuture interval=1h boundary=1789322400000 client=BinanceFutureWebSocketClient-9 n=79 receive_offset_ms_p50=123.0 receive_offset_ms_max=128.0 queue_ms_p50=43.383 queue_ms_max=61.554 ready_offset_ms_p50=166.43 ready_offset_ms_max=189.606 queued_at_receive_p50=382.0 queued_at_receive_max=556.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:34.095Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=RAREUSDT event=continuous_kline client=BinanceFutureWebSocketClient-2 received_wall_ms=1789322400152 event_offset_ms=108.0 event_to_receive_ms=37.0 receive_offset_ms=145.0 frame_to_enqueue_ms=0.005 queue_ms=55.501 json_ms=0.007 dispatch_ms=0.014 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.007 settle_ms=0.003 monitor_ms=0.001 processing_ms=0.044 ready_offset_ms=200.545 done_offset_ms=200.549 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=724.0 queued_at_start=14.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.095Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=VUSDT event=continuous_kline client=BinanceFutureWebSocketClient-2 received_wall_ms=1789322400152 event_offset_ms=108.0 event_to_receive_ms=37.0 receive_offset_ms=145.0 frame_to_enqueue_ms=0.005 queue_ms=55.486 json_ms=0.006 dispatch_ms=0.014 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.008 settle_ms=21.117 monitor_ms=0.007 processing_ms=21.162 ready_offset_ms=200.53 done_offset_ms=221.654 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=734.0 queued_at_start=10.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.095Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=PTBUSDT event=continuous_kline client=BinanceFutureWebSocketClient-2 received_wall_ms=1789322400152 event_offset_ms=108.0 event_to_receive_ms=37.0 receive_offset_ms=145.0 frame_to_enqueue_ms=0.005 queue_ms=55.475 json_ms=0.006 dispatch_ms=0.014 decode_ms=0.007 cache_ms=0.006 finalize_ms=0.009 settle_ms=0.003 monitor_ms=0.001 processing_ms=0.044 ready_offset_ms=200.521 done_offset_ms=200.524 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=727.0 queued_at_start=13.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.095Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=SMHUSDT event=continuous_kline client=BinanceFutureWebSocketClient-2 received_wall_ms=1789322400152 event_offset_ms=108.0 event_to_receive_ms=37.0 receive_offset_ms=145.0 frame_to_enqueue_ms=0.006 queue_ms=55.452 json_ms=0.006 dispatch_ms=0.013 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.007 settle_ms=0.003 monitor_ms=0.001 processing_ms=0.041 ready_offset_ms=200.496 done_offset_ms=200.499 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=733.0 queued_at_start=11.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.095Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=BUSDT event=continuous_kline client=BinanceFutureWebSocketClient-2 received_wall_ms=1789322400152 event_offset_ms=108.0 event_to_receive_ms=37.0 receive_offset_ms=145.0 frame_to_enqueue_ms=0.006 queue_ms=55.418 json_ms=0.006 dispatch_ms=0.013 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.007 settle_ms=0.003 monitor_ms=0.001 processing_ms=0.041 ready_offset_ms=200.462 done_offset_ms=200.465 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=733.0 queued_at_start=12.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.096Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=LSKUSDT event=continuous_kline client=BinanceFutureWebSocketClient-8 received_wall_ms=1789322400013 event_offset_ms=1.0 event_to_receive_ms=5.0 receive_offset_ms=6.0 frame_to_enqueue_ms=0.245 queue_ms=0.283 json_ms=0.088 dispatch_ms=0.225 decode_ms=0.139 cache_ms=0.077 finalize_ms=0.005 settle_ms=25.467 monitor_ms=0.017 processing_ms=26.017 ready_offset_ms=7.061 done_offset_ms=32.545 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=0.0 queued_at_start=0.0 active_threads=1.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.096Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=AAOIUSDT event=continuous_kline client=BinanceFutureWebSocketClient-4 received_wall_ms=1789322400126 event_offset_ms=108.0 event_to_receive_ms=11.0 receive_offset_ms=119.0 frame_to_enqueue_ms=0.059 queue_ms=17.389 json_ms=0.01 dispatch_ms=15.821 decode_ms=0.035 cache_ms=0.015 finalize_ms=0.072 settle_ms=0.008 monitor_ms=0.011 processing_ms=15.972 ready_offset_ms=152.403 done_offset_ms=152.421 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=227.0 queued_at_start=650.0 active_threads=4.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.096Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=POPMARTUSDT event=continuous_kline client=BinanceFutureWebSocketClient-9 received_wall_ms=1789322400130 event_offset_ms=108.0 event_to_receive_ms=15.0 receive_offset_ms=123.0 frame_to_enqueue_ms=0.006 queue_ms=26.587 json_ms=0.006 dispatch_ms=12.046 decode_ms=0.009 cache_ms=0.017 finalize_ms=0.008 settle_ms=1.224 monitor_ms=0.003 processing_ms=13.313 ready_offset_ms=161.679 done_offset_ms=162.907 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=371.0 queued_at_start=648.0 active_threads=3.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:34.096Z  INFO 517468 --- [kline-proxy] [ symbols-sync-4] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceFuture interval=1h boundary=1789322400000 symbol=GRVTUSDT event=continuous_kline client=BinanceFutureWebSocketClient-7 received_wall_ms=1789322400017 event_offset_ms=6.0 event_to_receive_ms=4.0 receive_offset_ms=10.0 frame_to_enqueue_ms=0.06 queue_ms=0.872 json_ms=0.065 dispatch_ms=0.039 decode_ms=0.034 cache_ms=0.033 finalize_ms=0.003 settle_ms=11.81 monitor_ms=0.014 processing_ms=11.998 ready_offset_ms=11.106 done_offset_ms=22.93 clock_offset_ms=-7.0 clock_sample_span_ms=0.0 queued_at_receive=0.0 queued_at_start=2.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.020Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY service=binanceSpot interval=1h boundary=1789322400000 n=490 ev_n=490 overflow=0 flush_offset_ms=34992 event_offset_ms_p50=65.0 event_offset_ms_p90=113.0 event_offset_ms_max=115.0 event_to_receive_ms_p50=7.0 event_to_receive_ms_p90=21.0 event_to_receive_ms_max=38.0 receive_offset_ms_p50=80.0 receive_offset_ms_p90=124.0 receive_offset_ms_max=130.0 frame_to_enqueue_ms_p50=0.02 frame_to_enqueue_ms_p90=0.049 frame_to_enqueue_ms_max=1.445 queue_ms_p50=6.51 queue_ms_p90=43.504 queue_ms_max=63.854 json_ms_p50=0.013 json_ms_p90=0.028 json_ms_max=13.817 dispatch_ms_p50=0.024 dispatch_ms_p90=0.042 dispatch_ms_max=22.037 decode_ms_p50=0.014 decode_ms_p90=0.026 decode_ms_max=9.09 cache_ms_p50=0.014 cache_ms_p90=0.024 cache_ms_max=4.858 finalize_ms_p50=0.001 finalize_ms_p90=0.001 finalize_ms_max=0.016 settle_ms_p50=0.004 settle_ms_p90=0.008 settle_ms_max=34.875 monitor_ms_p50=0.006 monitor_ms_p90=0.011 monitor_ms_max=3.587 processing_ms_p50=0.08 processing_ms_p90=0.17 processing_ms_max=34.911 ready_offset_ms_p50=81.663 ready_offset_ms_p90=161.673 ready_offset_ms_max=177.984 done_offset_ms_p50=81.673 done_offset_ms_p90=161.677 done_offset_ms_max=212.866 clock_offset_ms_p50=-21.0 clock_offset_ms_p90=-21.0 clock_offset_ms_max=-21.0 clock_sample_span_ms_p50=0.0 clock_sample_span_ms_p90=0.0 clock_sample_span_ms_max=0.0 queued_at_receive_p50=27.0 queued_at_receive_p90=651.0 queued_at_receive_max=711.0 queued_at_start_p50=34.0 queued_at_start_p90=492.0 queued_at_start_max=734.0 active_threads_p50=3.0 active_threads_p90=4.0 active_threads_max=4.0 pool_size_p50=4.0 pool_size_p90=4.0 pool_size_max=4.0 dropped_total_p50=0.0 dropped_total_p90=0.0 dropped_total_max=0.0",
+    "2026-09-13T18:00:35.020Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-1 n=81 receive_offset_ms_p50=79.0 receive_offset_ms_max=124.0 queue_ms_p50=5.328 queue_ms_max=59.59 ready_offset_ms_p50=80.48 ready_offset_ms_max=177.313 queued_at_receive_p50=36.0 queued_at_receive_max=654.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.021Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-2 n=60 receive_offset_ms_p50=82.0 receive_offset_ms_max=126.0 queue_ms_p50=6.136 queue_ms_max=59.679 ready_offset_ms_p50=84.018 ready_offset_ms_max=176.81 queued_at_receive_p50=32.0 queued_at_receive_max=654.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.021Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-3 n=74 receive_offset_ms_p50=78.0 receive_offset_ms_max=127.0 queue_ms_p50=4.202 queue_ms_max=63.854 ready_offset_ms_p50=81.106 ready_offset_ms_max=177.654 queued_at_receive_p50=14.0 queued_at_receive_max=689.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.022Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-4 n=63 receive_offset_ms_p50=64.0 receive_offset_ms_max=116.0 queue_ms_p50=7.213 queue_ms_max=63.686 ready_offset_ms_p50=65.077 ready_offset_ms_max=176.72 queued_at_receive_p50=44.0 queued_at_receive_max=579.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.022Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-5 n=67 receive_offset_ms_p50=86.0 receive_offset_ms_max=126.0 queue_ms_p50=9.417 queue_ms_max=59.413 ready_offset_ms_p50=106.655 ready_offset_ms_max=176.975 queued_at_receive_p50=42.0 queued_at_receive_max=653.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.022Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-6 n=74 receive_offset_ms_p50=68.0 receive_offset_ms_max=127.0 queue_ms_p50=5.652 queue_ms_max=63.786 ready_offset_ms_p50=68.429 ready_offset_ms_max=177.818 queued_at_receive_p50=13.0 queued_at_receive_max=677.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.023Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_CLIENT service=binanceSpot interval=1h boundary=1789322400000 client=BinanceSpotWebSocketClient-7 n=71 receive_offset_ms_p50=83.0 receive_offset_ms_max=130.0 queue_ms_p50=7.879 queue_ms_max=53.09 ready_offset_ms_p50=87.671 ready_offset_ms_max=177.984 queued_at_receive_p50=24.0 queued_at_receive_max=711.0 pool_size_p50=4.0 pool_size_max=4.0",
+    "2026-09-13T18:00:35.023Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=JASMYUSDT event=kline client=BinanceSpotWebSocketClient-7 received_wall_ms=1789322400151 event_offset_ms=114.0 event_to_receive_ms=16.0 receive_offset_ms=130.0 frame_to_enqueue_ms=0.008 queue_ms=47.946 json_ms=0.005 dispatch_ms=0.012 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.0 settle_ms=34.875 monitor_ms=0.007 processing_ms=34.911 ready_offset_ms=177.984 done_offset_ms=212.866 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=686.0 queued_at_start=40.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=BNSOLUSDT event=kline client=BinanceSpotWebSocketClient-6 received_wall_ms=1789322400148 event_offset_ms=114.0 event_to_receive_ms=13.0 receive_offset_ms=127.0 frame_to_enqueue_ms=0.011 queue_ms=50.778 json_ms=0.005 dispatch_ms=0.012 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.0 settle_ms=0.002 monitor_ms=0.002 processing_ms=0.034 ready_offset_ms=177.818 done_offset_ms=177.822 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=666.0 queued_at_start=46.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=CELRUSDT event=kline client=BinanceSpotWebSocketClient-3 received_wall_ms=1789322400148 event_offset_ms=115.0 event_to_receive_ms=12.0 receive_offset_ms=127.0 frame_to_enqueue_ms=0.027 queue_ms=50.598 json_ms=0.005 dispatch_ms=0.011 decode_ms=0.008 cache_ms=0.005 finalize_ms=0.0 settle_ms=0.002 monitor_ms=0.003 processing_ms=0.034 ready_offset_ms=177.654 done_offset_ms=177.659 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=686.0 queued_at_start=45.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=CHIPUSDT event=kline client=BinanceSpotWebSocketClient-3 received_wall_ms=1789322400148 event_offset_ms=115.0 event_to_receive_ms=12.0 receive_offset_ms=127.0 frame_to_enqueue_ms=0.009 queue_ms=50.594 json_ms=0.005 dispatch_ms=0.012 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.0 settle_ms=0.002 monitor_ms=0.002 processing_ms=0.034 ready_offset_ms=177.633 done_offset_ms=177.637 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=689.0 queued_at_start=44.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=ZBTUSDT event=kline client=BinanceSpotWebSocketClient-7 received_wall_ms=1789322400148 event_offset_ms=110.0 event_to_receive_ms=17.0 receive_offset_ms=127.0 frame_to_enqueue_ms=0.043 queue_ms=50.515 json_ms=0.005 dispatch_ms=0.012 decode_ms=0.007 cache_ms=0.005 finalize_ms=0.0 settle_ms=0.002 monitor_ms=0.003 processing_ms=0.034 ready_offset_ms=177.588 done_offset_ms=177.593 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=700.0 queued_at_start=43.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=GUNUSDT event=kline client=BinanceSpotWebSocketClient-5 received_wall_ms=1789322400106 event_offset_ms=67.0 event_to_receive_ms=18.0 receive_offset_ms=85.0 frame_to_enqueue_ms=0.02 queue_ms=3.315 json_ms=0.012 dispatch_ms=22.037 decode_ms=0.017 cache_ms=0.015 finalize_ms=0.001 settle_ms=0.006 monitor_ms=0.008 processing_ms=22.095 ready_offset_ms=110.416 done_offset_ms=110.429 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=30.0 queued_at_start=24.0 active_threads=4.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=1000CHEEMSUSDT event=kline client=BinanceSpotWebSocketClient-2 received_wall_ms=1789322400106 event_offset_ms=66.0 event_to_receive_ms=19.0 receive_offset_ms=85.0 frame_to_enqueue_ms=0.025 queue_ms=6.136 json_ms=0.025 dispatch_ms=18.045 decode_ms=0.039 cache_ms=0.049 finalize_ms=0.002 settle_ms=0.01 monitor_ms=0.014 processing_ms=18.185 ready_offset_ms=109.322 done_offset_ms=109.347 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=34.0 queued_at_start=50.0 active_threads=4.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=MAVUSDT event=kline client=BinanceSpotWebSocketClient-7 received_wall_ms=1789322400110 event_offset_ms=68.0 event_to_receive_ms=21.0 receive_offset_ms=89.0 frame_to_enqueue_ms=0.014 queue_ms=21.298 json_ms=13.817 dispatch_ms=0.07 decode_ms=0.019 cache_ms=0.013 finalize_ms=0.002 settle_ms=0.007 monitor_ms=0.007 processing_ms=13.935 ready_offset_ms=124.234 done_offset_ms=124.247 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=37.0 queued_at_start=388.0 active_threads=4.0 pool_size=4.0 dropped_total=0.0",
+    "2026-09-13T18:00:35.024Z  INFO 517468 --- [kline-proxy] [ symbols-sync-1] c.z.q.k.m.ClosedBarLatencyRecorder       : CLOSED_BAR_LATENCY_DETAIL service=binanceSpot interval=1h boundary=1789322400000 symbol=PYPLBUSDT event=kline client=BinanceSpotWebSocketClient-3 received_wall_ms=1789322400039 event_offset_ms=33.0 event_to_receive_ms=-15.0 receive_offset_ms=18.0 frame_to_enqueue_ms=0.075 queue_ms=2.272 json_ms=0.015 dispatch_ms=0.022 decode_ms=0.014 cache_ms=0.018 finalize_ms=0.001 settle_ms=9.925 monitor_ms=0.008 processing_ms=10.003 ready_offset_ms=20.417 done_offset_ms=30.35 clock_offset_ms=-21.0 clock_sample_span_ms=0.0 queued_at_receive=11.0 queued_at_start=7.0 active_threads=2.0 pool_size=4.0 dropped_total=0.0"
+  ],
+  "bulk_logs": [
+    "2026-09-13T18:00:00.194Z  INFO 517468 --- [kline-proxy] [nio-1888-exec-9] c.z.q.k.s.impl.AbstractKlineService      : BULK_FINAL_WAIT interval=1h boundary=1789322400000 requested=6 pending_initial=6 waited_ms=161 pending_after=0 not_trading=[]",
+    "2026-09-13T18:00:00.214Z  INFO 517468 --- [kline-proxy] [nio-1888-exec-8] c.z.q.k.s.impl.AbstractKlineService      : BULK_FINAL_WAIT interval=1h boundary=1789322400000 requested=718 pending_initial=707 waited_ms=152 pending_after=0 not_trading=[]"
+  ],
+  "gc_logs": [
+    "[2026-09-13T18:00:00.690+0000][3274.616s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 47467275574 ns, Reaching safepoint: 48934 ns, Cleanup: 188743 ns, At safepoint: 31911 ns, Total: 269588 ns",
+    "[2026-09-13T18:00:01.870+0000][3275.796s][info][safepoint   ] Safepoint \"ICBufferFull\", Time since last: 1179992387 ns, Reaching safepoint: 49594 ns, Cleanup: 144742 ns, At safepoint: 26045 ns, Total: 220381 ns",
+    "[2026-09-13T18:00:02.870+0000][3276.797s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000142527 ns, Reaching safepoint: 66918 ns, Cleanup: 88052 ns, At safepoint: 27238 ns, Total: 182208 ns",
+    "[2026-09-13T18:00:03.871+0000][3277.797s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000186668 ns, Reaching safepoint: 67301 ns, Cleanup: 42124 ns, At safepoint: 12332 ns, Total: 121757 ns",
+    "[2026-09-13T18:00:04.871+0000][3278.797s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000195855 ns, Reaching safepoint: 38879 ns, Cleanup: 32539 ns, At safepoint: 6229 ns, Total: 77647 ns",
+    "[2026-09-13T18:00:05.871+0000][3279.797s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000120741 ns, Reaching safepoint: 42365 ns, Cleanup: 13091 ns, At safepoint: 10683 ns, Total: 66139 ns",
+    "[2026-09-13T18:00:07.871+0000][3281.798s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 2000226495 ns, Reaching safepoint: 40878 ns, Cleanup: 12261 ns, At safepoint: 5829 ns, Total: 58968 ns",
+    "[2026-09-13T18:00:09.872+0000][3283.798s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 2000260852 ns, Reaching safepoint: 37931 ns, Cleanup: 18150 ns, At safepoint: 4980 ns, Total: 61061 ns",
+    "[2026-09-13T18:00:11.872+0000][3285.798s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 2000216540 ns, Reaching safepoint: 51164 ns, Cleanup: 14903 ns, At safepoint: 9696 ns, Total: 75763 ns",
+    "[2026-09-13T18:00:12.872+0000][3286.798s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000144354 ns, Reaching safepoint: 36672 ns, Cleanup: 24171 ns, At safepoint: 5196 ns, Total: 66039 ns",
+    "[2026-09-13T18:00:13.307+0000][3287.233s][info][gc,start    ] GC(241) Pause Young (Prepare Mixed) (G1 Evacuation Pause)",
+    "[2026-09-13T18:00:13.307+0000][3287.233s][info][gc,task     ] GC(241) Using 2 workers of 2 for evacuation",
+    "[2026-09-13T18:00:13.340+0000][3287.266s][info][gc,phases   ] GC(241)   Pre Evacuate Collection Set: 0.6ms",
+    "[2026-09-13T18:00:13.340+0000][3287.266s][info][gc,phases   ] GC(241)   Merge Heap Roots: 0.4ms",
+    "[2026-09-13T18:00:13.340+0000][3287.266s][info][gc,phases   ] GC(241)   Evacuate Collection Set: 31.2ms",
+    "[2026-09-13T18:00:13.340+0000][3287.266s][info][gc,phases   ] GC(241)   Post Evacuate Collection Set: 1.4ms",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,phases   ] GC(241)   Other: 0.1ms",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,heap     ] GC(241) Eden regions: 1093->0(1083)",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,heap     ] GC(241) Survivor regions: 23->33(140)",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,heap     ] GC(241) Old regions: 510->511",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,heap     ] GC(241) Humongous regions: 82->46",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,metaspace] GC(241) Metaspace: 67367K(68416K)->67367K(68416K) NonClass: 59765K(60224K)->59765K(60224K) Class: 7602K(8192K)->7602K(8192K)",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc          ] GC(241) Pause Young (Prepare Mixed) (G1 Evacuation Pause) 1706M->588M(1860M) 33.792ms",
+    "[2026-09-13T18:00:13.340+0000][3287.267s][info][gc,cpu      ] GC(241) User=0.07s Sys=0.00s Real=0.03s",
+    "[2026-09-13T18:00:13.341+0000][3287.267s][info][safepoint   ] Safepoint \"G1CollectForAllocation\", Time since last: 434236534 ns, Reaching safepoint: 48928 ns, Cleanup: 6333 ns, At safepoint: 34707929 ns, Total: 34763190 ns",
+    "[2026-09-13T18:00:14.341+0000][3288.268s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000098363 ns, Reaching safepoint: 30371 ns, Cleanup: 9434 ns, At safepoint: 4261 ns, Total: 44066 ns",
+    "[2026-09-13T18:00:15.342+0000][3289.268s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000109868 ns, Reaching safepoint: 34603 ns, Cleanup: 9131 ns, At safepoint: 4564 ns, Total: 48298 ns",
+    "[2026-09-13T18:00:16.342+0000][3290.268s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000147291 ns, Reaching safepoint: 31575 ns, Cleanup: 12325 ns, At safepoint: 4279 ns, Total: 48179 ns",
+    "[2026-09-13T18:00:19.342+0000][3293.268s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 3000332486 ns, Reaching safepoint: 34021 ns, Cleanup: 12102 ns, At safepoint: 4929 ns, Total: 51052 ns",
+    "[2026-09-13T18:00:26.343+0000][3300.269s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 7000528820 ns, Reaching safepoint: 47639 ns, Cleanup: 11828 ns, At safepoint: 7884 ns, Total: 67351 ns",
+    "[2026-09-13T18:00:30.718+0000][3304.644s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 4375205057 ns, Reaching safepoint: 43614 ns, Cleanup: 16063 ns, At safepoint: 5212 ns, Total: 64889 ns",
+    "[2026-09-13T18:00:34.718+0000][3308.645s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 4000418920 ns, Reaching safepoint: 28944 ns, Cleanup: 43704 ns, At safepoint: 4736 ns, Total: 77384 ns",
+    "[2026-09-13T18:00:35.719+0000][3309.645s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000110849 ns, Reaching safepoint: 41454 ns, Cleanup: 13181 ns, At safepoint: 15663 ns, Total: 70298 ns",
+    "[2026-09-13T18:00:36.719+0000][3310.645s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 1000125163 ns, Reaching safepoint: 35484 ns, Cleanup: 11315 ns, At safepoint: 4335 ns, Total: 51134 ns",
+    "[2026-09-13T18:00:38.719+0000][3312.645s][info][safepoint   ] Safepoint \"Cleanup\", Time since last: 2000274648 ns, Reaching safepoint: 35443 ns, Cleanup: 12810 ns, At safepoint: 5339 ns, Total: 53592 ns"
+  ],
+  "systemd": "MainPID=517468\nNRestarts=0\nActiveState=active\n"
+}

@@ -1,0 +1,485 @@
+{
+  "begin_ms": 1789322440000,
+  "end_ms": 1789322490000,
+  "event_counts": {
+    "jdk.ObjectAllocationSample": 4248,
+    "jdk.ThreadPark": 10917,
+    "jdk.ExecutionSample": 625,
+    "jdk.FileWrite": 3674,
+    "jdk.Compilation": 1,
+    "jdk.GCPhasePause": 5,
+    "jdk.GarbageCollection": 4
+  },
+  "java_execution_samples": {
+    "total": 625,
+    "categories": {
+      "kline_workers": 43,
+      "other": 8,
+      "websocket_receive": 21,
+      "http": 5,
+      "persistence": 548
+    },
+    "threads": [
+      [
+        "symbols-sync-2",
+        320
+      ],
+      [
+        "symbols-sync-4",
+        228
+      ],
+      [
+        "websocket-message-handler-kline-2",
+        12
+      ],
+      [
+        "websocket-message-handler-kline-1",
+        11
+      ],
+      [
+        "websocket-message-handler-kline-3",
+        10
+      ],
+      [
+        "websocket-message-handler-kline-0",
+        10
+      ],
+      [
+        "websocket-control-handler-2",
+        5
+      ],
+      [
+        "BinanceFutureWebSocketClient-8-1",
+        4
+      ],
+      [
+        "BinanceFutureWebSocketClient-4-1",
+        4
+      ],
+      [
+        "BinanceFutureWebSocketClient-9-1",
+        4
+      ],
+      [
+        "BinanceFutureWebSocketClient-5-1",
+        2
+      ],
+      [
+        "symbols-sync-1",
+        2
+      ],
+      [
+        "BinanceFutureWebSocketClient-1-1",
+        2
+      ],
+      [
+        "BinanceFutureWebSocketClient-7-1",
+        2
+      ],
+      [
+        "websocket-control-handler-1",
+        1
+      ],
+      [
+        "http-nio-1888-exec-37",
+        1
+      ],
+      [
+        "http-nio-1888-exec-50",
+        1
+      ],
+      [
+        "http-nio-1888-exec-10",
+        1
+      ],
+      [
+        "BinanceFutureWebSocketClient-2-1",
+        1
+      ],
+      [
+        "http-nio-1888-exec-51",
+        1
+      ],
+      [
+        "http-nio-1888-exec-24",
+        1
+      ],
+      [
+        "BinanceFutureWebSocketClient-3-1",
+        1
+      ],
+      [
+        "BinanceFutureWebSocketClient-6-1",
+        1
+      ]
+    ],
+    "top_leaves": [
+      [
+        "java.lang.AbstractStringBuilder.ensureCapacityInternal",
+        184
+      ],
+      [
+        "java.text.DecimalFormat.subformatNumber",
+        97
+      ],
+      [
+        "jdk.internal.math.FloatingDecimal$BinaryToASCIIBuffer.dtoa",
+        68
+      ],
+      [
+        "java.text.DecimalFormat.format",
+        52
+      ],
+      [
+        "java.text.DigitList.set",
+        29
+      ],
+      [
+        "java.lang.ThreadLocal$ThreadLocalMap.getEntry",
+        29
+      ],
+      [
+        "java.text.DecimalFormat.subformat",
+        21
+      ],
+      [
+        "java.lang.invoke.Invokers$Holder.invokeExact_MT",
+        11
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.JsonKlinePersistenceStore$$Lambda+0x00007f994055e860.296765560.test",
+        7
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.JsonKlinePersistenceStore.dayString",
+        6
+      ],
+      [
+        "com.fasterxml.jackson.core.sym.CharsToNameCanonicalizer.findSymbol",
+        5
+      ],
+      [
+        "java.lang.Long.equals",
+        5
+      ],
+      [
+        "java.util.Arrays.fill",
+        5
+      ],
+      [
+        "java.util.concurrent.ConcurrentHashMap.putVal",
+        4
+      ],
+      [
+        "java.lang.Character.isDigit",
+        3
+      ],
+      [
+        "java.util.concurrent.ConcurrentHashMap.get",
+        3
+      ],
+      [
+        "java.util.ImmutableCollections$MapN.probe",
+        3
+      ],
+      [
+        "jdk.internal.math.FloatingDecimal.readJavaFormatString",
+        3
+      ],
+      [
+        "jdk.internal.math.FloatingDecimal$BinaryToASCIIBuffer.toJavaFormatString",
+        3
+      ],
+      [
+        "java.util.LinkedHashMap.valuesToArray",
+        3
+      ],
+      [
+        "java.lang.String.<init>",
+        3
+      ],
+      [
+        "java.lang.Integer.getChars",
+        3
+      ],
+      [
+        "jdk.internal.math.FloatingDecimal$BinaryToASCIIBuffer.developLongDigits",
+        3
+      ],
+      [
+        "com.fasterxml.jackson.databind.node.NodeCursor$ObjectCursor.nextToken",
+        2
+      ],
+      [
+        "com.fasterxml.jackson.core.sym.CharsToNameCanonicalizer$Bucket.has",
+        2
+      ],
+      [
+        "java.lang.String.hashCode",
+        2
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.doForKlineEvent",
+        2
+      ],
+      [
+        "com.fasterxml.jackson.core.json.ReaderBasedJsonParser.nextFieldName",
+        2
+      ],
+      [
+        "java.util.concurrent.ConcurrentHashMap.computeIfAbsent",
+        2
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.JsonKlinePersistenceStore$$Lambda+0x00007f994079ea60.1983859789.applyAsLong",
+        2
+      ]
+    ],
+    "application_inclusive": [
+      [
+        "com.zx.quant.klineproxy.util.ExceptionSafeRunnable.run",
+        550
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService$$Lambda+0x00007f99405e6f00.1887979637.run",
+        548
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.dumpPersistedKlineSet",
+        548
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.dumpPersistedKlineSetTracked",
+        548
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.lambda$startKlinePersistenceUpdater$36",
+        548
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.dumpPersistedKlines",
+        548
+      ],
+      [
+        "com.zx.quant.klineproxy.util.ConvertUtil$$Lambda+0x00007f9940780f68.133804251.apply",
+        501
+      ],
+      [
+        "com.zx.quant.klineproxy.util.ConvertUtil.convertToDisplayKline",
+        501
+      ],
+      [
+        "com.zx.quant.klineproxy.util.ConvertUtil.nullOrValue",
+        501
+      ],
+      [
+        "com.zx.quant.klineproxy.util.ConvertUtil.lambda$doubleToString$5",
+        501
+      ],
+      [
+        "com.zx.quant.klineproxy.util.ConvertUtil.doubleToString",
+        501
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService$$Lambda+0x00007f994079db20.703936914.apply",
+        500
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.toPersistedKlineRow",
+        500
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient.handleMessage",
+        47
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.dispatch.KlineMessageDispatcher$Shard.run",
+        43
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient$$Lambda+0x00007f99407917e0.31652390.run",
+        41
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient.lambda$onReceive$3",
+        41
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.JsonKlinePersistenceStore.dumpRows",
+        40
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService$$Lambda+0x00007f994056c000.348026124.apply",
+        35
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.lambda$getKlineEventMessageHandler$10",
+        35
+      ],
+      [
+        "com.zx.quant.klineproxy.util.Serializer.treeToValue",
+        24
+      ],
+      [
+        "com.zx.quant.klineproxy.service.stream.AbstractBinanceKlineStream.parse",
+        20
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.doForKlineEvent",
+        15
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.handler.WebSocketChannelInboundHandler.channelRead0",
+        15
+      ],
+      [
+        "com.zx.quant.klineproxy.client.ws.client.AbstractWebSocketClient.onReceive",
+        15
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.JsonKlinePersistenceStore.deduplicateAndTail",
+        14
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService$$Lambda+0x00007f994056c240.1485318803.apply",
+        13
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.lambda$getKlineMessageClassifier$11",
+        12
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.updateStreamKline",
+        10
+      ],
+      [
+        "com.zx.quant.klineproxy.service.impl.AbstractKlineService.updateStreamKlineCache",
+        10
+      ]
+    ]
+  },
+  "persistence_samples": 548,
+  "persistence_formatting_samples": 498,
+  "allocation_weight_bytes": 3450817600,
+  "allocation_classes": [
+    [
+      "[B",
+      1186096456
+    ],
+    [
+      "java.lang.String",
+      493449864
+    ],
+    [
+      "java.text.FieldPosition",
+      413230184
+    ],
+    [
+      "java.lang.StringBuffer",
+      225866184
+    ],
+    [
+      "[Ljava.lang.Object;",
+      169391784
+    ],
+    [
+      "java.lang.Double",
+      159722776
+    ],
+    [
+      "com.zx.quant.klineproxy.model.persistence.PersistedKlineRow",
+      139769816
+    ],
+    [
+      "java.util.LinkedHashMap$Entry",
+      109768896
+    ],
+    [
+      "java.text.FieldPosition$Delegate",
+      99208216
+    ],
+    [
+      "java.lang.StringBuilder",
+      67276616
+    ],
+    [
+      "[Ljava.lang.String;",
+      63877360
+    ],
+    [
+      "java.lang.Long",
+      62372624
+    ],
+    [
+      "[I",
+      22420352
+    ],
+    [
+      "[C",
+      15245024
+    ],
+    [
+      "jdk.internal.math.FDBigInteger",
+      13826840
+    ],
+    [
+      "java.time.Instant",
+      13598744
+    ],
+    [
+      "[Ljava.util.HashMap$Node;",
+      11509448
+    ],
+    [
+      "com.fasterxml.jackson.core.json.ReaderBasedJsonParser",
+      9169056
+    ],
+    [
+      "java.util.stream.Collectors$$Lambda+0x00007f9940520a68.1678782694",
+      8376392
+    ],
+    [
+      "java.time.LocalDate",
+      7842976
+    ]
+  ],
+  "persistence_allocation_weight_bytes": 3147397696,
+  "cache_write_summary": {
+    "calls": 3624,
+    "bytes": 14996529,
+    "duration_ms_sum": 58.471354
+  },
+  "cpu_load": [],
+  "gc_pauses": [
+    {
+      "at_ms": 1789322466566,
+      "duration_ms": 27.532883
+    },
+    {
+      "at_ms": 1789322484320,
+      "duration_ms": 32.243734
+    },
+    {
+      "at_ms": 1789322485045,
+      "duration_ms": 8.818563
+    },
+    {
+      "at_ms": 1789322485328,
+      "duration_ms": 0.465933
+    },
+    {
+      "at_ms": 1789322487208,
+      "duration_ms": 24.179222
+    }
+  ],
+  "monitor_entries": [],
+  "methodology": "ExecutionSample covers sampled Java stacks, not native JIT/GC CPU; allocation weights are estimates. FileWrite durations exclude other filesystem work and device durability.",
+  "cache_write_window_ms": [
+    1789322464507,
+    1789322487875.022
+  ],
+  "cache_writes_by_market": {
+    "spot": 1470,
+    "future": 2154
+  }
+}

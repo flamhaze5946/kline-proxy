@@ -1,0 +1,30 @@
+[
+  {
+    "service": "future",
+    "symbol": "BTCUSDT",
+    "unchanged_content": true,
+    "before_mtime": "2026-09-13T17:05:05.371264+00:00",
+    "current_mtime": "2026-09-13T17:15:44.918633+00:00"
+  },
+  {
+    "service": "future",
+    "symbol": "ETHUSDT",
+    "unchanged_content": true,
+    "before_mtime": "2026-09-13T17:05:06.663271+00:00",
+    "current_mtime": "2026-09-13T17:15:47.222645+00:00"
+  },
+  {
+    "service": "spot",
+    "symbol": "BTCUSDT",
+    "unchanged_content": true,
+    "before_mtime": "2026-09-13T17:05:10.119289+00:00",
+    "current_mtime": "2026-09-13T17:15:40.190608+00:00"
+  },
+  {
+    "service": "spot",
+    "symbol": "ETHUSDT",
+    "unchanged_content": true,
+    "before_mtime": "2026-09-13T17:05:11.003294+00:00",
+    "current_mtime": "2026-09-13T17:15:41.642616+00:00"
+  }
+]
