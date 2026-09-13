@@ -1,0 +1,11 @@
+{
+  "repo": "/Users/flamhaze5946/Workspace/Java/Personal/kline-proxy",
+  "commit": "1025516aa9177bc6073284a37850ac85c32589d5",
+  "java_local": "Zulu 21.0.8",
+  "runtime_limit": "macOS arm64, Zulu 21.0.8, -XX:ActiveProcessorCount=2; NOT hard CPU affinity/quota. Performance ratios are local only.",
+  "docker_attempt": "New Temurin containers remained in Created state; only these two experiment containers were removed. No Docker daemon restart or existing container changes.",
+  "jvm_heap": "-Xms1g -Xmx2g",
+  "workers": "4 core, 20 max, 4096 FIFO; overload may expand to 20. Mailbox uses 4 shards.",
+  "measurement": "12 warmup rounds, then 10 measured; process CPU includes ingress scan, workers, GC/JIT, and bulk tasks when enabled. JFR on all scenarios.",
+  "bulk_harness_revision": "Use *-bulk96-gated results; prior bulk runs used pacing loops and are excluded due to harness scheduling overhead."
+}

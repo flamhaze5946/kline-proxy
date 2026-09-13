@@ -1,0 +1,77 @@
+[
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/final-reproduction/jfr/duplicate-finals.jfr",
+    "bytes": 1932808,
+    "sha256": "44bc1dc960a0b365634b3548caf7162d1ef2ac42397c594203555846e980c9bd"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/final-reproduction/jfr/bulk96.jfr",
+    "bytes": 5996582,
+    "sha256": "72ecba17f03aa7366cd005f0ca0aaff3ceda8b13fc86f7c7888a402c4c488315"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/final-reproduction/jfr/soak.jfr",
+    "bytes": 9261398,
+    "sha256": "57e1e562f6b4e87974e26dc5bcb47d9529ca85eab777d2cf589f43ac96b04c43"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/final-reproduction/jfr/flood.jfr",
+    "bytes": 1472540,
+    "sha256": "cb6ec1da660c7b2d698a122108b3cba23c91e85ff11c0290f318ca57ed6233af"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/final-reproduction/jfr/normal.jfr",
+    "bytes": 1740761,
+    "sha256": "9496dfd33aff24685710252084042864526efc4b7ba60159f5d84567d942c92d"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-current-flood.jfr",
+    "bytes": 1548160,
+    "sha256": "20232c720cf4f3d8478416f25e398041e7a62c444a37791970718cc4b6e26a4b"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-current-bulk96.jfr",
+    "bytes": 5650228,
+    "sha256": "7a3d9b3dee6c422192fd3f8a9c172c2c078334d5ee46746f255c204101bdad75"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-baseline-normal.jfr",
+    "bytes": 1456926,
+    "sha256": "439eb339d4d4bf8d0a0a3d091b49babd02763e4d92f725595b88e97e9ce52763"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-before-targeted-bulk96.jfr",
+    "bytes": 5926112,
+    "sha256": "341242553c6af926bc831ee574bcf9ada888716b411c2d6d33801373bd60043f"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-current-normal.jfr",
+    "bytes": 1797142,
+    "sha256": "00f5b7369850ea8ab4063749ecd0935276142798d5909875f773f60dee6262fb"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/jfr/steady-baseline-bulk96.jfr",
+    "bytes": 4658094,
+    "sha256": "4e198ef44b23727e8a2be0d317d1000be088e2e42107ed9b7aeec954210cf2cb"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/release-reproduction/jfr/duplicate-finals.jfr",
+    "bytes": 1077876,
+    "sha256": "19c29e9f0fa1ff7887bf4a5d0f51f6abc6b297378e84c0d86b4ead85824a409c"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/release-reproduction/jfr/bulk96.jfr",
+    "bytes": 997484,
+    "sha256": "21f39c5878a2a23df7dfa518d61dfa96e83150bb8a1d2008a0ab4d4176d537ad"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/release-reproduction/jfr/flood.jfr",
+    "bytes": 636811,
+    "sha256": "ce2e49adac584f5e6491f55ab090b218f779f6a4b1bb89ba15835364d3c1c274"
+  },
+  {
+    "path": "/tmp/kline-proxy-optimization-20260913/release-reproduction/jfr/normal.jfr",
+    "bytes": 668064,
+    "sha256": "087ea0fe9795f45e7eba05757e425aa400ddc91b97d33d241b6931235daa3119"
+  }
+]

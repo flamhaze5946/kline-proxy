@@ -1,6 +1,7 @@
 package com.zx.quant.klineproxy.client.ws.client;
 
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
+import com.zx.quant.klineproxy.model.KlineDispatchMetadata;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import java.net.URI;
@@ -70,4 +71,6 @@ public interface WebSocketClient {
   void addMessageHandler(Function<ParsedWebSocketMessage, Boolean> messageHandler);
 
   void addMessageTopicExtractorHandler(Function<ParsedWebSocketMessage, String> messageTopicExtractor);
+
+  default void setKlineMessageClassifier(Function<String, KlineDispatchMetadata> classifier) { }
 }

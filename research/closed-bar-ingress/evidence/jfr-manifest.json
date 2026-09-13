@@ -1,0 +1,45 @@
+{
+  "local_root": "/tmp/kline-proxy-optimization-20260913",
+  "recordings": {
+    "jfr/baseline-bulk96-gated.jfr": {
+      "bytes": 1480948,
+      "sha256": "1228d6ac0fb17eef808812098b53cdf79239d5b0e4d553f52657d38fd3a46754"
+    },
+    "jfr/baseline-flood.jfr": {
+      "bytes": 957395,
+      "sha256": "4ceca5b3eef624c5f00993a505db4341808eccf88a0299538a5151066aecd0a6"
+    },
+    "jfr/baseline-warm.jfr": {
+      "bytes": 780465,
+      "sha256": "f6af7a1ecd06e6ceffee2dd114865e7a497884701cb13c328c3736380ade8864"
+    },
+    "jfr/cached-bulk96-gated.jfr": {
+      "bytes": 1443730,
+      "sha256": "811f7204788420af9582a1f05c93fcdc7293c2946498a9b631c6ed39e84d7406"
+    },
+    "jfr/cached-flood.jfr": {
+      "bytes": 931643,
+      "sha256": "e7ac363e7f41825d95237c5e9a4166dbf8adfdba44b6b8dcacb291b87d30300a"
+    },
+    "jfr/cached-warm.jfr": {
+      "bytes": 770551,
+      "sha256": "54d613e7f6521e0bda8e142f01de796c4d04ada418dc2caf5a3604656366ef06"
+    },
+    "jfr/mailbox-duplicate-finals.jfr": {
+      "bytes": 780206,
+      "sha256": "8b52b68e6a3ac5ea00c81b81715dacc842a1996a42e23d4d61d0370f8b07c4e0"
+    },
+    "jfr/mailbox-flood.jfr": {
+      "bytes": 703293,
+      "sha256": "d3712ac59e4129326aedb5804d723694d7cb5f181b3b7007bb2484af15f5b9b9"
+    },
+    "jfr/mailbox-warm.jfr": {
+      "bytes": 848166,
+      "sha256": "6465ecf2fd1dc8c816f7065d682d2af932129dc4a6f88094a6f686f20acecc22"
+    },
+    "jfr/poll-bulk96-gated.jfr": {
+      "bytes": 1335740,
+      "sha256": "d2b7959f71a14459b1bee3618a71b3dd44af4632766e43e7793631d112e1a3e8"
+    }
+  }
+}

@@ -1,0 +1,326 @@
+{
+  "steady-baseline-normal": {
+    "cpu_ms": {
+      "min": 119.592,
+      "median": 207.5615,
+      "max": 276.242
+    },
+    "close_done_max_ms": {
+      "min": 133.506958,
+      "median": 142.474104,
+      "max": 157.329459
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  },
+  "steady-current-normal": {
+    "cpu_ms": {
+      "min": 29.671,
+      "median": 72.55199999999999,
+      "max": 182.802
+    },
+    "close_done_max_ms": {
+      "min": 131.857708,
+      "median": 133.71839549999999,
+      "max": 137.198917
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416.0,
+      "max": 2416
+    },
+    "ingress_backpressureCount": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  },
+  "steady-baseline-bulk96": {
+    "cpu_ms": {
+      "min": 150.627,
+      "median": 193.72899999999998,
+      "max": 324.838
+    },
+    "close_done_max_ms": {
+      "min": 134.360833,
+      "median": 138.600771,
+      "max": 159.202875
+    },
+    "bulk_done_max_ms": {
+      "min": 133.881667,
+      "median": 138.12743799999998,
+      "max": 172.933917
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  },
+  "steady-current-bulk96": {
+    "cpu_ms": {
+      "min": 44.671,
+      "median": 112.0585,
+      "max": 244.288
+    },
+    "close_done_max_ms": {
+      "min": 131.887625,
+      "median": 133.790896,
+      "max": 163.84575
+    },
+    "bulk_done_max_ms": {
+      "min": 131.254333,
+      "median": 131.7739585,
+      "max": 163.095875
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416.0,
+      "max": 2416
+    },
+    "ingress_backpressureCount": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  },
+  "steady-before-targeted-bulk96": {
+    "cpu_ms": {
+      "min": 57.94,
+      "median": 124.73349999999999,
+      "max": 243.446
+    },
+    "close_done_max_ms": {
+      "min": 132.009416,
+      "median": 133.35902099999998,
+      "max": 134.876208
+    },
+    "bulk_done_max_ms": {
+      "min": 131.387,
+      "median": 132.031229,
+      "max": 166.216833
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416.0,
+      "max": 2416
+    },
+    "ingress_backpressureCount": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  },
+  "steady-current-flood": {
+    "cpu_ms": {
+      "min": 81.483,
+      "median": 85.26,
+      "max": 116.379
+    },
+    "close_done_max_ms": {
+      "min": 22.591375,
+      "median": 25.5240215,
+      "max": 41.081584
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "handled_closes": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "expected_close_messages": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "missing_finals": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_final_values": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "wrong_latest_forming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_coalescedForming": {
+      "min": 34025,
+      "median": 35152.5,
+      "max": 39663
+    },
+    "ingress_processedForming": {
+      "min": 8657,
+      "median": 13167.5,
+      "max": 14295
+    },
+    "ingress_backpressureCount": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "runs": 50,
+    "warmups": 100
+  }
+}

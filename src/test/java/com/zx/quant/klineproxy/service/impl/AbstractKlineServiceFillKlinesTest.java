@@ -418,6 +418,85 @@ class AbstractKlineServiceFillKlinesTest {
   }
 
   @Test
+  void persistenceWaitsForFinalEvenWhenCloseTimeHasPassedAndDataDoesNotChange() {
+    TestKlineService service = finalWaitService(H + 100, 0);
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), false);
+    service.invokeDumpPersistedKlines(true);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT")).isNull();
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), true);
+    service.invokeDumpPersistedKlines(false);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows()).hasSize(1);
+  }
+
+  @Test
+  void streamFastPathStillFillsNewAndHistoricalGapsWithoutFinalizingItsAnchor() {
+    TestKlineService forward = finalWaitService(H * 3 + 100, 0);
+    forward.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), false);
+    forward.updateStreamKline("BTCUSDT", "1h", hourBar(H * 2, 20, "120"), false);
+    KlineSet set = forward.klineSetMap.get(new KlineSetKey("BTCUSDT", "1h"));
+    assertThat(set.getKlineMap().keySet()).containsExactly(0L, H, H * 2);
+    assertThat(set.isFinal(0)).isFalse();
+    assertThat(set.isFinal(H)).isFalse();
+    assertThat(set.isFinal(H * 2)).isFalse();
+    TestKlineService backward = finalWaitService(H * 3 + 100, 0);
+    backward.updateStreamKline("BTCUSDT", "1h", hourBar(H * 2, 20, "120"), false);
+    backward.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), false);
+    KlineSet previous = backward.klineSetMap.get(new KlineSetKey("BTCUSDT", "1h"));
+    assertThat(previous.getKlineMap().keySet()).containsExactly(0L, H, H * 2);
+    assertThat(previous.isFinal(H)).isFalse();
+    assertThat(previous.isFinal(H * 2)).isFalse();
+    backward.updateStreamKline("BTCUSDT", "1h", hourBar(H, 0, "105"), true);
+    assertThat(previous.isFinal(H)).isTrue();
+    assertThat(((StringKline) previous.getKlineMap().get(H)).getClosePrice()).isEqualTo("105");
+  }
+
+  @Test
+  void finalCorrectionInvalidatesPreviouslyCachedBulkSnapshot() {
+    long boundary = H * 10;
+    TestKlineService service = finalWaitService(boundary + 100, 0);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 10, "101"), true, boundary + 1);
+    BulkKlinesResponse before = service.queryBulkKlines("1h", 1, true, List.of("BTCUSDT"));
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 10, "109"), true, boundary + 2);
+    BulkKlinesResponse after = service.queryBulkKlines("1h", 1, true, List.of("BTCUSDT"));
+    assertThat(after).isNotSameAs(before);
+    assertThat(after.klines().get("BTCUSDT").getFirst()[4]).isEqualTo("109");
+  }
+
+  @Test
+  void restOfNextBarMustNotFinalizeTheCachedFormingAnchor() {
+    long boundary = H * 10;
+    TestKlineService service = finalWaitService(boundary + 100, 0);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 10, "101"), false);
+    service.updateKlines("BTCUSDT", "1h", List.of(hourBar(boundary, 1, "102")));
+    KlineSet set = service.klineSetMap.get(new KlineSetKey("BTCUSDT", "1h"));
+    assertThat(set.isFinal(boundary - H)).isFalse();
+    assertThat(set.isFinal(boundary)).isFalse();
+  }
+
+  @Test
+  void finalFlagMustNotBePublishedWhileItsRealSnapshotHasNotBeenWritten() {
+    long boundary = H * 10;
+    TestKlineService service = finalWaitService(boundary + 100, 0);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 10, "101"), false);
+    KlineSet set = service.klineSetMap.get(new KlineSetKey("BTCUSDT", "1h"));
+    var map = new java.util.concurrent.ConcurrentSkipListMap<Long, Kline>(set.getKlineMap()) {
+      @Override
+      public Kline put(Long key, Kline value) {
+        if (value.getTradeNum() == 11) {
+          assertThat(set.isFinal(key)).isFalse();
+        }
+        return super.put(key, value);
+      }
+    };
+    set.setKlineMap(map);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(boundary - H, 11, "109"), true);
+    assertThat(set.isFinal(boundary - H)).isTrue();
+    assertThat(((StringKline) map.get(boundary - H)).getClosePrice()).isEqualTo("109");
+  }
+
+  @Test
   void streamBarIsFinalOnlyWhenBinanceSaysClosed() {
     long boundary = 10 * H;
     // 100 ms after the boundary with a 300 ms cap: the request must wait ~200 ms then give up

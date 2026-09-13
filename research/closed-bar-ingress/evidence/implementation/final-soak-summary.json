@@ -1,0 +1,162 @@
+{
+  "warmups": 20,
+  "measured_rounds": 1200,
+  "measured_finals": 1449600,
+  "errors": 0,
+  "retention": [
+    {
+      "round": 0,
+      "bars": 2417208,
+      "stream_versions": 2416,
+      "final_flags": 2414792,
+      "max_bars_per_series": 1001,
+      "max_versions_per_series": 2,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 547467400
+    },
+    {
+      "round": 100,
+      "bars": 2476400,
+      "stream_versions": 123216,
+      "final_flags": 2473984,
+      "max_bars_per_series": 1050,
+      "max_versions_per_series": 102,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 586652744
+    },
+    {
+      "round": 200,
+      "bars": 2473984,
+      "stream_versions": 244016,
+      "final_flags": 2471568,
+      "max_bars_per_series": 1048,
+      "max_versions_per_series": 202,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 588051968
+    },
+    {
+      "round": 300,
+      "bars": 2471568,
+      "stream_versions": 364816,
+      "final_flags": 2469152,
+      "max_bars_per_series": 1046,
+      "max_versions_per_series": 302,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 602041288
+    },
+    {
+      "round": 400,
+      "bars": 2469152,
+      "stream_versions": 485616,
+      "final_flags": 2466736,
+      "max_bars_per_series": 1044,
+      "max_versions_per_series": 402,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 611985712
+    },
+    {
+      "round": 500,
+      "bars": 2466736,
+      "stream_versions": 606416,
+      "final_flags": 2464320,
+      "max_bars_per_series": 1042,
+      "max_versions_per_series": 502,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 623661608
+    },
+    {
+      "round": 600,
+      "bars": 2464320,
+      "stream_versions": 727216,
+      "final_flags": 2461904,
+      "max_bars_per_series": 1040,
+      "max_versions_per_series": 602,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 634653984
+    },
+    {
+      "round": 700,
+      "bars": 2461904,
+      "stream_versions": 848016,
+      "final_flags": 2459488,
+      "max_bars_per_series": 1038,
+      "max_versions_per_series": 702,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 645551256
+    },
+    {
+      "round": 800,
+      "bars": 2459488,
+      "stream_versions": 968816,
+      "final_flags": 2457072,
+      "max_bars_per_series": 1036,
+      "max_versions_per_series": 802,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 656507664
+    },
+    {
+      "round": 900,
+      "bars": 2457072,
+      "stream_versions": 1089616,
+      "final_flags": 2454656,
+      "max_bars_per_series": 1034,
+      "max_versions_per_series": 902,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 668472040
+    },
+    {
+      "round": 1000,
+      "bars": 2454656,
+      "stream_versions": 1210416,
+      "final_flags": 2452240,
+      "max_bars_per_series": 1032,
+      "max_versions_per_series": 1002,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 679765024
+    },
+    {
+      "round": 1100,
+      "bars": 2452240,
+      "stream_versions": 1244240,
+      "final_flags": 2449824,
+      "max_bars_per_series": 1030,
+      "max_versions_per_series": 1030,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 687571592
+    },
+    {
+      "round": 1200,
+      "bars": 2449824,
+      "stream_versions": 1241824,
+      "final_flags": 2447408,
+      "max_bars_per_series": 1028,
+      "max_versions_per_series": 1028,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 687183872
+    },
+    {
+      "round": 1219,
+      "bars": 2472776,
+      "stream_versions": 1264776,
+      "final_flags": 2470360,
+      "max_bars_per_series": 1047,
+      "max_versions_per_series": 1047,
+      "orphan_versions": 0,
+      "orphan_final_flags": 0,
+      "heap_used_bytes": 694350968
+    }
+  ]
+}

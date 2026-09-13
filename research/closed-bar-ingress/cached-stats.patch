@@ -1,0 +1,57 @@
+--- a/src/main/java/com/zx/quant/klineproxy/service/impl/AbstractKlineService.java
++++ b/src/main/java/com/zx/quant/klineproxy/service/impl/AbstractKlineService.java
+@@ -725,10 +725,8 @@
+     if (intervalEnum == null) {
+       return;
+     }
+-    Set<String> trading = tradingSymbolsOrNull();
+-    if (!isTrading(trading, symbol)) {
+-      return; // delisted / halted symbols are outside the settle universe
+-    }
++    // Research ablation: fixed trading/cache cohort within a boundary.
++    // Production must handle exchange-universe revision and REST/new-symbol arrivals explicitly.
+     long boundary = openTime + intervalEnum.getMills();
+     long arrivalMs = getServerTime() - boundary;
+     BoundarySettle settle = boundarySettles.compute(interval, (key, current) -> {
+@@ -736,18 +734,22 @@
+         if (current != null && !current.logged) {
+           logSettle(current, intervalEnum, true);
+         }
+-        return new BoundarySettle(boundary);
++        Set<String> trading = tradingSymbolsOrNull();
++        return new BoundarySettle(boundary, trading,
++            new HashSet<>(symbolsWithBar(interval, openTime, trading, true)));
+       }
+       return current;
+     });
+-    if (settle.boundary != boundary) {
++    if (!isTrading(settle.trading, symbol) || settle.boundary != boundary) {
+       return; // a late closing update for an older bar (REST already covers it)
+     }
+-    settle.arrivalMsBySymbol.putIfAbsent(symbol, arrivalMs);
++    if (settle.arrivalMsBySymbol.putIfAbsent(symbol, arrivalMs) == null && settle.expected.contains(symbol)) {
++      settle.expectedArrived.incrementAndGet();
++    }
+     if (eventTimeMs != null) {
+       settle.eventOffsetMsBySymbol.putIfAbsent(symbol, eventTimeMs - boundary);
+     }
+-    if (!settle.logged && settle.arrivalMsBySymbol.size() >= symbolsWithBar(interval, openTime, trading, true).size()) {
++    if (!settle.logged && settle.expectedArrived.get() >= settle.expected.size()) {
+       logSettle(settle, intervalEnum, false);
+     }
+   }
+@@ -854,8 +856,13 @@
+     private volatile boolean logged;
+     private volatile ClosedBarSettleSummary summary;
+ 
+-    private BoundarySettle(long boundary) {
++    private final Set<String> trading;
++    private final Set<String> expected;
++    private final java.util.concurrent.atomic.AtomicInteger expectedArrived = new java.util.concurrent.atomic.AtomicInteger();
++    private BoundarySettle(long boundary, Set<String> trading, Set<String> expected) {
+       this.boundary = boundary;
++      this.trading = trading;
++      this.expected = expected;
+     }
+   }
+ 

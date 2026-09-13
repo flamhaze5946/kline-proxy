@@ -1,0 +1,116 @@
+{
+  "normal": {
+    "cpu_ms": {
+      "min": 38.976,
+      "median": 66.724,
+      "max": 92.145
+    },
+    "close_done_max_ms": {
+      "min": 132.25925,
+      "median": 133.550063,
+      "max": 135.359583
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416.0,
+      "max": 2416
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "validated_rounds": 150
+  },
+  "flood": {
+    "cpu_ms": {
+      "min": 83.896,
+      "median": 86.462,
+      "max": 120.167
+    },
+    "close_done_max_ms": {
+      "min": 23.803959,
+      "median": 26.759604,
+      "max": 43.795083
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 5155,
+      "median": 10767.0,
+      "max": 11203
+    },
+    "ingress_coalescedForming": {
+      "min": 37117,
+      "median": 37553.0,
+      "max": 43165
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "validated_rounds": 150
+  },
+  "bulk96": {
+    "cpu_ms": {
+      "min": 64.173,
+      "median": 95.726,
+      "max": 125.816
+    },
+    "close_done_max_ms": {
+      "min": 132.204583,
+      "median": 133.0396875,
+      "max": 134.796709
+    },
+    "bulk_done_max_ms": {
+      "min": 131.317542,
+      "median": 131.6087915,
+      "max": 132.470584
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208.0,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416.0,
+      "max": 2416
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0.0,
+      "max": 0
+    },
+    "validated_rounds": 150
+  }
+}

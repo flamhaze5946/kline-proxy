@@ -25,6 +25,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -43,6 +44,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -60,10 +62,14 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.AbortPolicy;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
-import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
+import java.util.concurrent.RejectedExecutionException;
+import com.zx.quant.klineproxy.model.KlineDispatchMetadata;
+import com.zx.quant.klineproxy.client.ws.dispatch.KlineMessageDispatcher;
+import com.zx.quant.klineproxy.model.config.KlineIngressProperties;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
@@ -87,21 +93,29 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final String SUBSCRIBE_SCHEDULE_EXECUTOR_GROUP_PREFIX = "websocket-subscribe";
 
-  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-message-handler";
+  private static final String MESSAGE_EXECUTOR_GROUP_PREFIX = "websocket-control-handler";
 
   private static final long TOPIC_MONITOR_INTERVAL_MILLS = 30_000L;
 
   private static final long TOPIC_MESSAGE_TIMEOUT_MILLS = 120_000L;
 
-  private static final AtomicLong MESSAGE_TASK_DROP_COUNT = new AtomicLong(0);
+  private static final AtomicLong MESSAGE_RECEIVE_SEQUENCE = new AtomicLong(0);
+  private static final AtomicLong GENERIC_TASKS = new AtomicLong(0);
 
   private static final ThreadPoolExecutor MESSAGE_EXECUTOR = buildMessageExecutor();
+  private static final KlineMessageDispatcher FALLBACK_KLINE_DISPATCHER =
+      new KlineMessageDispatcher(new KlineIngressProperties());
+
+  @Autowired(required = false)
+  private KlineMessageDispatcher klineMessageDispatcher;
+  private volatile Function<String, KlineDispatchMetadata> klineMessageClassifier = raw -> null;
 
   private static final String PING = "PING";
 
   private static final String PONG = "PONG";
 
   private final AtomicBoolean launching;
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   private final Supplier<WebSocketChannelInboundHandler> handlerSupplier;
 
@@ -214,6 +228,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   public void start() {
     synchronized (launching) {
+      if (closed.get()) {
+        return;
+      }
       launching.set(false);
       if (monitorScheduler != null) {
         monitorScheduler.shutdown();
@@ -225,7 +242,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         commonScheduler.shutdown();
       }
 
-      this.candidateFrameWrappers.clear();
+      releaseQueuedFrames();
       this.candidateSubscribeTopics.clear();
       this.candidateUnsubscribeTopics.clear();
       this.topicLastMessageTimeMap.clear();
@@ -282,20 +299,84 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void onReceive(String message, long receivedAtMillis, long receivedAtNanos) {
+    heartbeatTransport();
+    long receiveSequence = MESSAGE_RECEIVE_SEQUENCE.incrementAndGet();
+    KlineDispatchMetadata metadata;
+    try {
+      metadata = klineMessageClassifier.apply(message);
+    } catch (RuntimeException error) {
+      log.warn("websocket client: {} ingress classification failed; using reliable generic handler.", clientName(), error);
+      metadata = null;
+    }
+    if (metadata != null) {
+      KlineMessageDispatcher dispatcher = klineDispatcher();
+      KlineDispatchMetadata classified = metadata;
+      // Detailed latency is a closing-bar diagnostic. Avoid timing objects, clock reads and queue
+      // snapshots for the high-volume forming updates that may be coalesced before execution.
+      WebSocketMessageTiming timing = metadata.closed()
+          ? new WebSocketMessageTiming(clientName(), receivedAtMillis, receivedAtNanos) : null;
+      topicLastMessageTimeMap.put(metadata.topic(), receivedAtMillis);
+      if (timing != null) {
+        timing.enqueued(dispatcher.queuedTasks());
+      }
+      dispatcher.submit(metadata, receiveSequence, () -> {
+        if (timing != null) {
+          timing.handlerStarted(dispatcher.queuedTasks());
+        }
+        handleMessage(message, timing, receiveSequence, dispatcher, classified);
+      });
+      return;
+    }
     WebSocketMessageTiming timing = new WebSocketMessageTiming(clientName(), receivedAtMillis, receivedAtNanos);
-    clientMonitorTask.heartbeat();
     timing.enqueued(MESSAGE_EXECUTOR.getQueue().size());
-    CompletableFuture.runAsync(
-        () -> {
+    GENERIC_TASKS.incrementAndGet();
+    try {
+      MESSAGE_EXECUTOR.execute(() -> {
+        try {
           timing.handlerStarted(MESSAGE_EXECUTOR.getQueue().size());
-          handleMessage(message, timing);
-        },
-        MESSAGE_EXECUTOR);
+          handleMessage(message, timing, receiveSequence);
+        } finally {
+          GENERIC_TASKS.decrementAndGet();
+        }
+      });
+    } catch (RuntimeException | Error error) {
+      GENERIC_TASKS.decrementAndGet();
+      throw error;
+    }
+  }
+
+  @Override
+  public void setKlineMessageClassifier(Function<String, KlineDispatchMetadata> classifier) {
+    klineMessageClassifier = java.util.Objects.requireNonNull(classifier);
+  }
+
+  private KlineMessageDispatcher klineDispatcher() {
+    return klineMessageDispatcher != null ? klineMessageDispatcher : FALLBACK_KLINE_DISPATCHER;
   }
 
   @Override
   public void onReceiveNoHandle() {
-    clientMonitorTask.heartbeat();
+    heartbeatTransport();
+  }
+
+  private void heartbeatTransport() {
+    ClientMonitorTask monitor = clientMonitorTask;
+    if (monitor != null) {
+      monitor.heartbeat();
+    }
+  }
+
+  /** Call only after every producer's close has finished its in-flight channel callbacks. */
+  public static boolean awaitGenericMessageTasks(Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    while (GENERIC_TASKS.get() != 0) {
+      long remaining = deadline - System.nanoTime();
+      if (remaining <= 0 || Thread.currentThread().isInterrupted()) {
+        return false;
+      }
+      LockSupport.parkNanos(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(1)));
+    }
+    return true;
   }
 
   @Override
@@ -349,6 +430,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   @Override
   public void connect() {
     synchronized (launching) {
+      if (closed.get()) {
+        return;
+      }
       try {
         subId = generateSubId();
         inboundHandler = handlerSupplier.get();
@@ -356,7 +440,10 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
         connectWebSocket();
         if (alive()) {
-          inboundHandler.getHandshakeFuture().sync();
+          if (!inboundHandler.getHandshakeFuture().await(10, TimeUnit.SECONDS)
+              || !inboundHandler.getHandshakeFuture().isSuccess()) {
+            throw new IllegalStateException("WebSocket handshake failed or timed out");
+          }
           this.subscribeTopics(registeredTopics);
         } else {
           log.warn("websocket client: {} not alived when connect.", clientName());
@@ -371,6 +458,9 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
   @Override
   public void reconnect() {
     synchronized (launching) {
+      if (closed.get()) {
+        return;
+      }
       launching.set(false);
       try{
         log.info("websocket client: {} start to reconnect.", clientName());
@@ -386,45 +476,67 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public boolean alive() {
-    return channel != null && channel.isActive();
+    return !closed.get() && channel != null && channel.isActive();
   }
 
   @Override
   public void close() {
-    clientMonitorTask = null;
-    if (monitorScheduler != null && !monitorScheduler.isShutdown()) {
-      monitorScheduler.shutdown();
+    ChannelFuture closeFuture = null;
+    synchronized (launching) {
+      closed.set(true);
+      launching.set(false);
+      if (monitorScheduler != null) {
+        monitorScheduler.shutdown();
+      }
+      if (subscribeScheduler != null) {
+        subscribeScheduler.shutdown();
+      }
+      if (commonScheduler != null) {
+        commonScheduler.shutdown();
+      }
+      if (channel != null) {
+        closeFuture = channel.close();
+      }
+      releaseQueuedFrames();
     }
-    if (channel != null) {
-      channel.close();
+    // Do not hold launching while the event loop completes callbacks/reconnect attempts.
+    if (closeFuture != null && !closeFuture.channel().eventLoop().inEventLoop()
+        && !closeFuture.awaitUninterruptibly(10, TimeUnit.SECONDS)) {
+      log.error("WebSocket producer {} did not stop its channel within 10 seconds", clientName());
+    }
+    shutdownGroup("client closed");
+  }
+
+  private void releaseQueuedFrames() {
+    synchronized (candidateFrameWrappers) {
+      WebSocketFrameWrapper wrapper;
+      while ((wrapper = candidateFrameWrappers.poll()) != null) {
+        wrapper.frame().release();
+      }
     }
   }
 
   @Override
   public void sendData(WebSocketFrame frame, Runnable afterSendFunc) {
-    if (!alive()) {
-      log.warn("client: {} not alive, data: {} send failed.", clientName(), frame);
-      return;
-    }
-
     if (afterSendFunc == null) {
-      afterSendFunc = () -> {
-        String frameLog;
-        if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
-          frameLog = textWebSocketFrame.text();
-        } else {
-          frameLog = frame.getClass().getSimpleName();
-        }
-        log.info("client: {} data: {} sent.", clientName(), frameLog);
-      };
+      // Capture text before Netty takes ownership; an async callback must not read a released buf.
+      String frameLog = frame instanceof TextWebSocketFrame text ? text.text() : frame.getClass().getSimpleName();
+      afterSendFunc = () -> log.info("client: {} data: {} sent.", clientName(), frameLog);
     }
-    WebSocketFrameWrapper wrapper = new WebSocketFrameWrapper(frame, afterSendFunc);
-    candidateFrameWrappers.offer(wrapper);
+    synchronized (candidateFrameWrappers) {
+      if (!alive()) {
+        log.warn("client: {} not alive, frame send failed.", clientName());
+        frame.release();
+        return;
+      }
+      candidateFrameWrappers.offer(new WebSocketFrameWrapper(frame, afterSendFunc));
+    }
   }
 
   public void sendData0(WebSocketFrame frame) {
     if (!alive()) {
       log.warn("client: {} not alive, data: {} send failed.", clientName(), frame);
+      frame.release();
       return;
     }
     String limiterName = globalFrameSendRateLimiter();
@@ -494,6 +606,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       Bootstrap bootstrap = new Bootstrap();
       bootstrap
           .group(group)
+          .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
           .channel(NioSocketChannel.class)
           .handler(
               new ChannelInitializer<SocketChannel>() {
@@ -642,23 +755,33 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     return null;
   }
 
-  private void handleMessage(String message, WebSocketMessageTiming timing) {
+  private void handleMessage(String message, WebSocketMessageTiming timing, long receiveSequence) {
+    handleMessage(message, timing, receiveSequence, null, null);
+  }
+
+  private void handleMessage(String message, WebSocketMessageTiming timing, long receiveSequence,
+      KlineMessageDispatcher dispatcher, KlineDispatchMetadata metadata) {
     try {
-      if (StringUtils.contains(message, PING)) {
-        this.sendMessage(message.replace(PING, PONG));
+      if (StringUtils.equals(StringUtils.trim(message), PING)) {
+        this.sendMessage(PONG);
         return;
       }
-      if (StringUtils.contains(message, PONG)) {
+      if (StringUtils.equals(StringUtils.trim(message), PONG)) {
         return;
       }
 
-      ParsedWebSocketMessage parsedMessage = parseMessage(message, timing);
-      timing.jsonParsed();
-      if (parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)) {
-        timing.executorSnapshot(MESSAGE_EXECUTOR.getActiveCount(), MESSAGE_EXECUTOR.getPoolSize(),
-            MESSAGE_TASK_DROP_COUNT.get());
+      ParsedWebSocketMessage parsedMessage = parseMessage(message, timing, receiveSequence, metadata);
+      if (timing != null) {
+        timing.jsonParsed();
       }
-      heartbeatTopic(parsedMessage);
+      if (timing != null && parsedMessage.payloadObject()
+          && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)) {
+        timing.executorSnapshot(dispatcher != null ? dispatcher.activeWorkers() : MESSAGE_EXECUTOR.getActiveCount(),
+            dispatcher != null ? dispatcher.workerCount() : MESSAGE_EXECUTOR.getPoolSize(), 0L);
+      }
+      if (metadata == null) {
+        heartbeatTopic(parsedMessage);
+      } // classified frames already recorded their heartbeat at receipt, before any queue delay
       if (isListTopicsMessage(parsedMessage.rootNode())) {
         ListTopicsEvent listTopicsEvent = serializer.treeToValue(parsedMessage.rootNode(), ListTopicsEvent.class);
         synchronized (channelRegisteredTopics) {
@@ -676,14 +799,21 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       }
 
       if (!isWebSocketResponseMessage(parsedMessage)) {
+        if (dispatcher != null) {
+          throw new IllegalStateException("Classified kline was not handled: " + metadata.bar());
+        }
         log.info("not handlable message received: {}", parsedMessage.rawMessage());
       }
     } catch (RuntimeException e) {
+      if (dispatcher != null) {
+        throw e; // dispatcher reports the failed attempt separately from processed counters
+      }
       log.warn("websocket client: {} handle message failed.", clientName(), e);
     }
   }
 
-  private ParsedWebSocketMessage parseMessage(String message, WebSocketMessageTiming timing) {
+  private ParsedWebSocketMessage parseMessage(String message, WebSocketMessageTiming timing, long receiveSequence,
+      KlineDispatchMetadata metadata) {
     JsonNode rootNode = serializer.readTree(message);
     JsonNode payloadNode = rootNode;
     String stream = extractTextField(rootNode, "stream");
@@ -691,7 +821,8 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     if (StringUtils.isNotBlank(stream) && dataNode != null && !dataNode.isNull()) {
       payloadNode = dataNode;
     }
-    return new ParsedWebSocketMessage(message, rootNode, payloadNode, stream, extractEventType(payloadNode), timing);
+    return new ParsedWebSocketMessage(message, rootNode, payloadNode, stream, extractEventType(payloadNode), timing,
+        receiveSequence, metadata);
   }
 
   private String extractEventType(JsonNode payloadNode) {
@@ -735,22 +866,33 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         MESSAGE_EXECUTOR_GROUP_PREFIX);
     return new ThreadPoolExecutor(
-        4,
-        20,
+        2,
+        2,
         1,
         TimeUnit.MINUTES,
         new LinkedBlockingQueue<>(4096),
-        namedThreadFactory,
-        new DiscardOldestPolicy() {
-          @Override
-          public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
-            if (!e.isShutdown()) {
-              long dropped = MESSAGE_TASK_DROP_COUNT.incrementAndGet();
-              if (dropped == 1 || dropped % 100 == 0) {
-                log.warn("message executor queue full, dropped {} websocket messages.", dropped);
+        task -> {
+          Thread thread = namedThreadFactory.newThread(task);
+          thread.setDaemon(true); // the Spring lifecycle explicitly drains work before destruction
+          return thread;
+        },
+        (task, executor) -> {
+          boolean interrupted = false;
+          try {
+            while (!executor.isShutdown()) {
+              try {
+                if (executor.getQueue().offer(task, 100, TimeUnit.MILLISECONDS)) {
+                  return;
+                }
+              } catch (InterruptedException ignored) {
+                interrupted = true;
               }
             }
-            super.rejectedExecution(r, e);
+            throw new RejectedExecutionException("WebSocket generic handler is shutting down");
+          } finally {
+            if (interrupted) {
+              Thread.currentThread().interrupt();
+            }
           }
         });
   }

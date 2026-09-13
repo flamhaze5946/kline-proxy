@@ -91,7 +91,7 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
       long receivedAtNanos = System.nanoTime();
       long receivedAtMillis = System.currentTimeMillis();
       if (frame instanceof BinaryWebSocketFrame binaryWebSocketFrame) {
-        webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()),
+        webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content()),
             receivedAtMillis, receivedAtNanos);
       } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
         webSocketClient.onReceive(textWebSocketFrame.text(), receivedAtMillis, receivedAtNanos);

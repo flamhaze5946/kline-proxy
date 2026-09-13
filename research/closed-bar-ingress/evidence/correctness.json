@@ -1,0 +1,25 @@
+[ {
+  "expected_trade_num" : 10,
+  "scenario" : "same_n_final_snapshot",
+  "is_final" : true,
+  "actual_close" : 101.0,
+  "correct" : false,
+  "expected_close" : 109.0,
+  "actual_trade_num" : 10
+}, {
+  "expected_trade_num" : 20,
+  "scenario" : "inflight_older_overwrites_newer",
+  "is_final" : false,
+  "actual_close" : 101.0,
+  "correct" : false,
+  "expected_close" : 109.0,
+  "actual_trade_num" : 10
+}, {
+  "expected_trade_num" : 20,
+  "scenario" : "inflight_forming_overwrites_final",
+  "is_final" : true,
+  "actual_close" : 101.0,
+  "correct" : false,
+  "expected_close" : 109.0,
+  "actual_trade_num" : 10
+} ]

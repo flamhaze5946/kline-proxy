@@ -1,6 +1,8 @@
 package com.zx.quant.klineproxy.util;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonParser;
+import java.io.IOException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -56,6 +58,10 @@ public class Serializer {
     } catch (JsonProcessingException e) {
       throw new RuntimeException(e);
     }
+  }
+
+  public JsonParser createParser(String jsonString) throws IOException {
+    return objectMapper.getFactory().createParser(jsonString);
   }
 
   public <T> T treeToValue(JsonNode jsonNode, Class<T> clazz) {

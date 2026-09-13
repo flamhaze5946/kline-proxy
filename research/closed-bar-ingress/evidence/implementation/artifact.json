@@ -1,0 +1,9 @@
+{
+  "jar": "/Users/flamhaze5946/Workspace/Java/Personal/kline-proxy/target/kline-proxy-1.8.1.jar",
+  "bytes": 48068060,
+  "sha256": "19390b7aba219a8807c1fa2c62d4ad801d999390d987a05ee181aa098c50ae12",
+  "jdk": "Zulu 21.0.8",
+  "base_commit": "1025516aa9177bc6073284a37850ac85c32589d5",
+  "deployment": "not deployed",
+  "source_manifest": "release-source-manifest.json"
+}

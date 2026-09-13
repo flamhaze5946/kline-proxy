@@ -1,0 +1,16 @@
+--- a/src/main/java/com/zx/quant/klineproxy/service/impl/AbstractKlineService.java
++++ b/src/main/java/com/zx/quant/klineproxy/service/impl/AbstractKlineService.java
+@@ -923,12 +923,7 @@
+   }
+ 
+   private void signalFinal() {
+-    finalLock.lock();
+-    try {
+-      finalSignal.signalAll();
+-    } finally {
+-      finalLock.unlock();
+-    }
++    // Research ablation only: retain the existing bounded 25 ms polling, disable broadcasts.
+   }
+ 
+   protected KlineBulkProperties getBulkProperties() {

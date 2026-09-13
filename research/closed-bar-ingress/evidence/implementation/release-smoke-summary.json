@@ -1,0 +1,154 @@
+{
+  "normal": {
+    "cpu_ms": {
+      "min": 52.489,
+      "median": 73.357,
+      "max": 89.404
+    },
+    "close_done_max_ms": {
+      "min": 132.336875,
+      "median": 132.591083,
+      "max": 133.341334
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416,
+      "max": 2416
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "validated_rounds": 10
+  },
+  "flood": {
+    "cpu_ms": {
+      "min": 124.248,
+      "median": 144.524,
+      "max": 151.107
+    },
+    "close_done_max_ms": {
+      "min": 15.017833000000003,
+      "median": 21.138334,
+      "max": 27.238166999999997
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 5050,
+      "median": 6074,
+      "max": 6391
+    },
+    "ingress_coalescedForming": {
+      "min": 41929,
+      "median": 42246,
+      "max": 43270
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "validated_rounds": 10
+  },
+  "bulk96": {
+    "cpu_ms": {
+      "min": 94.361,
+      "median": 136.709,
+      "max": 176.811
+    },
+    "close_done_max_ms": {
+      "min": 132.50625,
+      "median": 132.617916,
+      "max": 133.234458
+    },
+    "bulk_done_max_ms": {
+      "min": 131.491875,
+      "median": 131.596333,
+      "max": 131.783958
+    },
+    "ingress_processedFinal": {
+      "min": 1208,
+      "median": 1208,
+      "max": 1208
+    },
+    "ingress_processedForming": {
+      "min": 2416,
+      "median": 2416,
+      "max": 2416
+    },
+    "ingress_coalescedForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "validated_rounds": 10
+  },
+  "duplicate-finals": {
+    "cpu_ms": {
+      "min": 491.177,
+      "median": 571.707,
+      "max": 838.328
+    },
+    "close_done_max_ms": {
+      "min": 159.358792,
+      "median": 171.240375,
+      "max": 192.048542
+    },
+    "bulk_done_max_ms": {
+      "min": -1.0,
+      "median": -1.0,
+      "max": -1.0
+    },
+    "ingress_processedFinal": {
+      "min": 120800,
+      "median": 120800,
+      "max": 120800
+    },
+    "ingress_processedForming": {
+      "min": 5462,
+      "median": 5509,
+      "max": 6485
+    },
+    "ingress_coalescedForming": {
+      "min": 41835,
+      "median": 42811,
+      "max": 42858
+    },
+    "ingress_staleForming": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "validated_rounds": 10
+  }
+}

@@ -17,6 +17,13 @@ management:
 number:
   type: double
 kline:
+  ingress:
+    workers: 4
+    # All capacities are per worker. Full queues apply backpressure; final updates are never evicted.
+    finalQueueCapacityPerWorker: 2048
+    formingQueueCapacityPerWorker: 4096
+    closedKeyCapacityPerWorker: 2048
+    coalesceFormingUpdates: true
   diagnostics:
     closedBarLatencyEnabled: true
   persistence:
