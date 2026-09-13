@@ -3,6 +3,8 @@ package com.zx.quant.klineproxy.client.ws.handler;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -32,7 +34,7 @@ class WebSocketChannelInboundHandlerTest {
     channel.writeInbound(new ContinuationWebSocketFrame(true, 0, "\"data\":{\"price\":\"1\"}}"));
 
     verify(webSocketClient, times(1))
-        .onReceive("{\"stream\":\"btcusdt@ticker\",\"data\":{\"price\":\"1\"}}");
+        .onReceive(eq("{\"stream\":\"btcusdt@ticker\",\"data\":{\"price\":\"1\"}}"), anyLong(), anyLong());
     channel.finishAndReleaseAll();
   }
 }

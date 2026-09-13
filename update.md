@@ -1,5 +1,6 @@
 ## Unreleased
 
+- 增加收盘消息分段耗时诊断，区分 Netty 帧回调、线程池排队、JSON / 协议解码、缓存更新、收盘通知和既有收齐统计；整点后 30 秒延后输出汇总、连接统计及最多 10 条尾部消息。默认开启，可用 `kline.diagnostics.closedBarLatencyEnabled=false` 停止收集和输出。口径见 [closed-bar-latency.md](docs/closed-bar-latency.md)。
 - 合约 K 线支持按周期选择流：`kline.binance.future.intervalSyncConfigs.<interval>.useContinuousKlineStream` 默认 `false`，使用原有 `<symbol>@kline_<interval>`；设为 `true` 后，永续合约使用 `<pair>_<contractType>@continuousKline_<interval>`。例如只为 `1h` 开启，`1d` 仍可保持普通流。
 - 普通流 `BinanceKlineStream` 与连续流 `BinanceContinuousKlineStream` 各自封装主题生成、解析及符号映射，共用 `AbstractBinanceKlineStream` 的解码流程；服务共用缓存、持久化和 `x=true` 收盘通知。支持原始消息及 combined stream 封装。
 - 连续流通过 exchange info 的 `pair + contractType` 映射到唯一、状态为 `TRADING` 的交易符号，支持 `PERPETUAL` / `TRADIFI_PERPETUAL`。交割合约、缺失或有歧义的映射继续使用普通流，避免把滚动连续序列写入单个交割合约的历史。订阅缓存会随模式或合约映射变化失效。

@@ -13,6 +13,7 @@ import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.ListTopicsEvent;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.WebSocketFrameWrapper;
+import com.zx.quant.klineproxy.model.WebSocketMessageTiming;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -94,7 +95,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private static final AtomicLong MESSAGE_TASK_DROP_COUNT = new AtomicLong(0);
 
-  private static final ExecutorService MESSAGE_EXECUTOR = buildMessageExecutor();
+  private static final ThreadPoolExecutor MESSAGE_EXECUTOR = buildMessageExecutor();
 
   private static final String PING = "PING";
 
@@ -275,9 +276,20 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   @Override
   public void onReceive(String message) {
+    long receivedAtNanos = System.nanoTime();
+    onReceive(message, System.currentTimeMillis(), receivedAtNanos);
+  }
+
+  @Override
+  public void onReceive(String message, long receivedAtMillis, long receivedAtNanos) {
+    WebSocketMessageTiming timing = new WebSocketMessageTiming(clientName(), receivedAtMillis, receivedAtNanos);
     clientMonitorTask.heartbeat();
+    timing.enqueued(MESSAGE_EXECUTOR.getQueue().size());
     CompletableFuture.runAsync(
-        () -> handleMessage(message),
+        () -> {
+          timing.handlerStarted(MESSAGE_EXECUTOR.getQueue().size());
+          handleMessage(message, timing);
+        },
         MESSAGE_EXECUTOR);
   }
 
@@ -630,7 +642,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     return null;
   }
 
-  private void handleMessage(String message) {
+  private void handleMessage(String message, WebSocketMessageTiming timing) {
     try {
       if (StringUtils.contains(message, PING)) {
         this.sendMessage(message.replace(PING, PONG));
@@ -640,7 +652,12 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         return;
       }
 
-      ParsedWebSocketMessage parsedMessage = parseMessage(message);
+      ParsedWebSocketMessage parsedMessage = parseMessage(message, timing);
+      timing.jsonParsed();
+      if (parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)) {
+        timing.executorSnapshot(MESSAGE_EXECUTOR.getActiveCount(), MESSAGE_EXECUTOR.getPoolSize(),
+            MESSAGE_TASK_DROP_COUNT.get());
+      }
       heartbeatTopic(parsedMessage);
       if (isListTopicsMessage(parsedMessage.rootNode())) {
         ListTopicsEvent listTopicsEvent = serializer.treeToValue(parsedMessage.rootNode(), ListTopicsEvent.class);
@@ -666,7 +683,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     }
   }
 
-  private ParsedWebSocketMessage parseMessage(String message) {
+  private ParsedWebSocketMessage parseMessage(String message, WebSocketMessageTiming timing) {
     JsonNode rootNode = serializer.readTree(message);
     JsonNode payloadNode = rootNode;
     String stream = extractTextField(rootNode, "stream");
@@ -674,7 +691,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
     if (StringUtils.isNotBlank(stream) && dataNode != null && !dataNode.isNull()) {
       payloadNode = dataNode;
     }
-    return new ParsedWebSocketMessage(message, rootNode, payloadNode, stream, extractEventType(payloadNode));
+    return new ParsedWebSocketMessage(message, rootNode, payloadNode, stream, extractEventType(payloadNode), timing);
   }
 
   private String extractEventType(JsonNode payloadNode) {
@@ -714,7 +731,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         && rootNode.get("result").isArray();
   }
 
-  private static ExecutorService buildMessageExecutor() {
+  private static ThreadPoolExecutor buildMessageExecutor() {
     ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         MESSAGE_EXECUTOR_GROUP_PREFIX);
     return new ThreadPoolExecutor(

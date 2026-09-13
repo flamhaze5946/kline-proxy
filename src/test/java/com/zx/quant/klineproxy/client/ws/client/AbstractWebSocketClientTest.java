@@ -14,9 +14,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class AbstractWebSocketClientTest {
 
@@ -42,6 +44,53 @@ class AbstractWebSocketClientTest {
     assertEquals(1, serializer.readTreeCalls.get());
     assertEquals(0, serializer.treeToValueCalls.get());
     assertEquals(0, serializer.fromJsonStringCalls.get());
+    assertTrue(parsedMessage.timing().getJsonParsedAtNanos() >= parsedMessage.timing().getHandlerStartedAtNanos());
+    assertTrue(parsedMessage.timing().getHandlerStartedAtNanos() >= parsedMessage.timing().getEnqueuedAtNanos());
+  }
+
+  @Test
+  void timestampsPreserveFrameReceiptWhileMessageWaitsForWorker() throws Exception {
+    TestWebSocketClient client = new TestWebSocketClient(new Serializer(new ObjectMapper()));
+    ThreadPoolExecutor executor = (ThreadPoolExecutor) ReflectionTestUtils.getField(
+        AbstractWebSocketClient.class, "MESSAGE_EXECUTOR");
+    CountDownLatch occupied = new CountDownLatch(executor.getCorePoolSize());
+    CountDownLatch release = new CountDownLatch(1);
+    CountDownLatch handled = new CountDownLatch(1);
+    AtomicReference<ParsedWebSocketMessage> received = new AtomicReference<>();
+    client.addMessageHandler(message -> {
+      received.set(message);
+      handled.countDown();
+      return true;
+    });
+    try {
+      for (int i = 0; i < executor.getCorePoolSize(); i++) {
+        executor.execute(() -> {
+          occupied.countDown();
+          try {
+            release.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+      }
+      assertTrue(occupied.await(2, TimeUnit.SECONDS));
+      long frameNanos = System.nanoTime();
+      long frameMillis = System.currentTimeMillis();
+      client.onReceive("{\"e\":\"continuous_kline\",\"k\":{\"x\":true}}", frameMillis, frameNanos);
+      assertEquals(1L, handled.getCount(), "message must still be queued");
+      long releasedAt = System.nanoTime();
+      release.countDown();
+      assertTrue(handled.await(2, TimeUnit.SECONDS));
+      var timing = received.get().timing();
+      assertEquals(frameMillis, timing.getReceivedAtMillis());
+      assertEquals(frameNanos, timing.getReceivedAtNanos());
+      assertTrue(timing.getEnqueuedAtNanos() <= releasedAt);
+      assertTrue(timing.getHandlerStartedAtNanos() >= releasedAt);
+      assertTrue(timing.getPoolSize() >= 4);
+      assertTrue(timing.getActiveThreads() >= 1);
+    } finally {
+      release.countDown();
+    }
   }
 
   @Test

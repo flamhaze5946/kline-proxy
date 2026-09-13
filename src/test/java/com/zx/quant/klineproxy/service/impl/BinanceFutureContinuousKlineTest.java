@@ -15,6 +15,7 @@ import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
+import com.zx.quant.klineproxy.model.WebSocketMessageTiming;
 import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.BinanceFutureKlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncFutureConfig;
@@ -151,6 +152,7 @@ class BinanceFutureContinuousKlineTest {
       BulkKlinesResponse pending = f.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT"));
       assertThat(pending.finalized()).isFalse();
       assertThat(pending.pending()).containsExactly("ADAUSDT");
+      assertThat(drainLatency(f)).isEmpty();
 
       assertThat(f.service.getKlineEventMessageHandler().apply(message(finalMessage, combined))).isTrue();
       BulkKlinesResponse done = f.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT"));
@@ -177,6 +179,10 @@ class BinanceFutureContinuousKlineTest {
       assertThat(f.service.getKlineEventMessageHandler().apply(message(stale, combined))).isTrue();
       assertArrayEquals(row, com.zx.quant.klineproxy.util.ConvertUtil.convertToDisplayKline(
           f.service.klineSetMap.get(new KlineSetKey("ADAUSDT", "1h")).getKlineMap().lastEntry().getValue()));
+      var snapshots = drainLatency(f);
+      assertThat(snapshots).hasSize(1);
+      List<?> samples = ReflectionTestUtils.invokeMethod(snapshots.getFirst(), "samples");
+      assertThat(samples).hasSize(1);
     }
     assertArrayEquals(ordinary.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT")).klines().get("ADAUSDT").getFirst(),
         continuous.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT")).klines().get("ADAUSDT").getFirst());
@@ -187,6 +193,20 @@ class BinanceFutureContinuousKlineTest {
     Fixture f = fixture(true, "string", List.of(symbol("ADAUSDT", "ADAUSDT", "PERPETUAL")));
     assertThat(f.service.getKlineEventMessageHandler().apply(message(fixtureMessage(false), false))).isTrue();
     assertThat(f.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT")).finalized()).isTrue();
+  }
+
+  @Test
+  void disablingLatencyDiagnosticsPreservesClosedBarFinality() throws Exception {
+    Fixture f = fixture(true, "string", List.of(symbol("ADAUSDT", "ADAUSDT", "PERPETUAL")));
+    ReflectionTestUtils.setField(f.service, "closedBarLatencyEnabled", false);
+    assertThat(f.service.getKlineEventMessageHandler().apply(message(fixtureMessage(true), true))).isTrue();
+    assertThat(f.service.queryBulkKlines("1h", 1, true, List.of("ADAUSDT")).finalized()).isTrue();
+    assertThat(drainLatency(f)).isEmpty();
+  }
+
+  private static List<?> drainLatency(Fixture f) {
+    Object recorder = ReflectionTestUtils.getField(f.service, "closedBarLatencyRecorder");
+    return ReflectionTestUtils.invokeMethod(recorder, "drainDue", BOUNDARY + 30_000L);
   }
 
   @Test
@@ -224,7 +244,11 @@ class BinanceFutureContinuousKlineTest {
   private static ParsedWebSocketMessage message(ObjectNode payload, boolean combined) {
     String topic = payload.path("e").asText().equals("continuous_kline") ? CONTINUOUS_TOPIC : ORDINARY_TOPIC;
     JsonNode root = combined ? MAPPER.createObjectNode().put("stream", topic).set("data", payload) : payload;
-    return new ParsedWebSocketMessage(root.toString(), root, payload, combined ? topic : null, payload.path("e").asText());
+    WebSocketMessageTiming timing = new WebSocketMessageTiming("test-future", System.currentTimeMillis(), System.nanoTime());
+    timing.enqueued(0);
+    timing.handlerStarted(0);
+    timing.jsonParsed();
+    return new ParsedWebSocketMessage(root.toString(), root, payload, combined ? topic : null, payload.path("e").asText(), timing);
   }
 
   private static Fixture fixture(boolean continuous, String numberType, List<BinanceFutureSymbol> symbols) {

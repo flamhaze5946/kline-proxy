@@ -17,6 +17,8 @@ management:
 number:
   type: double
 kline:
+  diagnostics:
+    closedBarLatencyEnabled: true
   persistence:
     enabled: false
     loadOnStartup: true

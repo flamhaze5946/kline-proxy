@@ -88,10 +88,13 @@ public class WebSocketChannelInboundHandler extends SimpleChannelInboundHandler<
           }
       }
     } else if (msg instanceof WebSocketFrame frame) {
+      long receivedAtNanos = System.nanoTime();
+      long receivedAtMillis = System.currentTimeMillis();
       if (frame instanceof BinaryWebSocketFrame binaryWebSocketFrame) {
-        webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()));
+        webSocketClient.onReceive(decodeByteBuf(binaryWebSocketFrame.content().retain()),
+            receivedAtMillis, receivedAtNanos);
       } else if (frame instanceof TextWebSocketFrame textWebSocketFrame) {
-        webSocketClient.onReceive(textWebSocketFrame.text());
+        webSocketClient.onReceive(textWebSocketFrame.text(), receivedAtMillis, receivedAtNanos);
       } else if (frame instanceof PingWebSocketFrame) {
         webSocketClient.onReceiveNoHandle();
         webSocketClient.sendData(new PongWebSocketFrame(frame.content().retain()));

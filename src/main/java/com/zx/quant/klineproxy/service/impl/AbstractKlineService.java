@@ -32,6 +32,8 @@ import com.zx.quant.klineproxy.model.enums.NumberTypeEnum;
 import com.zx.quant.klineproxy.model.exceptions.ApiException;
 import com.zx.quant.klineproxy.model.persistence.PersistedKlineRow;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
+import com.zx.quant.klineproxy.monitor.ClosedBarLatencyRecorder;
+import com.zx.quant.klineproxy.monitor.ClosedBarLatencyRecorder.Trace;
 import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import com.zx.quant.klineproxy.service.KlineService;
 import com.zx.quant.klineproxy.service.stream.AbstractBinanceKlineStream;
@@ -183,6 +185,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   /** per interval: when did each symbol's closing update (x=true) for the latest boundary arrive */
   private final ConcurrentHashMap<String, BoundarySettle> boundarySettles = new ConcurrentHashMap<>();
+  private final ClosedBarLatencyRecorder closedBarLatencyRecorder = new ClosedBarLatencyRecorder();
+
+  @Value("${kline.diagnostics.closedBarLatencyEnabled:true}")
+  private boolean closedBarLatencyEnabled = true;
   private static final long SETTLE_INCOMPLETE_LOG_AFTER_MS = 30_000L;
   private static final int SETTLE_PENDING_LIST_LIMIT = 20;
 
@@ -674,20 +680,36 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   /**
-   * @param eventTimeMs Binance's own {@code E} (when IT emitted the message), or null when the
-   *     caller has none. Recording it next to our local arrival time is what separates "Binance
-   *     published late" from "we received/processed it late" — the local-clock arrival alone
-   *     cannot tell those apart.
+   * @param eventTimeMs Binance's own event timestamp {@code E}, or null when the caller has none.
+   *     E is not a guaranteed socket send time. Transport diagnostics distinguish our frame
+   *     callback, executor queue and processing; the legacy settle offset is sampled later.
    */
   protected void updateStreamKline(String symbol, String interval, Kline kline, boolean closed,
       Long eventTimeMs) {
+    updateStreamKline(symbol, interval, kline, closed, eventTimeMs, null);
+  }
+
+  private void updateStreamKline(String symbol, String interval, Kline kline, boolean closed,
+      Long eventTimeMs, Trace trace) {
     if (kline == null) {
       return;
     }
+    if (trace != null) {
+      trace.cacheStarting();
+    }
     updateKlinesInternal(symbol, interval, Collections.singletonList(kline), false);
+    if (trace != null) {
+      trace.cacheUpdated();
+    }
     if (closed) {
       markFinal(symbol, interval, kline.getOpenTime());
+      if (trace != null) {
+        trace.finalized();
+      }
       recordClosedBarArrival(symbol, interval, kline.getOpenTime(), eventTimeMs);
+      if (trace != null) {
+        trace.settleRecorded();
+      }
     }
   }
 
@@ -754,6 +776,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   /** scheduled: flag boundaries whose closing updates never fully arrived */
   void logIncompleteSettles() {
     long now = getServerTime();
+    closedBarLatencyRecorder.logDue(getServiceType(), now);
     for (BoundarySettle settle : boundarySettles.values()) {
       if (settle.logged || now - settle.boundary < SETTLE_INCOMPLETE_LOG_AFTER_MS) {
         continue;
@@ -806,14 +829,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         }
       }
       Collections.sort(pending);
-      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={}",
+      log.warn("CLOSED_BAR_SETTLE_INCOMPLETE interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} pending={} pending_symbols={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={} service={}",
           intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, pending.size(),
           pending.size() <= SETTLE_PENDING_LIST_LIMIT ? pending : pending.subList(0, SETTLE_PENDING_LIST_LIMIT),
-          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax);
+          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax, getServiceType());
     } else {
-      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={}",
+      log.info("CLOSED_BAR_SETTLED interval={} boundary={} expected={} arrived={} first_ms={} p50_ms={} p90_ms={} max_ms={} last={} not_trading={} not_trading_symbols={} ev_n={} ev_first_ms={} ev_p50_ms={} ev_p90_ms={} ev_max_ms={} service={}",
           intervalEnum.code(), settle.boundary, expected, arrived, first, p50, p90, max, last,
-          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax);
+          notTrading.size(), notTradingShown, evN, evFirst, evP50, evP90, evMax, getServiceType());
     }
   }
 
@@ -826,7 +849,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private static final class BoundarySettle {
     private final long boundary;
     private final ConcurrentHashMap<String, Long> arrivalMsBySymbol = new ConcurrentHashMap<>();
-    /** Binance's own emit time minus the boundary — publish-side delay, no local clock involved. */
+    /** Binance event time minus the boundary; no local clock involved. */
     private final ConcurrentHashMap<String, Long> eventOffsetMsBySymbol = new ConcurrentHashMap<>();
     private volatile boolean logged;
     private volatile ClosedBarSettleSummary summary;
@@ -1023,7 +1046,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   protected Function<ParsedWebSocketMessage, Boolean> getKlineEventMessageHandler() {
     return parsedMessage -> {
       AbstractBinanceKlineStream stream = getKlineStreamForEvent(parsedMessage.eventType());
-      return stream != null && doForKlineEvent(stream.parse(parsedMessage, getNumberType(), serializer));
+      if (stream == null) {
+        return false;
+      }
+      Trace trace = closedBarLatencyEnabled && parsedMessage.timing() != null
+          && parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)
+          ? new Trace(parsedMessage.timing()) : null;
+      return doForKlineEvent(stream.parse(parsedMessage, getNumberType(), serializer), trace);
     };
   }
 
@@ -1049,6 +1078,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent) {
+    return doForKlineEvent(eventKlineEvent, null);
+  }
+
+  private boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent, Trace trace) {
     if (eventKlineEvent == null || getKlineStreamForEvent(eventKlineEvent.getEventType()) == null
         || eventKlineEvent.getEventKline() == null) {
       return false;
@@ -1068,8 +1101,19 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     } catch (NumberFormatException ignored) {
       // diagnostics only: a malformed E must never drop a kline update
     }
-    updateStreamKline(symbol, interval, kline, eventKlineEvent.getEventKline().isClosed(), eventTimeMs);
+    updateStreamKline(symbol, interval, kline, eventKlineEvent.getEventKline().isClosed(), eventTimeMs, trace);
     monitorManager.incReceivedKlineMessage(getServiceType(), interval, symbol);
+    if (trace != null) {
+      trace.completed();
+      long clockBeforeMs = System.currentTimeMillis();
+      long serverTimeMs = getServerTime();
+      long clockAfterMs = System.currentTimeMillis();
+      long clockSampleSpanMs = clockAfterMs - clockBeforeMs;
+      long clockOffsetMs = serverTimeMs - clockBeforeMs - clockSampleSpanMs / 2;
+      long boundary = kline.getOpenTime() + CommonUtil.getEnumByCode(interval, IntervalEnum.class).getMills();
+      closedBarLatencyRecorder.record(interval, boundary, new ClosedBarLatencyRecorder.Sample(
+          symbol, eventKlineEvent.getEventType(), eventTimeMs, clockOffsetMs, clockSampleSpanMs, trace));
+    }
     return true;
   }
 

@@ -61,6 +61,10 @@ public interface WebSocketClient {
 
   void onReceive(String message);
 
+  default void onReceive(String message, long receivedAtMillis, long receivedAtNanos) {
+    onReceive(message);
+  }
+
   default void onReceiveNoHandle() {}
 
   void addMessageHandler(Function<ParsedWebSocketMessage, Boolean> messageHandler);
