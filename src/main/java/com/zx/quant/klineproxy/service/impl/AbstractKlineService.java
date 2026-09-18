@@ -421,13 +421,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         : Set.of();
     tickerPriceBook.applyAbsent(absent, requestTime);
     if (isTickerStreamAlive()) {
-      List<String> priced = symbols.stream().filter(symbol -> !absent.contains(symbol)).toList();
+      // a no-price symbol answers only through an update newer than the request that kept it booked
+      List<String> priced = symbols.stream()
+          .filter(symbol -> !absent.contains(symbol) || tickerPriceBook.contains(symbol)).toList();
       return priced.isEmpty() ? List.of() : queryLiveTickerPrices(priced);
     }
     List<Ticker<?>> result = new ArrayList<>(symbols.size());
     for (String symbol : symbols) {
       Ticker<?> rest = restBySymbol.get(symbol);
-      Ticker<?> ticker = rest != null ? newerOfRestAndBook(rest) : answered ? null : tickerPriceBook.get(symbol);
+      Ticker<?> ticker = rest != null ? newerOfRestAndBook(rest) : tickerPriceBook.get(symbol);
       if (ticker != null) {
         result.add(ticker);
       }
