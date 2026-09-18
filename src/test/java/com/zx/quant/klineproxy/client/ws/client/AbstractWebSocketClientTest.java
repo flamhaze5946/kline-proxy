@@ -108,6 +108,33 @@ class AbstractWebSocketClientTest {
   }
 
   @Test
+  void genericFramesAreHandledInReceiveOrder() throws Exception {
+    TestWebSocketClient client = new TestWebSocketClient(new Serializer(new ObjectMapper()));
+    List<String> handled = new java.util.concurrent.CopyOnWriteArrayList<>();
+    CountDownLatch done = new CountDownLatch(3);
+    client.addMessageHandler(message -> {
+      String symbol = message.payloadNode().get(0).get("s").asText();
+      if (symbol.equals("FIRST")) {
+        try {
+          Thread.sleep(100L);  // a slow frame must not be overtaken by the ones behind it
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      handled.add(symbol);
+      done.countDown();
+      return true;
+    });
+
+    for (String symbol : List.of("FIRST", "SECOND", "THIRD")) {
+      client.onReceive("[{\"e\":\"24hrMiniTicker\",\"s\":\"" + symbol + "\"}]");
+    }
+
+    assertTrue(done.await(2, TimeUnit.SECONDS));
+    assertEquals(List.of("FIRST", "SECOND", "THIRD"), handled);
+  }
+
+  @Test
   void symbolOrPayloadContainingPingPongMustRemainMarketData() throws Exception {
     TestWebSocketClient client = new TestWebSocketClient(new Serializer(new ObjectMapper()));
     CountDownLatch handled = new CountDownLatch(2);

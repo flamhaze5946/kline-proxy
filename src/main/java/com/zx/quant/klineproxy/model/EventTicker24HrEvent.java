@@ -14,7 +14,7 @@ public class EventTicker24HrEvent extends EventTicker24Hr {
   @JsonProperty("e")
   protected String eventType;
   @JsonProperty("E")
-  protected String eventTime;
+  protected Long eventTime;
   @JsonProperty("s")
   protected String symbol;
 }
