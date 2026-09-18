@@ -36,6 +36,12 @@ public final class TickerPriceBook {
   /** latest stream update of each symbol not in the book yet */
   private final Map<String, BigDecimalTicker> pendingStream = new HashMap<>();
 
+  /**
+   * symbol -> coverage of a REST answer without a price for it: data up to that time cannot bring it
+   * back. Dropped once a newer full snapshot takes over the decision.
+   */
+  private final Map<String, Long> absentUntil = new HashMap<>();
+
   private final AtomicLong version = new AtomicLong();
 
   private volatile Snapshot snapshot = new Snapshot(-1L, List.of());
@@ -86,8 +92,10 @@ public final class TickerPriceBook {
       return false;
     }
     if (!tickers.containsKey(symbol)) {
-      pendingStream.merge(symbol, newTicker(symbol, price, time),
-          (current, next) -> next.getTime() > current.getTime() ? next : current);
+      if (!isAbsentAt(symbol, time)) {
+        pendingStream.merge(symbol, newTicker(symbol, price, time),
+            (current, next) -> next.getTime() > current.getTime() ? next : current);
+      }
       return false;
     }
     return upsert(symbol, price, time);
@@ -110,6 +118,10 @@ public final class TickerPriceBook {
         continue;
       }
       listed.add(symbol);
+      Long absent = absentUntil.get(symbol);
+      if (absent != null && coverage <= absent) {
+        continue;  // a no-price answer newer than this snapshot decides
+      }
       if (newest || tickers.containsKey(symbol)) {
         upsert(symbol, price, ticker.getTime());
       }
@@ -125,12 +137,14 @@ public final class TickerPriceBook {
     }
     // an unlisted symbol's update newer than the snapshot may be a listing it could not see yet
     pendingStream.values().removeIf(pending -> {
-      if (listed.contains(pending.getSymbol())) {
+      if (listed.contains(pending.getSymbol()) && tickers.containsKey(pending.getSymbol())) {
         upsert(pending.getSymbol(), pending.getPrice(), pending.getTime());
         return true;
       }
       return pending.getTime() <= coverage;
     });
+    // older no-price answers: absent symbols now need data newer than this snapshot anyway
+    absentUntil.values().removeIf(absent -> absent <= coverage);
     lastFullSyncTime.set(coverage);
   }
 
@@ -145,7 +159,8 @@ public final class TickerPriceBook {
       if (symbol == null || price == null || ticker.getTime() <= 0L) {
         continue;
       }
-      if (!tickers.containsKey(symbol) && ticker.getTime() <= lastFullSyncTime.get()) {
+      if (!tickers.containsKey(symbol) && ticker.getTime() <= lastFullSyncTime.get()
+          || isAbsentAt(symbol, ticker.getTime())) {
         continue;
       }
       upsert(symbol, price, ticker.getTime());
@@ -164,6 +179,7 @@ public final class TickerPriceBook {
   public synchronized void applyAbsent(Collection<String> symbols, long requestTime) {
     long coverage = requestTime - restLagMillis;
     for (String symbol : symbols) {
+      absentUntil.merge(symbol, coverage, Math::max);
       BigDecimalTicker current = tickers.get(symbol);
       if (current != null && current.getTime() <= coverage) {
         tickers.remove(symbol);
@@ -243,6 +259,11 @@ public final class TickerPriceBook {
     tickers.put(symbol, newTicker(symbol, price, time));
     version.incrementAndGet();
     return true;
+  }
+
+  private boolean isAbsentAt(String symbol, long time) {
+    Long absent = absentUntil.get(symbol);
+    return absent != null && time <= absent;
   }
 
   private static BigDecimalTicker newTicker(String symbol, BigDecimal price, long time) {
