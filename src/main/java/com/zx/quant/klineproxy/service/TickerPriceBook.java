@@ -156,6 +156,26 @@ public final class TickerPriceBook {
     }
   }
 
+  /**
+   * A successful REST answer without a price for these symbols (a settling contract answers {}): each
+   * leaves the book unless the book holds an update newer than the request.
+   * @param requestTime server time just before the request was sent
+   */
+  public synchronized void applyAbsent(Collection<String> symbols, long requestTime) {
+    long coverage = requestTime - restLagMillis;
+    for (String symbol : symbols) {
+      BigDecimalTicker current = tickers.get(symbol);
+      if (current != null && current.getTime() <= coverage) {
+        tickers.remove(symbol);
+        version.incrementAndGet();
+      }
+      BigDecimalTicker pending = pendingStream.get(symbol);
+      if (pending != null && pending.getTime() <= coverage) {
+        pendingStream.remove(symbol);
+      }
+    }
+  }
+
   /** latest event time seen on the stream; 0 before the first frame */
   public long lastStreamEventTime() {
     return lastStreamEventTime.get();

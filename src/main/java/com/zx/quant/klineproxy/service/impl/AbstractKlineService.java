@@ -367,13 +367,17 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   /**
-   * Stream silent: REST passthrough. Otherwise the book, once a full snapshot has defined the
-   * market; a segment the snapshot does not cover yet (frames were lost) is repaired behind the read.
+   * Stream silent: REST passthrough, unless the stream resumed while it was in flight. Otherwise the
+   * book, once a full snapshot has defined the market; a segment the snapshot does not cover yet
+   * (frames were lost) is repaired behind the read.
    */
   private List<Ticker<?>> queryAllMarketTickerPrices() {
     lastAllMarketTickerAccessTime.set(System.currentTimeMillis());
     if (!isTickerStreamAlive()) {
-      return queryProvisionalAllMarketTickers();
+      List<Ticker<?>> provisional = queryProvisionalAllMarketTickers();
+      if (!isTickerStreamAlive()) {
+        return provisional;
+      }
     }
     if (!tickerPriceBook.hasFullSnapshot()) {
       syncTickerPricesIfNoSnapshot();
@@ -393,44 +397,36 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   /**
-   * Live stream: the book answers, after waiting for its first snapshot; a symbol it lacks (a new
-   * listing, or every symbol while no snapshot could be taken) is looked up with a dated REST call and
-   * joins the book. Silent stream: REST ticker/price.
+   * Live stream: the book answers. Silent stream: REST ticker/price, unless the stream resumed while
+   * it was in flight; a symbol REST answers without a price has none and leaves the book.
    */
   private List<Ticker<?>> queryTickerPrices(Collection<String> symbols) {
     if (isTickerStreamAlive()) {
-      if (!tickerPriceBook.hasFullSnapshot()) {
-        syncTickerPricesIfNoSnapshot();
-      }
-      if (tickerPriceBook.hasFullSnapshot()) {
-        if (!tickerPriceBook.isCovered()) {
-          triggerTickerPriceSyncIfStale();
-        }
-        List<Ticker<?>> known = tickerPriceBook.get(symbols);
-        if (known.size() == symbols.size()) {
-          return known;
-        }
-        List<String> unknownSymbols = symbols.stream()
-            .filter(symbol -> !tickerPriceBook.contains(symbol)).distinct().toList();
-        tickerPriceBook.applySymbols(queryDatedTickersBySymbols(unknownSymbols));
-        return tickerPriceBook.get(symbols);
-      }
-      tickerPriceBook.applySymbols(queryDatedTickersBySymbols(symbols.stream().distinct().toList()));
-      return tickerPriceBook.get(symbols);
+      return queryLiveTickerPrices(symbols);
     }
+    List<String> requested = symbols.stream().distinct().toList();
     long requestTime = getServerTime();
-    List<Ticker<?>> restTickers = queryTickersBySymbols(symbols.stream().distinct().toList());
+    List<Ticker<?>> restTickers = queryTickersBySymbols(requested);
     if (restTickers == null) {
       restTickers = List.of();
     }
     tickerPriceBook.applySymbols(restTickers);
+    if (isTickerStreamAlive()) {
+      return queryLiveTickerPrices(symbols);
+    }
     Map<String, Ticker<?>> restBySymbol = restTickers.stream()
         .filter(ticker -> ticker.getSymbol() != null && ticker.getPrice() != null)
         .collect(Collectors.toMap(Ticker::getSymbol, Function.identity(), (o, n) -> n));
+    // an empty list for several symbols means the market does not support the query, not "no price"
+    boolean answered = !restTickers.isEmpty() || requested.size() == 1;
+    if (answered) {
+      tickerPriceBook.applyAbsent(requested.stream().filter(symbol -> !restBySymbol.containsKey(symbol)).toList(),
+          requestTime);
+    }
     List<Ticker<?>> result = new ArrayList<>(symbols.size());
     for (String symbol : symbols) {
       Ticker<?> rest = restBySymbol.get(symbol);
-      Ticker<?> ticker = rest == null ? tickerPriceBook.get(symbol) : newerOfRestAndBook(rest, requestTime);
+      Ticker<?> ticker = rest != null ? newerOfRestAndBook(rest) : answered ? null : tickerPriceBook.get(symbol);
       if (ticker != null) {
         result.add(ticker);
       }
@@ -439,13 +435,40 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   /**
-   * The book's price when it is newer than the REST one: a dated REST price by its time, an undated
-   * one by the moment it was requested (the stream may have resumed while it was in flight).
+   * The book answers, after waiting for its first snapshot; a symbol it lacks (a new listing, or every
+   * symbol while no snapshot could be taken) is looked up with a dated REST call and joins the book.
    */
-  private Ticker<?> newerOfRestAndBook(Ticker<?> rest, long requestTime) {
+  private List<Ticker<?>> queryLiveTickerPrices(Collection<String> symbols) {
+    if (!tickerPriceBook.hasFullSnapshot()) {
+      syncTickerPricesIfNoSnapshot();
+    }
+    if (tickerPriceBook.hasFullSnapshot()) {
+      if (!tickerPriceBook.isCovered()) {
+        triggerTickerPriceSyncIfStale();
+      }
+      List<Ticker<?>> known = tickerPriceBook.get(symbols);
+      if (known.size() == symbols.size()) {
+        return known;
+      }
+      List<String> unknownSymbols = symbols.stream()
+          .filter(symbol -> !tickerPriceBook.contains(symbol)).distinct().toList();
+      tickerPriceBook.applySymbols(queryDatedTickersBySymbols(unknownSymbols));
+      return tickerPriceBook.get(symbols);
+    }
+    tickerPriceBook.applySymbols(queryDatedTickersBySymbols(symbols.stream().distinct().toList()));
+    return tickerPriceBook.get(symbols);
+  }
+
+  /**
+   * A dated REST price loses to a newer book price. An undated one is only served while the stream
+   * is silent, so nothing in the book is newer than it.
+   */
+  private Ticker<?> newerOfRestAndBook(Ticker<?> rest) {
+    if (rest.getTime() <= 0L) {
+      return rest;
+    }
     Ticker<?> booked = tickerPriceBook.get(rest.getSymbol());
-    long restTime = rest.getTime() > 0L ? rest.getTime() : requestTime;
-    return booked != null && booked.getTime() > restTime ? booked : rest;
+    return booked != null && booked.getTime() > rest.getTime() ? booked : rest;
   }
 
   /** prices dated by their last update: ticker/24hr closeTime where ticker/price carries no time */
@@ -1895,14 +1918,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         return;
       }
       long streamMark = tickerPriceBook.lastStreamEventTime();
-      long requestTime = getServerTime();
       List<Ticker<?>> tickers = queryTickers0();
       List<Ticker<?>> values = new ArrayList<>(tickers == null ? 0 : tickers.size());
       if (tickers != null) {
         tickerPriceBook.applySymbols(tickers);  // dated prices (futures) still feed the book
         for (Ticker<?> ticker : tickers) {
           if (ticker.getSymbol() != null && ticker.getPrice() != null) {
-            values.add(newerOfRestAndBook(ticker, requestTime));
+            values.add(newerOfRestAndBook(ticker));
           }
         }
       }
