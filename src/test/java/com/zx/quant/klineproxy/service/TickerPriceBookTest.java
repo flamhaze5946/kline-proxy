@@ -101,6 +101,16 @@ class TickerPriceBookTest {
   }
 
   @Test
+  void anAnswerWithoutAPriceRemovesOnlyEntriesTheRequestIsNewerThan() {
+    book.applySnapshot(List.of(dated("SETTLINGUSDT", "5", 1_000L), dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.updateFromStream("BTCUSDT", new BigDecimal("101"), 9_500L);  // newer than the request below
+
+    book.applyAbsent(List.of("SETTLINGUSDT", "BTCUSDT"), 10_000L);  // covers up to 9_000
+
+    assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("BTCUSDT");
+  }
+
+  @Test
   void datedRestAndStreamMergeToTheNewestWhateverTheArrivalOrder() {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
 

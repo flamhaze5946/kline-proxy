@@ -227,6 +227,39 @@ class AbstractKlineServiceTickerPriceTest {
   }
 
   @Test
+  void aContractThatStoppedTradingAnswersEmptyAndLeavesTheBook() {
+    TickerTestService service = liveFutures();
+    service.serverTime = NOW - 10 + 2_001;  // silent
+    service.symbolRest = List.of(new BigDecimalTicker());  // Binance answers {} once ETHUSDT is settling
+
+    assertThat(service.queryTickers(List.of("ETHUSDT"))).isEmpty();
+    assertThat(book(service).contains("ETHUSDT")).isFalse();
+  }
+
+  @Test
+  void undatedRestIsNotServedWhenTheStreamResumesWhileItIsInFlight() {
+    TickerTestService service = spot();
+    service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 3_000, "98.9", 1L),
+        full24Hr("ETHUSDT", "50", NOW - 60_000, "49.9", 1L));
+    service.handle(frame("24hrMiniTicker", NOW - 1_500, NOW - 20, "BTCUSDT", "110"));
+    awaitCovered(service);
+    service.serverTime = NOW - 20 + 30_001;  // silent for spot
+    Runnable resume = () -> service.handle(frame("24hrMiniTicker", NOW + 29_900, NOW + 29_990, "BTCUSDT", "111"));
+
+    service.symbolRest = List.of(restTicker("BTCUSDT", "120", 0L));
+    service.duringSymbolRest = resume;
+    assertThat(prices(service.queryTickers(List.of("BTCUSDT")))).containsExactly("BTCUSDT=111");
+
+    service.serverTime = NOW + 29_990 + 30_001;  // silent again
+    service.providerRest = List.of(restTicker("BTCUSDT", "120", 0L), restTicker("ETHUSDT", "51", 0L));
+    service.duringProvider = () -> service.handle(frame("24hrMiniTicker", NOW + 60_000, NOW + 60_050, "BTCUSDT", "112"));
+    assertThat(prices(service.queryTickers(List.of()))).containsExactly("BTCUSDT=112", "ETHUSDT=50");
+
+    service.serverTime = NOW + 61_100;  // let the post-gap snapshot cover the last segment
+    awaitCovered(service);
+  }
+
+  @Test
   void lostFramesTriggerASnapshotAndNewerStreamPricesSurviveIt() {
     TickerTestService service = liveFutures();
     int snapshotsBefore = service.snapshotRestCalls.get();
@@ -458,6 +491,9 @@ class AbstractKlineServiceTickerPriceTest {
     /** runs inside the next passthrough request, as if a frame arrived while it was in flight */
     private volatile Runnable duringProvider;
 
+    /** runs inside the next symbol request, as if a frame arrived while it was in flight */
+    private volatile Runnable duringSymbolRest;
+
     private volatile RuntimeException all24HrFailure;
 
     private volatile List<Ticker<?>> symbolRest = List.of();
@@ -536,6 +572,11 @@ class AbstractKlineServiceTickerPriceTest {
 
     @Override
     protected List<Ticker<?>> queryTickersBySymbols(Collection<String> symbols) {
+      Runnable during = duringSymbolRest;
+      if (during != null) {
+        duringSymbolRest = null;
+        during.run();
+      }
       symbolRestCalls.incrementAndGet();
       synchronized (symbolRestRequests) {
         symbolRestRequests.add(List.copyOf(symbols));
