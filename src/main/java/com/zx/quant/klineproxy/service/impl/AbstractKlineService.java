@@ -13,6 +13,7 @@ import com.zx.quant.klineproxy.model.EventKline.DoubleEventKline;
 import com.zx.quant.klineproxy.model.EventKline.FloatEventKline;
 import com.zx.quant.klineproxy.model.EventKline.StringEventKline;
 import com.zx.quant.klineproxy.model.EventKlineEvent;
+import com.zx.quant.klineproxy.model.EventMiniTicker24HrEvent;
 import com.zx.quant.klineproxy.model.EventTicker24HrEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Kline.BigDecimalKline;
@@ -24,6 +25,7 @@ import com.zx.quant.klineproxy.model.KlineSetKey;
 import com.zx.quant.klineproxy.model.KlineUpdateSource;
 import com.zx.quant.klineproxy.model.ParsedWebSocketMessage;
 import com.zx.quant.klineproxy.model.Ticker;
+import com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
 import com.zx.quant.klineproxy.model.config.KlinePersistenceProperties;
@@ -40,6 +42,7 @@ import com.zx.quant.klineproxy.monitor.ClosedBarLatencyRecorder.Trace;
 import com.zx.quant.klineproxy.service.KlinePersistenceStore;
 import com.zx.quant.klineproxy.service.FinalBarWaitRegistry;
 import com.zx.quant.klineproxy.service.KlineService;
+import com.zx.quant.klineproxy.service.TickerPriceBook;
 import com.zx.quant.klineproxy.service.stream.AbstractBinanceKlineStream;
 import com.zx.quant.klineproxy.service.stream.BinanceKlineStream;
 import com.zx.quant.klineproxy.service.stream.BinanceKlineHeader;
@@ -53,6 +56,7 @@ import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -80,6 +84,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
@@ -93,9 +98,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -123,15 +126,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private static final ExecutorService KLINE_FETCH_EXECUTOR = buildKlineFetchExecutor();
 
-  private static final IntervalEnum DEFAULT_TICKER_INTERVAL = IntervalEnum.ONE_HOUR;
-
   protected static final BinanceKlineStream ORDINARY_KLINE_STREAM = new BinanceKlineStream();
 
   private static final List<AbstractBinanceKlineStream> DEFAULT_KLINE_STREAMS = List.of(ORDINARY_KLINE_STREAM);
 
-  private static final String TICKER_24HR_EVENT = "24hrTicker";
+  /** frames arrive every 1000 ms: stale after one missed frame plus delivery jitter */
+  protected static final long TICKER_STREAM_STALE_MILLIS = 2_000L;
 
-  private static final String TICKER_24HR_TOPIC = "!ticker@arr";
+  /**
+   * consecutive frames carry contiguous event times (observed jumps under 50 ms);
+   * a lost frame opens a jump of about 1000 ms
+   */
+  private static final long TICKER_STREAM_GAP_MILLIS = 500L;
+
+  /**
+   * how far a full REST snapshot trails its request: measured from request send to the newest
+   * liquid-symbol time, up to 563 ms on fapi/v2/ticker/price and 942 ms on api/v3/ticker/24hr
+   */
+  private static final long TICKER_REST_LAG_MILLIS = 1_000L;
+
+  private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
   private static final int SYMBOLS_PER_CONNECTION = 150;
 
@@ -175,7 +189,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   private final Set<String> extraSubscribeTopics = ConcurrentHashMap.newKeySet();
 
-  private final Cache<String, Ticker24Hr> ticker24HrCache = Caffeine.newBuilder()
+  private final Cache<String, Ticker24HrEntry> ticker24HrCache = Caffeine.newBuilder()
       .expireAfterWrite(Duration.ofDays(1))
       .build();
 
@@ -194,13 +208,29 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Value("${kline.diagnostics.closedBarLatencyEnabled:true}")
   private boolean closedBarLatencyEnabled = true;
 
-  private final AtomicReference<AllMarketSnapshot<Ticker<?>>> allMarketTickerSnapshot =
+  private final TickerPriceBook tickerPriceBook = new TickerPriceBook(
+      TICKER_STREAM_GAP_MILLIS, TICKER_REST_LAG_MILLIS);
+
+  /** serializes full REST snapshots of the price book */
+  private final Object tickerPriceSyncLock = new Object();
+
+  private final AtomicBoolean syncingTickerPrices = new AtomicBoolean(false);
+
+  private final AtomicLong lastTickerPriceSyncAttemptTime = new AtomicLong(0L);
+
+  @Value("${kline.ticker.restCompensationIntervalMs:60000}")
+  private long tickerRestCompensationIntervalMs = 60_000L;
+
+  /** REST ticker/price passthrough, served only while the stream is silent */
+  private final AtomicReference<AllMarketSnapshot<Ticker<?>>> provisionalTickerSnapshot =
       new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
+
+  private final AtomicBoolean refreshingProvisionalTickerSnapshot = new AtomicBoolean(false);
+
+  private final Object provisionalTickerLock = new Object();
 
   private final AtomicReference<AllMarketSnapshot<Ticker24Hr>> allMarketTicker24HrSnapshot =
       new AtomicReference<>(new AllMarketSnapshot<>(List.of(), 0L));
-
-  private final AtomicBoolean refreshingAllMarketTickerSnapshot = new AtomicBoolean(false);
 
   private final AtomicBoolean refreshingAllMarketTicker24HrSnapshot = new AtomicBoolean(false);
 
@@ -296,12 +326,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return System.currentTimeMillis();
   }
 
-  protected Collection<String> getTicker24HrSubscribeTopics() {
-    return Set.of(TICKER_24HR_TOPIC);
+  /** the all-market stream feeding the price book and the 24hr fallback cache */
+  protected AllMarketTickerStream getAllMarketTickerStream() {
+    return AllMarketTickerStream.TICKER;
   }
 
-  protected String getTicker24HrStreamTopic(String symbol) {
-    return TICKER_24HR_TOPIC;
+  /** how long the stream may stay silent before ticker/price reads go to REST */
+  protected long getTickerStreamStaleMillis() {
+    return TICKER_STREAM_STALE_MILLIS;
+  }
+
+  /**
+   * Whether full price snapshots come from ticker/24hr (lastPrice at closeTime) instead of
+   * {@link #queryTickers0()}: a snapshot must date every price, and spot ticker/price carries no time.
+   */
+  protected boolean isTickerPriceSnapshotFrom24Hr() {
+    return false;
+  }
+
+  protected Collection<String> getTicker24HrSubscribeTopics() {
+    return Set.of(getAllMarketTickerStream().topic());
   }
 
   protected List<Ticker24Hr> queryTicker24HrsBySymbols(Collection<String> symbols) {
@@ -316,48 +360,106 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return Collections.emptyList();
   }
 
+  /** A symbol without a price (settling, pending listing) is simply absent from the answer. */
   @Override
   public List<Ticker<?>> queryTickers(Collection<String> symbols) {
-    if (CollectionUtils.isNotEmpty(symbols)) {
-      List<Ticker<?>> realtimeTickers = queryTickersBySymbols(symbols);
-      if (CollectionUtils.isNotEmpty(realtimeTickers)) {
-        return realtimeTickers;
-      }
-    } else {
-      List<Ticker<?>> realtimeTickers = queryAllMarketTickersSnapshot();
-      if (CollectionUtils.isNotEmpty(realtimeTickers)) {
-        return realtimeTickers;
-      }
-    }
-    IntervalEnum intervalEnum = DEFAULT_TICKER_INTERVAL;
-    List<IntervalEnum> subscribeIntervals = getSubscribeIntervals();
-    if (CollectionUtils.isNotEmpty(subscribeIntervals)) {
-      intervalEnum = subscribeIntervals.get(0);
-    }
-    String interval = intervalEnum.code();
-    long serverTime = getServerTime();
-    List<Ticker<?>> tickers = new ArrayList<>();
-    Collection<String> realSymbols;
-    if (CollectionUtils.isNotEmpty(symbols)) {
-      realSymbols = symbols;
-    } else {
-      realSymbols = klineSetMap.keySet().stream()
-          .filter(key -> StringUtils.equals(key.getInterval(), interval))
-          .map(KlineSetKey::getSymbol)
-          .toList();
-    }
+    return CollectionUtils.isEmpty(symbols) ? queryAllMarketTickerPrices() : queryTickerPrices(symbols);
+  }
 
-    for (String symbol : realSymbols) {
-      KlineSetKey key = new KlineSetKey(symbol, interval);
-      KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
-      NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
-      if (MapUtils.isNotEmpty(klineMap)) {
-        Kline kline = klineMap.lastEntry().getValue();
-        Ticker<?> ticker = Ticker.create(symbol, kline, serverTime);
-        tickers.add(ticker);
+  /**
+   * Stream silent: REST passthrough. Otherwise the book, once a full snapshot has defined the
+   * market; a segment the snapshot does not cover yet (frames were lost) is repaired behind the read.
+   */
+  private List<Ticker<?>> queryAllMarketTickerPrices() {
+    lastAllMarketTickerAccessTime.set(System.currentTimeMillis());
+    if (!isTickerStreamAlive()) {
+      return queryProvisionalAllMarketTickers();
+    }
+    if (!tickerPriceBook.hasFullSnapshot()) {
+      syncTickerPricesIfNoSnapshot();
+      if (!tickerPriceBook.hasFullSnapshot()) {
+        if (isTickerPriceSnapshotFrom24Hr()) {
+          // ticker/price carries no time here: while the stream is live it is not an answer
+          throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, -1001,
+              "Ticker prices are not ready yet; please retry.");
+        }
+        return queryProvisionalAllMarketTickers();
       }
     }
-    return tickers;
+    if (!tickerPriceBook.isCovered()) {
+      triggerTickerPriceSyncIfStale();
+    }
+    return tickerPriceBook.all();
+  }
+
+  /**
+   * Live stream: the book answers, after waiting for its first snapshot; a symbol it lacks (a new
+   * listing, or every symbol while no snapshot could be taken) is looked up with a dated REST call and
+   * joins the book. Silent stream: REST ticker/price.
+   */
+  private List<Ticker<?>> queryTickerPrices(Collection<String> symbols) {
+    if (isTickerStreamAlive()) {
+      if (!tickerPriceBook.hasFullSnapshot()) {
+        syncTickerPricesIfNoSnapshot();
+      }
+      if (tickerPriceBook.hasFullSnapshot()) {
+        if (!tickerPriceBook.isCovered()) {
+          triggerTickerPriceSyncIfStale();
+        }
+        List<Ticker<?>> known = tickerPriceBook.get(symbols);
+        if (known.size() == symbols.size()) {
+          return known;
+        }
+        List<String> unknownSymbols = symbols.stream()
+            .filter(symbol -> !tickerPriceBook.contains(symbol)).distinct().toList();
+        tickerPriceBook.applySymbols(queryDatedTickersBySymbols(unknownSymbols));
+        return tickerPriceBook.get(symbols);
+      }
+      tickerPriceBook.applySymbols(queryDatedTickersBySymbols(symbols.stream().distinct().toList()));
+      return tickerPriceBook.get(symbols);
+    }
+    long requestTime = getServerTime();
+    List<Ticker<?>> restTickers = queryTickersBySymbols(symbols.stream().distinct().toList());
+    if (restTickers == null) {
+      restTickers = List.of();
+    }
+    tickerPriceBook.applySymbols(restTickers);
+    Map<String, Ticker<?>> restBySymbol = restTickers.stream()
+        .filter(ticker -> ticker.getSymbol() != null && ticker.getPrice() != null)
+        .collect(Collectors.toMap(Ticker::getSymbol, Function.identity(), (o, n) -> n));
+    List<Ticker<?>> result = new ArrayList<>(symbols.size());
+    for (String symbol : symbols) {
+      Ticker<?> rest = restBySymbol.get(symbol);
+      Ticker<?> ticker = rest == null ? tickerPriceBook.get(symbol) : newerOfRestAndBook(rest, requestTime);
+      if (ticker != null) {
+        result.add(ticker);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * The book's price when it is newer than the REST one: a dated REST price by its time, an undated
+   * one by the moment it was requested (the stream may have resumed while it was in flight).
+   */
+  private Ticker<?> newerOfRestAndBook(Ticker<?> rest, long requestTime) {
+    Ticker<?> booked = tickerPriceBook.get(rest.getSymbol());
+    long restTime = rest.getTime() > 0L ? rest.getTime() : requestTime;
+    return booked != null && booked.getTime() > restTime ? booked : rest;
+  }
+
+  /** prices dated by their last update: ticker/24hr closeTime where ticker/price carries no time */
+  private List<Ticker<?>> queryDatedTickersBySymbols(Collection<String> symbols) {
+    if (!isTickerPriceSnapshotFrom24Hr()) {
+      List<Ticker<?>> tickers = queryTickersBySymbols(symbols);
+      return tickers == null ? List.of() : tickers;
+    }
+    List<Ticker24Hr> ticker24Hrs = queryTicker24HrsBySymbols(symbols);
+    return ticker24Hrs == null ? List.of() : toPriceTickers(ticker24Hrs);
+  }
+
+  private boolean isTickerStreamAlive() {
+    return tickerPriceBook.isStreamAlive(getServerTime(), getTickerStreamStaleMillis());
   }
 
   @Override
@@ -365,8 +467,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (CollectionUtils.isNotEmpty(symbols)) {
       List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24HrsBySymbols(symbols);
       if (CollectionUtils.isNotEmpty(realtimeTicker24Hrs)) {
-        ticker24HrCache.putAll(realtimeTicker24Hrs.stream()
-            .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n)));
+        realtimeTicker24Hrs.forEach(this::mergeTicker24Hr);
         return realtimeTicker24Hrs;
       }
     }
@@ -375,11 +476,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       if (CollectionUtils.isNotEmpty(realtimeTicker24Hrs)) {
         return realtimeTicker24Hrs;
       }
-      return List.copyOf(ticker24HrCache.asMap().values());
+      return ticker24HrCache.asMap().values().stream().map(Ticker24HrEntry::ticker).toList();
     }
     return symbols.stream()
         .map(ticker24HrCache::getIfPresent)
         .filter(Objects::nonNull)
+        .map(Ticker24HrEntry::ticker)
         .collect(Collectors.toList());
   }
 
@@ -1021,7 +1123,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   protected Function<ParsedWebSocketMessage, Boolean> getTicker24HrEventMessageHandler() {
-    return parsedMessage -> doForTicker24HrEvents(convertToEventTicker24HrEvent(parsedMessage));
+    return parsedMessage -> {
+      if (StringUtils.equals(parsedMessage.eventType(), AllMarketTickerStream.TICKER.eventType())) {
+        return doForTicker24HrEvents(convertToTickerEvents(parsedMessage, EventTicker24HrEvent.class));
+      }
+      if (StringUtils.equals(parsedMessage.eventType(), AllMarketTickerStream.MINI_TICKER.eventType())) {
+        return doForMiniTicker24HrEvents(convertToTickerEvents(parsedMessage, EventMiniTicker24HrEvent.class));
+      }
+      return false;
+    };
   }
 
   protected boolean doForKlineEvent(EventKlineEvent<?, ?> eventKlineEvent) {
@@ -1074,16 +1184,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return false;
     }
     Optional<EventTicker24HrEvent> invalidEventOptional = eventTicker24HrEvents.stream()
-        .filter(event -> !StringUtils.equals(event.getEventType(), TICKER_24HR_EVENT))
+        .filter(event -> !StringUtils.equals(event.getEventType(), AllMarketTickerStream.TICKER.eventType()))
         .findAny();
     if (invalidEventOptional.isPresent()) {
       return false;
     }
+    onTickerStreamFrame(eventTicker24HrEvents.stream().map(EventTicker24HrEvent::getEventTime).toList());
     eventTicker24HrEvents.forEach(this::doForTicker24HrEvent);
     return true;
   }
 
   protected void doForTicker24HrEvent(EventTicker24HrEvent eventTicker24HrEvent) {
+    monitorManager.incReceivedTickerMessage(getServiceType());
+    if (eventTicker24HrEvent.getEventTime() != null) {
+      tickerPriceBook.updateFromStream(eventTicker24HrEvent.getSymbol(), eventTicker24HrEvent.getLastPrice(),
+          eventTicker24HrEvent.getEventTime());
+    }
+    // the futures market stream also carries coin-margined contracts: only symbols of this market count
+    if (!tickerPriceBook.contains(eventTicker24HrEvent.getSymbol())) {
+      return;
+    }
     Ticker24Hr ticker24Hr = new Ticker24Hr();
     ticker24Hr.setSymbol(eventTicker24HrEvent.getSymbol());
     ticker24Hr.setPriceChange(eventTicker24HrEvent.getPriceChange());
@@ -1107,8 +1227,157 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     ticker24Hr.setLastId(eventTicker24HrEvent.getLastId());
     ticker24Hr.setCount(eventTicker24HrEvent.getCount());
 
-    ticker24HrCache.put(ticker24Hr.getSymbol(), ticker24Hr);
+    mergeTicker24Hr(ticker24Hr);
+  }
+
+  protected boolean doForMiniTicker24HrEvents(List<EventMiniTicker24HrEvent> events) {
+    if (CollectionUtils.isEmpty(events)) {
+      return false;
+    }
+    boolean invalid = events.stream()
+        .anyMatch(event -> !StringUtils.equals(event.getEventType(), AllMarketTickerStream.MINI_TICKER.eventType()));
+    if (invalid) {
+      return false;
+    }
+    onTickerStreamFrame(events.stream().map(EventMiniTicker24HrEvent::getEventTime).toList());
+    events.forEach(this::doForMiniTicker24HrEvent);
+    return true;
+  }
+
+  protected void doForMiniTicker24HrEvent(EventMiniTicker24HrEvent event) {
     monitorManager.incReceivedTickerMessage(getServiceType());
+    if (event.getEventTime() != null) {
+      tickerPriceBook.updateFromStream(event.getSymbol(), event.getLastPrice(), event.getEventTime());
+    }
+    if (tickerPriceBook.contains(event.getSymbol())) {
+      mergeMiniTicker24Hr(event);
+    }
+  }
+
+  /** Runs before the frame's prices land, so a frame after lost ones marks the book uncovered first. */
+  private void onTickerStreamFrame(List<Long> eventTimes) {
+    long minEventTime = Long.MAX_VALUE;
+    long maxEventTime = Long.MIN_VALUE;
+    for (Long eventTime : eventTimes) {
+      if (eventTime != null) {
+        minEventTime = Math.min(minEventTime, eventTime);
+        maxEventTime = Math.max(maxEventTime, eventTime);
+      }
+    }
+    if (maxEventTime == Long.MIN_VALUE) {
+      return;
+    }
+    if (tickerPriceBook.onStreamFrame(minEventTime, maxEventTime)) {
+      // changes made while frames were lost are only recoverable from a full snapshot
+      triggerTickerPriceSync();
+    }
+  }
+
+  /**
+   * A full ticker (REST or stream) updates each field group it is newer for. Its closeTime is the
+   * symbol's last update time; an undated one (legacy callers) always applies.
+   */
+  private void mergeTicker24Hr(Ticker24Hr ticker24Hr) {
+    if (ticker24Hr == null || ticker24Hr.getSymbol() == null) {
+      return;
+    }
+    boolean undated = ticker24Hr.getCloseTime() == null;
+    long time = undated ? 0L : ticker24Hr.getCloseTime();
+    ticker24HrCache.asMap().compute(ticker24Hr.getSymbol(), (symbol, current) -> {
+      if (current == null) {
+        return new Ticker24HrEntry(ticker24Hr, time, time);
+      }
+      boolean takeStats = undated || time >= current.statsTime();
+      boolean takeFull = undated || time >= current.fullTime();
+      if (takeStats && takeFull) {
+        return new Ticker24HrEntry(ticker24Hr, time, time);
+      }
+      if (!takeStats && !takeFull) {
+        return current;
+      }
+      Ticker24Hr merged = new Ticker24Hr();
+      merged.setSymbol(symbol);
+      copyStatsFields(takeStats ? ticker24Hr : current.ticker(), merged);
+      copyFullTickerFields(takeFull ? ticker24Hr : current.ticker(), merged);
+      return new Ticker24HrEntry(merged,
+          takeStats ? time : current.statsTime(), takeFull ? time : current.fullTime());
+    });
+  }
+
+  /**
+   * The mini ticker carries OHLC, volumes and the last price. Bid/ask, last quantity, trade ids and the
+   * previous close keep the values, and the time, of the last full ticker for the symbol.
+   */
+  private void mergeMiniTicker24Hr(EventMiniTicker24HrEvent event) {
+    if (event.getSymbol() == null || event.getEventTime() == null) {
+      return;
+    }
+    long time = event.getEventTime();
+    ticker24HrCache.asMap().compute(event.getSymbol(), (symbol, current) -> {
+      if (current != null && time < current.statsTime()) {
+        return current;
+      }
+      Ticker24Hr merged = new Ticker24Hr();
+      merged.setSymbol(symbol);
+      if (current != null) {
+        copyFullTickerFields(current.ticker(), merged);
+      }
+      applyMiniTickerStats(event, merged);
+      return new Ticker24HrEntry(merged, time, current == null ? 0L : current.fullTime());
+    });
+  }
+
+  private static void applyMiniTickerStats(EventMiniTicker24HrEvent event, Ticker24Hr ticker24Hr) {
+    BigDecimal lastPrice = event.getLastPrice();
+    BigDecimal openPrice = event.getOpenPrice();
+    BigDecimal volume = event.getVolume();
+    BigDecimal quoteVolume = event.getQuoteVolume();
+    ticker24Hr.setLastPrice(lastPrice);
+    ticker24Hr.setOpenPrice(openPrice);
+    ticker24Hr.setHighPrice(event.getHighPrice());
+    ticker24Hr.setLowPrice(event.getLowPrice());
+    ticker24Hr.setVolume(volume);
+    ticker24Hr.setQuoteVolume(quoteVolume);
+    if (lastPrice != null && openPrice != null) {
+      BigDecimal priceChange = lastPrice.subtract(openPrice);
+      ticker24Hr.setPriceChange(priceChange);
+      ticker24Hr.setPriceChangePercent(openPrice.signum() == 0 ? BigDecimal.ZERO
+          : priceChange.multiply(ONE_HUNDRED).divide(openPrice, 3, RoundingMode.HALF_UP));
+    }
+    if (volume != null && quoteVolume != null) {
+      ticker24Hr.setWeightedAvgPrice(volume.signum() == 0 ? BigDecimal.ZERO
+          : quoteVolume.divide(volume, 8, RoundingMode.HALF_UP));
+    }
+    ticker24Hr.setOpenTime(event.getEventTime() - Duration.ofDays(1).toMillis());
+    ticker24Hr.setCloseTime(event.getEventTime());
+  }
+
+  /** price and volume statistics: the fields the mini ticker also carries or implies */
+  private static void copyStatsFields(Ticker24Hr from, Ticker24Hr to) {
+    to.setPriceChange(from.getPriceChange());
+    to.setPriceChangePercent(from.getPriceChangePercent());
+    to.setWeightedAvgPrice(from.getWeightedAvgPrice());
+    to.setLastPrice(from.getLastPrice());
+    to.setOpenPrice(from.getOpenPrice());
+    to.setHighPrice(from.getHighPrice());
+    to.setLowPrice(from.getLowPrice());
+    to.setVolume(from.getVolume());
+    to.setQuoteVolume(from.getQuoteVolume());
+    to.setOpenTime(from.getOpenTime());
+    to.setCloseTime(from.getCloseTime());
+  }
+
+  /** fields only a full ticker carries */
+  private static void copyFullTickerFields(Ticker24Hr from, Ticker24Hr to) {
+    to.setPrevClosePrice(from.getPrevClosePrice());
+    to.setLastQty(from.getLastQty());
+    to.setBidPrice(from.getBidPrice());
+    to.setBidQty(from.getBidQty());
+    to.setAskPrice(from.getAskPrice());
+    to.setAskQty(from.getAskQty());
+    to.setFirstId(from.getFirstId());
+    to.setLastId(from.getLastId());
+    to.setCount(from.getCount());
   }
 
   protected Function<ParsedWebSocketMessage, String> getKlineEventMessageTopicExtractor() {
@@ -1120,27 +1389,16 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   protected Function<ParsedWebSocketMessage, String> getTicker24HrEventMessageTopicExtractor() {
     return parsedMessage -> {
+      AllMarketTickerStream stream = getAllMarketTickerStream();
       JsonNode payloadNode = parsedMessage.payloadNode();
-      if (payloadNode == null || payloadNode.isNull()) {
+      if (payloadNode == null || payloadNode.isNull()
+          || !StringUtils.equals(parsedMessage.eventType(), stream.eventType())) {
         return null;
       }
       if (payloadNode.isArray()) {
-        if (payloadNode.isEmpty() || !allEventTypesMatch(payloadNode, TICKER_24HR_EVENT)) {
-          return null;
-        }
-        return TICKER_24HR_TOPIC;
+        return allEventTypesMatch(payloadNode, stream.eventType()) ? stream.topic() : null;
       }
-      if (!StringUtils.equals(parsedMessage.eventType(), TICKER_24HR_EVENT)) {
-        return null;
-      }
-      if (StringUtils.isNotBlank(parsedMessage.stream())) {
-        return parsedMessage.stream();
-      }
-      String symbol = extractTextField(payloadNode, "s");
-      if (StringUtils.isBlank(symbol)) {
-        return null;
-      }
-      return getTicker24HrStreamTopic(symbol);
+      return StringUtils.isNotBlank(parsedMessage.stream()) ? parsedMessage.stream() : stream.topic();
     };
   }
 
@@ -1174,6 +1432,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     startPersistedKlineWarmup(restoredKlineSetKeys, configuredKlineSetKeys);
     startKlineRpcUpdater();
     startTicker24HrRpcUpdater();
+    startTickerPriceCompensation();
     startAllMarketSnapshotUpdater();
     startSymbolOfflineCleaner();
     startKlinePersistenceUpdater();
@@ -1488,11 +1747,168 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
           long now = System.currentTimeMillis();
-          refreshAllMarketSnapshotIfActive(now, lastAllMarketTickerAccessTime, allMarketTickerSnapshot,
-              this::triggerAllMarketTickerRefresh);
+          if (!isTickerStreamAlive()) {
+            refreshAllMarketSnapshotIfActive(now, lastAllMarketTickerAccessTime, provisionalTickerSnapshot,
+                this::triggerProvisionalTickerRefresh);
+          }
           refreshAllMarketSnapshotIfActive(now, lastAllMarketTicker24HrAccessTime, allMarketTicker24HrSnapshot,
               this::triggerAllMarketTicker24HrRefresh);
         }), 1000, ALL_MARKET_SNAPSHOT_REFRESH_CHECK_INTERVAL_MILLS, TimeUnit.MILLISECONDS);
+  }
+
+  /** REST compensation for changes the stream never delivered; an older price never replaces a newer one. */
+  private void startTickerPriceCompensation() {
+    SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(new ExceptionSafeRunnable(() -> {
+      if (syncTickerPrices()) {
+        scheduleTickerPriceResyncIfNeeded();
+      }
+    }), 1000, tickerRestCompensationIntervalMs, TimeUnit.MILLISECONDS);
+  }
+
+  /**
+   * Apply one full-market snapshot, every price dated by its last update, to the price book.
+   * @return true when a non-empty snapshot was applied
+   */
+  private boolean syncTickerPrices() {
+    synchronized (tickerPriceSyncLock) {
+      lastTickerPriceSyncAttemptTime.set(System.currentTimeMillis());
+      long requestTime = getServerTime();
+      if (isTickerPriceSnapshotFrom24Hr()) {
+        List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+        if (CollectionUtils.isEmpty(ticker24Hrs)) {
+          return false;
+        }
+        publishTicker24HrSnapshot(ticker24Hrs, requestTime);
+        return true;
+      }
+      List<Ticker<?>> tickers = queryTickers0();
+      if (CollectionUtils.isEmpty(tickers)) {
+        return false;
+      }
+      tickerPriceBook.applySnapshot(tickers, requestTime);
+      return true;
+    }
+  }
+
+  /**
+   * A read without a snapshot joins the one in flight, or takes one unless one was just attempted.
+   * A failure is left to the caller's no-snapshot policy (-1001, or dated symbol lookups).
+   */
+  private void syncTickerPricesIfNoSnapshot() {
+    synchronized (tickerPriceSyncLock) {
+      if (tickerPriceBook.hasFullSnapshot() || isTickerPriceSyncAttemptRecent()) {
+        return;
+      }
+      try {
+        syncTickerPrices();
+      } catch (RuntimeException e) {
+        log.warn("service: {} first ticker price snapshot failed.", getServiceType(), e);
+      }
+    }
+  }
+
+  private boolean isTickerPriceSyncAttemptRecent() {
+    return System.currentTimeMillis() - lastTickerPriceSyncAttemptTime.get() < ALL_MARKET_TICKER_CACHE_TTL.toMillis();
+  }
+
+  private void triggerTickerPriceSyncIfStale() {
+    if (!isTickerPriceSyncAttemptRecent()) {
+      triggerTickerPriceSync();
+    }
+  }
+
+  /** Repair an uncovered stream segment; skipped when another snapshot covered it meanwhile. */
+  private void triggerTickerPriceSync() {
+    triggerSingleFlight(syncingTickerPrices, () -> {
+      boolean applied;
+      synchronized (tickerPriceSyncLock) {
+        applied = tickerPriceBook.needsFullSync() && syncTickerPrices();
+      }
+      if (applied) {
+        scheduleTickerPriceResyncIfNeeded();
+      }
+    });
+  }
+
+  /** A snapshot requested too soon after a stream segment started does not cover it; take another one. */
+  private void scheduleTickerPriceResyncIfNeeded() {
+    if (tickerPriceBook.needsFullSync()) {
+      SCHEDULE_EXECUTOR_SERVICE.schedule(new ExceptionSafeRunnable(this::triggerTickerPriceSync),
+          ALL_MARKET_TICKER_CACHE_TTL.toMillis(), TimeUnit.MILLISECONDS);
+    }
+  }
+
+  private void triggerSingleFlight(AtomicBoolean running, Runnable task) {
+    if (!running.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      MANAGE_EXECUTOR.execute(() -> {
+        try {
+          task.run();
+        } catch (RuntimeException e) {
+          log.warn("service: {} background refresh failed.", getServiceType(), e);
+        } finally {
+          running.set(false);
+        }
+      });
+    } catch (RejectedExecutionException e) {
+      running.set(false);
+      log.warn("service: {} background refresh rejected.", getServiceType(), e);
+    }
+  }
+
+  /**
+   * REST ticker/price as fetched, served while the stream is silent. A snapshot nobody kept fresh
+   * (no all-market read for longer than the idle timeout) is refreshed before it is served.
+   */
+  private List<Ticker<?>> queryProvisionalAllMarketTickers() {
+    long now = System.currentTimeMillis();
+    AllMarketSnapshot<Ticker<?>> snapshot = provisionalTickerSnapshot.get();
+    if (CollectionUtils.isNotEmpty(snapshot.values())
+        && now - snapshot.refreshedAt() <= ALL_MARKET_SNAPSHOT_REFRESH_IDLE_TIMEOUT_MILLS
+        && !isProvisionalBehindStream(snapshot)) {
+      if (snapshot.isStale(now)) {
+        triggerProvisionalTickerRefresh();
+      }
+      return snapshot.values();
+    }
+    refreshProvisionalTickers();
+    return provisionalTickerSnapshot.get().values();
+  }
+
+  /** stream frames after the request carry prices the passthrough lacks: the book may be newer */
+  private boolean isProvisionalBehindStream(AllMarketSnapshot<Ticker<?>> snapshot) {
+    return tickerPriceBook.lastStreamEventTime() > snapshot.streamMark();
+  }
+
+  private void triggerProvisionalTickerRefresh() {
+    triggerSingleFlight(refreshingProvisionalTickerSnapshot, this::refreshProvisionalTickers);
+  }
+
+  /** Readers and the background refresh share one refresh: whoever waited reuses its result. */
+  private void refreshProvisionalTickers() {
+    synchronized (provisionalTickerLock) {
+      AllMarketSnapshot<Ticker<?>> current = provisionalTickerSnapshot.get();
+      if (current.refreshedAt() != 0L && !current.isStale(System.currentTimeMillis())
+          && !isProvisionalBehindStream(current)) {
+        return;
+      }
+      long streamMark = tickerPriceBook.lastStreamEventTime();
+      long requestTime = getServerTime();
+      List<Ticker<?>> tickers = queryTickers0();
+      List<Ticker<?>> values = new ArrayList<>(tickers == null ? 0 : tickers.size());
+      if (tickers != null) {
+        tickerPriceBook.applySymbols(tickers);  // dated prices (futures) still feed the book
+        for (Ticker<?> ticker : tickers) {
+          if (ticker.getSymbol() != null && ticker.getPrice() != null) {
+            values.add(newerOfRestAndBook(ticker, requestTime));
+          }
+        }
+      }
+      provisionalTickerSnapshot.set(
+          new AllMarketSnapshot<>(List.copyOf(values), System.currentTimeMillis(), streamMark));
+    }
   }
 
   private <E> void refreshAllMarketSnapshotIfActive(long now, AtomicLong lastAccessTime,
@@ -1508,100 +1924,66 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     refreshTask.run();
   }
 
-  private void triggerAllMarketTickerRefreshIfStale(AllMarketSnapshot<Ticker<?>> snapshot) {
-    if (snapshot.isStale(System.currentTimeMillis())) {
-      triggerAllMarketTickerRefresh();
-    }
-  }
-
   private void triggerAllMarketTicker24HrRefreshIfStale(AllMarketSnapshot<Ticker24Hr> snapshot) {
     if (snapshot.isStale(System.currentTimeMillis())) {
       triggerAllMarketTicker24HrRefresh();
     }
   }
 
-  private void triggerAllMarketTickerRefresh() {
-    triggerAllMarketSnapshotRefresh(refreshingAllMarketTickerSnapshot,
-        this::loadAllMarketTickerSnapshot,
-        allMarketTickerSnapshot::set);
-  }
-
   private void triggerAllMarketTicker24HrRefresh() {
-    triggerAllMarketSnapshotRefresh(refreshingAllMarketTicker24HrSnapshot,
-        this::loadAllMarketTicker24HrSnapshot,
-        snapshot -> {
-          allMarketTicker24HrSnapshot.set(snapshot);
-          syncTicker24HrCache(snapshot.values());
-        });
-  }
-
-  private <E> void triggerAllMarketSnapshotRefresh(AtomicBoolean refreshing,
-                                                   Supplier<AllMarketSnapshot<E>> loader,
-                                                   Consumer<AllMarketSnapshot<E>> snapshotUpdater) {
-    if (!refreshing.compareAndSet(false, true)) {
-      return;
-    }
-    CompletableFuture.runAsync(() -> {
-      try {
-        snapshotUpdater.accept(loader.get());
-      } finally {
-        refreshing.set(false);
-      }
-    }, MANAGE_EXECUTOR);
-  }
-
-  private List<Ticker<?>> refreshAllMarketTickersSnapshotNow() {
-    AllMarketSnapshot<Ticker<?>> snapshot = loadAllMarketTickerSnapshot();
-    allMarketTickerSnapshot.set(snapshot);
-    return snapshot.values();
+    triggerSingleFlight(refreshingAllMarketTicker24HrSnapshot, this::refreshAllMarketTicker24HrSnapshot);
   }
 
   private List<Ticker24Hr> refreshAllMarketTicker24HrsSnapshotNow() {
-    AllMarketSnapshot<Ticker24Hr> snapshot = loadAllMarketTicker24HrSnapshot();
-    allMarketTicker24HrSnapshot.set(snapshot);
-    syncTicker24HrCache(snapshot.values());
-    return snapshot.values();
+    refreshAllMarketTicker24HrSnapshot();
+    return allMarketTicker24HrSnapshot.get().values();
   }
 
-  private AllMarketSnapshot<Ticker<?>> loadAllMarketTickerSnapshot() {
-    List<Ticker<?>> realtimeTickers = queryTickers0();
-    if (CollectionUtils.isEmpty(realtimeTickers)) {
-      return new AllMarketSnapshot<>(List.of(), System.currentTimeMillis());
+  private void refreshAllMarketTicker24HrSnapshot() {
+    long requestTime = getServerTime();
+    List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+    if (CollectionUtils.isEmpty(ticker24Hrs)) {
+      allMarketTicker24HrSnapshot.set(new AllMarketSnapshot<>(List.of(), System.currentTimeMillis()));
+      return;
     }
-    return new AllMarketSnapshot<>(List.copyOf(realtimeTickers), System.currentTimeMillis());
+    publishTicker24HrSnapshot(ticker24Hrs, requestTime);
   }
 
-  private AllMarketSnapshot<Ticker24Hr> loadAllMarketTicker24HrSnapshot() {
-    List<Ticker24Hr> realtimeTicker24Hrs = queryTicker24Hrs();
-    if (CollectionUtils.isEmpty(realtimeTicker24Hrs)) {
-      return new AllMarketSnapshot<>(List.of(), System.currentTimeMillis());
+  /** @param requestTime server time just before the ticker/24hr request was sent */
+  private void publishTicker24HrSnapshot(List<Ticker24Hr> ticker24Hrs, long requestTime) {
+    allMarketTicker24HrSnapshot.set(new AllMarketSnapshot<>(List.copyOf(ticker24Hrs), System.currentTimeMillis()));
+    syncTicker24HrCache(ticker24Hrs);
+    if (isTickerPriceSnapshotFrom24Hr()) {
+      tickerPriceBook.applySnapshot(toPriceTickers(ticker24Hrs), requestTime);
     }
-    return new AllMarketSnapshot<>(List.copyOf(realtimeTicker24Hrs), System.currentTimeMillis());
+  }
+
+  /** ticker/24hr closeTime is the symbol's last update time, the date lastPrice needs */
+  private static List<Ticker<?>> toPriceTickers(List<Ticker24Hr> ticker24Hrs) {
+    List<Ticker<?>> tickers = new ArrayList<>(ticker24Hrs.size());
+    for (Ticker24Hr ticker24Hr : ticker24Hrs) {
+      if (ticker24Hr.getSymbol() == null || ticker24Hr.getLastPrice() == null || ticker24Hr.getCloseTime() == null) {
+        continue;
+      }
+      BigDecimalTicker ticker = new BigDecimalTicker();
+      ticker.setSymbol(ticker24Hr.getSymbol());
+      ticker.setPrice(ticker24Hr.getLastPrice());
+      ticker.setTime(ticker24Hr.getCloseTime());
+      tickers.add(ticker);
+    }
+    return tickers;
   }
 
   private void syncTicker24HrCache(List<Ticker24Hr> ticker24Hrs) {
     if (CollectionUtils.isEmpty(ticker24Hrs)) {
       return;
     }
-    Map<String, Ticker24Hr> ticker24HrMap = ticker24Hrs.stream()
-        .collect(Collectors.toMap(Ticker24Hr::getSymbol, Function.identity(), (o, n) -> n));
-    Set<String> needRemoveKeys = ticker24HrCache.asMap().keySet().stream()
-        .filter(existKey -> !ticker24HrMap.containsKey(existKey))
-        .collect(Collectors.toSet());
-    ticker24HrCache.putAll(ticker24HrMap);
-    if (CollectionUtils.isNotEmpty(needRemoveKeys)) {
-      ticker24HrCache.invalidateAll(needRemoveKeys);
+    Set<String> symbols = new HashSet<>();
+    for (Ticker24Hr ticker24Hr : ticker24Hrs) {
+      mergeTicker24Hr(ticker24Hr);
+      symbols.add(ticker24Hr.getSymbol());
     }
-  }
-
-  private List<Ticker<?>> queryAllMarketTickersSnapshot() {
-    lastAllMarketTickerAccessTime.set(System.currentTimeMillis());
-    AllMarketSnapshot<Ticker<?>> snapshot = allMarketTickerSnapshot.get();
-    if (CollectionUtils.isNotEmpty(snapshot.values())) {
-      triggerAllMarketTickerRefreshIfStale(snapshot);
-      return snapshot.values();
-    }
-    return refreshAllMarketTickersSnapshotNow();
+    ticker24HrCache.asMap().keySet().retainAll(symbols);
   }
 
   private List<Ticker24Hr> queryAllMarketTicker24HrsSnapshot() {
@@ -1686,16 +2068,17 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void startTicker24HrRpcUpdater() {
+    if (isTickerPriceSnapshotFrom24Hr()) {
+      return;  // the ticker price compensation fetches ticker/24hr for this market
+    }
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
         new ExceptionSafeRunnable(() -> {
+          long requestTime = getServerTime();
           List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
           if (CollectionUtils.isEmpty(ticker24Hrs)) {
             return;
           }
-          AllMarketSnapshot<Ticker24Hr> snapshot = new AllMarketSnapshot<>(List.copyOf(ticker24Hrs),
-              System.currentTimeMillis());
-          allMarketTicker24HrSnapshot.set(snapshot);
-          syncTicker24HrCache(snapshot.values());
+          publishTicker24HrSnapshot(ticker24Hrs, requestTime);
         }), 1000, 1000 * 60, TimeUnit.MILLISECONDS
     );
   }
@@ -1938,23 +2321,23 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
-  private List<EventTicker24HrEvent> convertToEventTicker24HrEvent(ParsedWebSocketMessage parsedMessage) {
+  private <E> List<E> convertToTickerEvents(ParsedWebSocketMessage parsedMessage, Class<E> eventClass) {
     JsonNode payloadNode = parsedMessage.payloadNode();
     if (payloadNode == null || payloadNode.isNull()) {
       return null;
     }
-    if (payloadNode.isArray()) {
-      EventTicker24HrEvent[] eventTicker24HrEventArray = serializer.treeToValue(payloadNode, EventTicker24HrEvent[].class);
-      if (eventTicker24HrEventArray == null || eventTicker24HrEventArray.length == 0) {
-        return null;
+    if (!payloadNode.isArray()) {
+      E event = serializer.treeToValue(payloadNode, eventClass);
+      return event == null ? null : List.of(event);
+    }
+    List<E> events = new ArrayList<>(payloadNode.size());
+    for (JsonNode eventNode : payloadNode) {
+      E event = serializer.treeToValue(eventNode, eventClass);
+      if (event != null) {
+        events.add(event);
       }
-      return new ArrayList<>(List.of(eventTicker24HrEventArray));
     }
-    EventTicker24HrEvent eventTicker24HrEvent = serializer.treeToValue(payloadNode, EventTicker24HrEvent.class);
-    if (eventTicker24HrEvent == null || StringUtils.isBlank(eventTicker24HrEvent.getEventType())) {
-      return null;
-    }
-    return List.of(eventTicker24HrEvent);
+    return events;
   }
 
   protected static void runTasksWithLimitedWorkers(List<Runnable> tasks, int maxWorkers, Executor executor) {
@@ -1982,6 +2365,33 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private record StreamSubscriptionState(String eventType, Object metadata) {
   }
 
+  /** 24hr fallback entry: price/volume statistics and full-ticker-only fields each keep their own time */
+  private record Ticker24HrEntry(Ticker24Hr ticker, long statsTime, long fullTime) {
+  }
+
+  /** all-market ticker streams: each frame carries only the symbols that changed in the last second */
+  protected enum AllMarketTickerStream {
+    TICKER("!ticker@arr", "24hrTicker"),
+    MINI_TICKER("!miniTicker@arr", "24hrMiniTicker");
+
+    private final String topic;
+
+    private final String eventType;
+
+    AllMarketTickerStream(String topic, String eventType) {
+      this.topic = topic;
+      this.eventType = eventType;
+    }
+
+    public String topic() {
+      return topic;
+    }
+
+    public String eventType() {
+      return eventType;
+    }
+  }
+
   private record ExpectedTopicsSnapshot(Set<String> symbols,
                                         Set<String> subscribeIntervals,
                                         Set<String> extraTopics,
@@ -2002,7 +2412,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
   }
 
-  private record AllMarketSnapshot<E>(List<E> values, long refreshedAt) {
+  /** @param streamMark latest stream event time when the snapshot was requested */
+  private record AllMarketSnapshot<E>(List<E> values, long refreshedAt, long streamMark) {
+
+    private AllMarketSnapshot(List<E> values, long refreshedAt) {
+      this(values, refreshedAt, 0L);
+    }
 
     private boolean isStale(long now) {
       return now - refreshedAt >= ALL_MARKET_TICKER_CACHE_TTL.toMillis();

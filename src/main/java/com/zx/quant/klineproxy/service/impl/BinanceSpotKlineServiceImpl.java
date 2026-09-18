@@ -39,6 +39,8 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
 
   private static final int TICKER_24HR_WEIGHT = 80;
 
+  private static final long SPOT_TICKER_STREAM_STALE_MILLIS = 30_000L;
+
   @Autowired
   private BinanceSpotKlineSyncConfigProperties klineSyncConfigProperties;
 
@@ -72,6 +74,24 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
     List<com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker> tickers = ClientUtil.getResponseBody(tickerCall,
         () -> rateLimitManager.stopAcquire(Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME, 1000 * 30));
     return tickers == null ? List.of() : List.copyOf(tickers);
+  }
+
+  /** Binance retired the spot !ticker@arr on 2026-03-26: it still acks SUBSCRIBE but never pushes. */
+  @Override
+  protected AllMarketTickerStream getAllMarketTickerStream() {
+    return AllMarketTickerStream.MINI_TICKER;
+  }
+
+  /** spot ticker/price REST carries no time, so it is only used after a long stream silence */
+  @Override
+  protected long getTickerStreamStaleMillis() {
+    return SPOT_TICKER_STREAM_STALE_MILLIS;
+  }
+
+  /** spot ticker/price REST carries no time; ticker/24hr dates lastPrice with closeTime */
+  @Override
+  protected boolean isTickerPriceSnapshotFrom24Hr() {
+    return true;
   }
 
   @Override

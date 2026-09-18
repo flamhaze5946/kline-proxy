@@ -862,12 +862,16 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         && rootNode.get("result").isArray();
   }
 
+  /**
+   * One thread: handlers see each connection's non-kline frames in receive order. The ticker price
+   * book detects lost frames from consecutive event times, so reordered frames would look lost.
+   */
   private static ThreadPoolExecutor buildMessageExecutor() {
     ThreadFactory namedThreadFactory = ThreadFactoryUtil.getNamedThreadFactory(
         MESSAGE_EXECUTOR_GROUP_PREFIX);
     return new ThreadPoolExecutor(
-        2,
-        2,
+        1,
+        1,
         1,
         TimeUnit.MINUTES,
         new LinkedBlockingQueue<>(4096),
