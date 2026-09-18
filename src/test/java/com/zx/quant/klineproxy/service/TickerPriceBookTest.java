@@ -127,6 +127,17 @@ class TickerPriceBookTest {
   }
 
   @Test
+  void aDelayedSnapshotWithAPriceNewerThanANoPriceAnswerRestoresTheSymbol() {
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), 10_000L);
+    book.applyAbsent(List.of("XUSDT"), 12_000L);  // covers up to 11_000
+
+    // requested before the no-price answer, yet it carries a later trade
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 12_100L)), 11_900L);
+
+    assertThat(price("XUSDT")).isEqualTo("7");
+  }
+
+  @Test
   void datedRestAndStreamMergeToTheNewestWhateverTheArrivalOrder() {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
 

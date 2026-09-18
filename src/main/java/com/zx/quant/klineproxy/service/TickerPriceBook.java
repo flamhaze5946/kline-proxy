@@ -119,8 +119,8 @@ public final class TickerPriceBook {
       }
       listed.add(symbol);
       Long absent = absentUntil.get(symbol);
-      if (absent != null && coverage <= absent) {
-        continue;  // a no-price answer newer than this snapshot decides
+      if (absent != null && coverage <= absent && ticker.getTime() <= absent) {
+        continue;  // a no-price answer newer than both this snapshot and its price decides
       }
       if (newest || tickers.containsKey(symbol)) {
         upsert(symbol, price, ticker.getTime());

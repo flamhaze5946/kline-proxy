@@ -249,6 +249,17 @@ class AbstractKlineServiceTickerPriceTest {
   }
 
   @Test
+  void aNewerStreamPriceSurvivesANoPriceAnswerForTheSameSymbol() {
+    TickerTestService service = liveFutures();
+    service.serverTime = NOW - 10 + 2_001;  // silent
+    service.symbolRest = List.of(new BigDecimalTicker());  // BTCUSDT answers {}
+    service.duringSymbolRest = () -> service.handle(frame("24hrTicker", NOW + 400, NOW + 1_990, "BTCUSDT", "102"));
+
+    assertThat(prices(service.queryTickers(List.of("BTCUSDT")))).containsExactly("BTCUSDT=102");
+    assertThat(service.symbolRestCalls.get()).isEqualTo(1);
+  }
+
+  @Test
   void undatedRestIsNotServedWhenTheStreamResumesWhileItIsInFlight() {
     TickerTestService service = spot();
     service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 3_000, "98.9", 1L),
