@@ -91,7 +91,7 @@ class TickerPriceBookTest {
   }
 
   @Test
-  void anOlderSnapshotFinishingLateNeverAddsSymbols() {
+  void anOlderSnapshotFinishingLateCannotAddASymbolTheNewestOneCovered() {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 12_000L);
 
     book.applySnapshot(List.of(dated("BTCUSDT", "101", 10_500L), dated("GONEUSDT", "1", 9_000L)), 11_000L);
@@ -135,6 +135,22 @@ class TickerPriceBookTest {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 12_100L)), 11_900L);
 
     assertThat(price("XUSDT")).isEqualTo("7");
+  }
+
+  @Test
+  void aLateOlderSnapshotAdmitsAPriceNewerThanTheNewestSnapshotAndANoPriceAnswer() {
+    // the newer snapshot and the no-price answer land before the older snapshot
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), 12_000L);
+    book.applyAbsent(List.of("XUSDT"), 13_000L);  // covers up to 12_000
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), 11_900L);
+    assertThat(price("XUSDT")).isEqualTo("7");
+
+    // the older snapshot lands before the no-price answer
+    TickerPriceBook other = new TickerPriceBook(GAP, REST_LAG);
+    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), 12_000L);
+    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), 11_900L);
+    other.applyAbsent(List.of("XUSDT"), 13_000L);
+    assertThat(other.get(List.of("XUSDT"))).extracting(ticker -> ticker.getPrice().toString()).containsExactly("7");
   }
 
   @Test

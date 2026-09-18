@@ -104,7 +104,8 @@ public final class TickerPriceBook {
   /**
    * Full-market snapshot whose tickers carry their last update time. The newest snapshot defines the
    * market: symbols it lacks are removed unless the book holds an update newer than the snapshot. An
-   * older snapshot finishing late only refreshes symbols already in the book.
+   * older snapshot finishing late changes no membership decision: each of its prices is admitted like
+   * a symbol lookup.
    * @param requestTime server time just before the request was sent
    */
   public synchronized void applySnapshot(Collection<? extends Ticker<?>> restTickers, long requestTime) {
@@ -118,13 +119,15 @@ public final class TickerPriceBook {
         continue;
       }
       listed.add(symbol);
+      if (!newest) {
+        admit(symbol, price, ticker.getTime());  // late: each price counts like a symbol lookup
+        continue;
+      }
       Long absent = absentUntil.get(symbol);
       if (absent != null && coverage <= absent && ticker.getTime() <= absent) {
         continue;  // a no-price answer newer than both this snapshot and its price decides
       }
-      if (newest || tickers.containsKey(symbol)) {
-        upsert(symbol, price, ticker.getTime());
-      }
+      upsert(symbol, price, ticker.getTime());
     }
     if (!newest || listed.isEmpty()) {
       return;
@@ -149,8 +152,7 @@ public final class TickerPriceBook {
   }
 
   /**
-   * Per-symbol REST response: dated tickers are merged, undated ones ignored. A symbol outside the book
-   * joins only with a price newer than the latest full snapshot, which did not list it.
+   * Per-symbol REST response: dated tickers are admitted, undated ones ignored.
    */
   public synchronized void applySymbols(Collection<? extends Ticker<?>> restTickers) {
     for (Ticker<?> ticker : restTickers) {
@@ -159,15 +161,22 @@ public final class TickerPriceBook {
       if (symbol == null || price == null || ticker.getTime() <= 0L) {
         continue;
       }
-      if (!tickers.containsKey(symbol) && ticker.getTime() <= lastFullSyncTime.get()
-          || isAbsentAt(symbol, ticker.getTime())) {
-        continue;
-      }
-      upsert(symbol, price, ticker.getTime());
-      BigDecimalTicker pending = pendingStream.remove(symbol);
-      if (pending != null) {
-        upsert(symbol, pending.getPrice(), pending.getTime());
-      }
+      admit(symbol, price, ticker.getTime());
+    }
+  }
+
+  /**
+   * A symbol outside the book joins only with a price newer than the latest full snapshot, which did
+   * not list it; nothing a no-price answer covers gets in. Its pending stream update follows it.
+   */
+  private void admit(String symbol, BigDecimal price, long time) {
+    if (!tickers.containsKey(symbol) && time <= lastFullSyncTime.get() || isAbsentAt(symbol, time)) {
+      return;
+    }
+    upsert(symbol, price, time);
+    BigDecimalTicker pending = pendingStream.remove(symbol);
+    if (pending != null) {
+      upsert(symbol, pending.getPrice(), pending.getTime());
     }
   }
 
