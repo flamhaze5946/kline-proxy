@@ -111,6 +111,22 @@ class TickerPriceBookTest {
   }
 
   @Test
+  void aNoPriceAnswerKeepsOlderDataFromBringingTheSymbolBack() {
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), 10_000L);
+    book.updateFromStream("XUSDT", new BigDecimal("6"), 10_500L);
+    book.applyAbsent(List.of("XUSDT"), 12_000L);  // covers up to 11_000
+    assertThat(book.contains("XUSDT")).isFalse();
+
+    book.applySymbols(List.of(dated("XUSDT", "5.5", 10_200L)));  // delayed symbol response
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5.6", 10_300L)), 11_500L);
+    book.updateFromStream("XUSDT", new BigDecimal("5.7"), 10_900L);  // delayed frame
+    assertThat(book.contains("XUSDT")).as("nothing older than the no-price answer").isFalse();
+
+    book.applySymbols(List.of(dated("XUSDT", "7", 11_200L)));
+    assertThat(price("XUSDT")).as("newer data restores it").isEqualTo("7");
+  }
+
+  @Test
   void datedRestAndStreamMergeToTheNewestWhateverTheArrivalOrder() {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
 

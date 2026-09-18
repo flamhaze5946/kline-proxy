@@ -411,17 +411,18 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       restTickers = List.of();
     }
     tickerPriceBook.applySymbols(restTickers);
-    if (isTickerStreamAlive()) {
-      return queryLiveTickerPrices(symbols);
-    }
     Map<String, Ticker<?>> restBySymbol = restTickers.stream()
         .filter(ticker -> ticker.getSymbol() != null && ticker.getPrice() != null)
         .collect(Collectors.toMap(Ticker::getSymbol, Function.identity(), (o, n) -> n));
     // an empty list for several symbols means the market does not support the query, not "no price"
     boolean answered = !restTickers.isEmpty() || requested.size() == 1;
-    if (answered) {
-      tickerPriceBook.applyAbsent(requested.stream().filter(symbol -> !restBySymbol.containsKey(symbol)).toList(),
-          requestTime);
+    Set<String> absent = answered
+        ? requested.stream().filter(symbol -> !restBySymbol.containsKey(symbol)).collect(Collectors.toSet())
+        : Set.of();
+    tickerPriceBook.applyAbsent(absent, requestTime);
+    if (isTickerStreamAlive()) {
+      List<String> priced = symbols.stream().filter(symbol -> !absent.contains(symbol)).toList();
+      return priced.isEmpty() ? List.of() : queryLiveTickerPrices(priced);
     }
     List<Ticker<?>> result = new ArrayList<>(symbols.size());
     for (String symbol : symbols) {
