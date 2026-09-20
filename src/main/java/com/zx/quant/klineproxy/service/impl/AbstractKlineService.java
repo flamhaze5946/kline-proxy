@@ -1798,21 +1798,26 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private boolean syncTickerPrices() {
     synchronized (tickerPriceSyncLock) {
       lastTickerPriceSyncAttemptTime.set(System.currentTimeMillis());
-      long requestTime = getServerTime();
-      if (isTickerPriceSnapshotFrom24Hr()) {
-        List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
-        if (CollectionUtils.isEmpty(ticker24Hrs)) {
+      try {
+        long requestTime = getServerTime();
+        if (isTickerPriceSnapshotFrom24Hr()) {
+          List<Ticker24Hr> ticker24Hrs = queryTicker24Hrs();
+          if (CollectionUtils.isEmpty(ticker24Hrs)) {
+            return false;
+          }
+          publishTicker24HrSnapshot(ticker24Hrs, requestTime);
+          return true;
+        }
+        List<Ticker<?>> tickers = queryTickers0();
+        if (CollectionUtils.isEmpty(tickers)) {
           return false;
         }
-        publishTicker24HrSnapshot(ticker24Hrs, requestTime);
+        tickerPriceBook.applySnapshot(tickers, requestTime);
         return true;
+      } finally {
+        // the cooldown runs from the completion: readers that waited for a slow failure do not retry it
+        lastTickerPriceSyncAttemptTime.set(System.currentTimeMillis());
       }
-      List<Ticker<?>> tickers = queryTickers0();
-      if (CollectionUtils.isEmpty(tickers)) {
-        return false;
-      }
-      tickerPriceBook.applySnapshot(tickers, requestTime);
-      return true;
     }
   }
 

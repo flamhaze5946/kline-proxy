@@ -237,6 +237,27 @@ class AbstractKlineServiceTickerPriceTest {
   }
 
   @Test
+  void readersWaitingOnASlowFailingFirstSnapshotDoNotRetryIt() throws Exception {
+    TickerTestService service = spot();
+    service.all24HrFailure = new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY, -1001, "timeout");
+    service.all24HrDelayMillis = 600L;  // longer than the retry cooldown
+    service.symbol24HrRest = List.of(full24Hr("BTCUSDT", "105", NOW - 3_000, "104.9", 1L));
+    service.handle(frame("24hrMiniTicker", NOW - 1_500, NOW - 20, "BTCUSDT", "110"));
+    assertThat(await(() -> service.all24HrRestCalls.get() == 1)).as("attempt in flight").isTrue();
+
+    List<Thread> readers = new ArrayList<>();
+    for (int i = 0; i < 2; i++) {
+      readers.add(new Thread(() -> service.queryTickers(List.of("BTCUSDT"))));
+    }
+    readers.forEach(Thread::start);
+    for (Thread reader : readers) {
+      reader.join(5_000L);
+    }
+
+    assertThat(service.all24HrRestCalls.get()).isEqualTo(1);
+  }
+
+  @Test
   void aNoPriceAnswerHoldsWhenAnotherSymbolResumesTheStreamMeanwhile() {
     TickerTestService service = liveFutures();
     service.serverTime = NOW - 10 + 2_001;  // silent
@@ -519,6 +540,8 @@ class AbstractKlineServiceTickerPriceTest {
 
     private volatile RuntimeException all24HrFailure;
 
+    private volatile long all24HrDelayMillis;
+
     private volatile List<Ticker<?>> symbolRest = List.of();
 
     private volatile List<Ticker24Hr> all24HrRest = List.of();
@@ -610,6 +633,13 @@ class AbstractKlineServiceTickerPriceTest {
     @Override
     protected List<Ticker24Hr> queryTicker24Hrs0() {
       all24HrRestCalls.incrementAndGet();
+      if (all24HrDelayMillis > 0L) {
+        try {
+          Thread.sleep(all24HrDelayMillis);
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
       if (all24HrFailure != null) {
         throw all24HrFailure;
       }
