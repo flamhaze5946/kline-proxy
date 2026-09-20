@@ -99,6 +99,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -481,7 +482,25 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       return tickers == null ? List.of() : tickers;
     }
     List<Ticker24Hr> ticker24Hrs = queryTicker24HrsBySymbols(symbols);
-    return ticker24Hrs == null ? List.of() : toPriceTickers(ticker24Hrs);
+    if (CollectionUtils.isEmpty(ticker24Hrs)) {
+      return List.of();
+    }
+    List<Ticker<?>> priced = new ArrayList<>(ticker24Hrs.size());
+    List<Ticker24Hr> untraded = new ArrayList<>();
+    for (Ticker24Hr ticker24Hr : ticker24Hrs) {
+      if (ticker24Hr.getSymbol() == null || ticker24Hr.getLastPrice() == null) {
+        continue;
+      }
+      if (ticker24Hr.getLastPrice().signum() == 0) {
+        if (ticker24Hr.getOpenTime() != null) {
+          untraded.add(ticker24Hr);
+        }
+      } else if (ticker24Hr.getCloseTime() != null) {
+        priced.add(datedTicker(ticker24Hr.getSymbol(), ticker24Hr.getLastPrice(), ticker24Hr.getCloseTime()));
+      }
+    }
+    priced.addAll(untradedPrices(untraded, () -> queryTickersBySymbols(untradedSymbols(untraded))));
+    return priced;
   }
 
   private boolean isTickerStreamAlive() {
@@ -1812,7 +1831,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         if (CollectionUtils.isEmpty(tickers)) {
           return false;
         }
-        tickerPriceBook.applySnapshot(tickers, requestTime);
+        tickerPriceBook.applySnapshot(tickers, symbolsOf(tickers), requestTime);
         return true;
       } finally {
         // the cooldown runs from the completion: readers that waited for a slow failure do not retry it
@@ -1984,24 +2003,80 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     allMarketTicker24HrSnapshot.set(new AllMarketSnapshot<>(List.copyOf(ticker24Hrs), System.currentTimeMillis()));
     syncTicker24HrCache(ticker24Hrs);
     if (isTickerPriceSnapshotFrom24Hr()) {
-      tickerPriceBook.applySnapshot(toPriceTickers(ticker24Hrs), requestTime);
+      applyTicker24HrPrices(ticker24Hrs, requestTime);
     }
   }
 
-  /** ticker/24hr closeTime is the symbol's last update time, the date lastPrice needs */
-  private static List<Ticker<?>> toPriceTickers(List<Ticker24Hr> ticker24Hrs) {
-    List<Ticker<?>> tickers = new ArrayList<>(ticker24Hrs.size());
+  /**
+   * ticker/24hr dates lastPrice with closeTime. A symbol that did not trade in the window has
+   * lastPrice 0, which is not a price: its own comes from ticker/price, dated by the window's start,
+   * the latest moment its last trade can have happened.
+   */
+  private void applyTicker24HrPrices(List<Ticker24Hr> ticker24Hrs, long requestTime) {
+    Set<String> listed = new HashSet<>();
+    List<Ticker<?>> priced = new ArrayList<>(ticker24Hrs.size());
+    List<Ticker24Hr> untraded = new ArrayList<>();
     for (Ticker24Hr ticker24Hr : ticker24Hrs) {
-      if (ticker24Hr.getSymbol() == null || ticker24Hr.getLastPrice() == null || ticker24Hr.getCloseTime() == null) {
+      if (ticker24Hr.getSymbol() == null) {
         continue;
       }
-      BigDecimalTicker ticker = new BigDecimalTicker();
-      ticker.setSymbol(ticker24Hr.getSymbol());
-      ticker.setPrice(ticker24Hr.getLastPrice());
-      ticker.setTime(ticker24Hr.getCloseTime());
-      tickers.add(ticker);
+      listed.add(ticker24Hr.getSymbol());
+      if (ticker24Hr.getLastPrice() == null) {
+        continue;
+      }
+      if (ticker24Hr.getLastPrice().signum() == 0) {
+        if (ticker24Hr.getOpenTime() != null) {
+          untraded.add(ticker24Hr);
+        }
+      } else if (ticker24Hr.getCloseTime() != null) {
+        priced.add(datedTicker(ticker24Hr.getSymbol(), ticker24Hr.getLastPrice(), ticker24Hr.getCloseTime()));
+      }
     }
-    return tickers;
+    priced.addAll(untradedPrices(untraded, this::queryTickers0));
+    tickerPriceBook.applySnapshot(priced, listed, requestTime);
+  }
+
+  private List<Ticker<?>> untradedPrices(List<Ticker24Hr> untraded, Supplier<List<Ticker<?>>> restPrices) {
+    if (untraded.isEmpty()) {
+      return List.of();
+    }
+    List<Ticker<?>> restTickers;
+    try {
+      restTickers = restPrices.get();
+    } catch (RuntimeException e) {
+      log.warn("service: {} prices of symbols that did not trade in 24h unavailable.", getServiceType(), e);
+      return List.of();
+    }
+    if (CollectionUtils.isEmpty(restTickers)) {
+      return List.of();
+    }
+    Map<String, Ticker<?>> restBySymbol = restTickers.stream()
+        .filter(ticker -> ticker.getSymbol() != null && ticker.getPrice() != null)
+        .collect(Collectors.toMap(Ticker::getSymbol, Function.identity(), (o, n) -> n));
+    List<Ticker<?>> prices = new ArrayList<>(untraded.size());
+    for (Ticker24Hr ticker24Hr : untraded) {
+      Ticker<?> rest = restBySymbol.get(ticker24Hr.getSymbol());
+      if (rest != null) {
+        prices.add(datedTicker(ticker24Hr.getSymbol(), rest.getPrice(), ticker24Hr.getOpenTime()));
+      }
+    }
+    return prices;
+  }
+
+  private static Set<String> untradedSymbols(List<Ticker24Hr> untraded) {
+    return untraded.stream().map(Ticker24Hr::getSymbol).filter(Objects::nonNull).collect(Collectors.toSet());
+  }
+
+  private static Set<String> symbolsOf(Collection<? extends Ticker<?>> tickers) {
+    return tickers.stream().map(Ticker::getSymbol).filter(Objects::nonNull).collect(Collectors.toSet());
+  }
+
+  private static BigDecimalTicker datedTicker(String symbol, Object price, long time) {
+    BigDecimalTicker ticker = new BigDecimalTicker();
+    ticker.setSymbol(symbol);
+    ticker.setPrice(price instanceof BigDecimal decimal ? decimal : new BigDecimal(String.valueOf(price)));
+    ticker.setTime(time);
+    return ticker;
   }
 
   private void syncTicker24HrCache(List<Ticker24Hr> ticker24Hrs) {

@@ -106,19 +106,19 @@ public final class TickerPriceBook {
    * market: symbols it lacks are removed unless the book holds an update newer than the snapshot. An
    * older snapshot finishing late changes no membership decision: each of its prices is admitted like
    * a symbol lookup.
+   * @param listed every symbol the snapshot returned, including any it could not price
    * @param requestTime server time just before the request was sent
    */
-  public synchronized void applySnapshot(Collection<? extends Ticker<?>> restTickers, long requestTime) {
+  public synchronized void applySnapshot(Collection<? extends Ticker<?>> restTickers, Set<String> listed,
+      long requestTime) {
     long coverage = requestTime - restLagMillis;
     boolean newest = coverage > lastFullSyncTime.get();
-    Set<String> listed = new HashSet<>();
     for (Ticker<?> ticker : restTickers) {
       BigDecimal price = toPrice(ticker.getPrice());
       String symbol = ticker.getSymbol();
       if (symbol == null || price == null || ticker.getTime() <= 0L) {
         continue;
       }
-      listed.add(symbol);
       if (!newest) {
         admit(symbol, price, ticker.getTime());  // late: each price counts like a symbol lookup
         continue;

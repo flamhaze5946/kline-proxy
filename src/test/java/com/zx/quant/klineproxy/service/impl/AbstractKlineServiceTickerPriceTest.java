@@ -366,6 +366,25 @@ class AbstractKlineServiceTickerPriceTest {
   }
 
   @Test
+  void aSpotSymbolThatDidNotTradeIn24hIsPricedFromTickerPriceDatedByTheWindowStart() {
+    TickerTestService service = spot();
+    Ticker24Hr quiet = full24Hr("QUIETUSDT", "0", NOW - 3_000, "0", 0L);
+    quiet.setOpenTime(NOW - 86_400_000L);
+    service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 3_000, "98.9", 1L), quiet);
+    // ticker/price still carries the last trade, from before the window
+    service.providerRest = List.of(restTicker("BTCUSDT", "99", 0L), restTicker("QUIETUSDT", "17530", 0L));
+    service.handle(frame("24hrMiniTicker", NOW - 1_500, NOW - 20, "BTCUSDT", "110"));
+    awaitCovered(service);
+
+    assertThat(prices(service.queryTickers(List.of()))).containsExactly("BTCUSDT=110", "QUIETUSDT=17530");
+    assertThat(service.queryTickers(List.of("QUIETUSDT")).get(0).getTime()).isEqualTo(NOW - 86_400_000L);
+
+    // a trade lands: the stream price wins over the window-start stamp
+    service.handle(miniTickerFrame(NOW - 10, "QUIETUSDT", "17530", "17600", "17600", "17530", "1", "17600"));
+    assertThat(prices(service.queryTickers(List.of("QUIETUSDT")))).containsExactly("QUIETUSDT=17600");
+  }
+
+  @Test
   void spot24hrFallbackKeepsTheNewestValueOfEachFieldGroup() {
     TickerTestService service = spot();
     service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 5_000, "99", 1L));
