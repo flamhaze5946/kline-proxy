@@ -105,7 +105,7 @@ class TickerPriceBookTest {
     book.applySnapshot(List.of(dated("SETTLINGUSDT", "5", 1_000L), dated("BTCUSDT", "100", 1_000L)), 10_000L);
     book.updateFromStream("BTCUSDT", new BigDecimal("101"), 9_500L);  // newer than the request below
 
-    book.applyAbsent(List.of("SETTLINGUSDT", "BTCUSDT"), 10_000L);  // covers up to 9_000
+    book.applyAbsent(List.of("SETTLINGUSDT", "BTCUSDT"), 10_000L);  // as recent as the snapshot, covers up to 9_000
 
     assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("BTCUSDT");
   }
@@ -151,6 +151,18 @@ class TickerPriceBookTest {
     other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), 11_900L);
     other.applyAbsent(List.of("XUSDT"), 13_000L);
     assertThat(other.get(List.of("XUSDT"))).extracting(ticker -> ticker.getPrice().toString()).containsExactly("7");
+  }
+
+  @Test
+  void aNoPriceAnswerOlderThanTheLatestSnapshotDecidesNothing() {
+    // QUIETUSDT trades rarely, so the snapshot dates it long before the request that listed it
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 19_000L), dated("QUIETUSDT", "5", 1_000L)), 20_000L);
+
+    book.applyAbsent(List.of("QUIETUSDT"), 15_000L);  // a no-price answer the snapshot already superseded
+
+    assertThat(price("QUIETUSDT")).isEqualTo("5");
+    book.applySymbols(List.of(dated("QUIETUSDT", "6", 19_500L)));
+    assertThat(price("QUIETUSDT")).as("no watermark was installed").isEqualTo("6");
   }
 
   @Test

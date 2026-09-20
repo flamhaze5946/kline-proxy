@@ -182,11 +182,16 @@ public final class TickerPriceBook {
 
   /**
    * A successful REST answer without a price for these symbols (a settling contract answers {}): each
-   * leaves the book unless the book holds an update newer than the request.
+   * leaves the book unless the book holds an update newer than the request. An answer older than the
+   * latest full snapshot decides nothing: that snapshot listed the market later. Same-moment answers
+   * still count: they are the more specific question.
    * @param requestTime server time just before the request was sent
    */
   public synchronized void applyAbsent(Collection<String> symbols, long requestTime) {
     long coverage = requestTime - restLagMillis;
+    if (coverage < lastFullSyncTime.get()) {
+      return;  // a newer full snapshot already decided which symbols the market has
+    }
     for (String symbol : symbols) {
       absentUntil.merge(symbol, coverage, Math::max);
       BigDecimalTicker current = tickers.get(symbol);
