@@ -310,8 +310,8 @@ class TickerPriceBookTest {
     book.applySnapshot(snapshot, listed, 10_000L);
     assertThat(book.contains("QUIETUSDT")).isFalse();
 
-    // priced later, dated by the window start, then kept by the next snapshot that still cannot price it
-    book.applySymbols(List.of(dated("QUIETUSDT", "17530", 9_300L)));
+    // priced later by a lookup dated long before the snapshot, then kept by the next one
+    book.applySymbols(List.of(dated("QUIETUSDT", "17530", 1_000L)));
     book.applySnapshot(snapshot, listed, 10_500L);
 
     assertThat(price("QUIETUSDT")).isEqualTo("17530");

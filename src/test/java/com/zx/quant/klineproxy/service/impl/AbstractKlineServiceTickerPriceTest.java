@@ -385,6 +385,24 @@ class AbstractKlineServiceTickerPriceTest {
   }
 
   @Test
+  void aQuietSymbolIsPricedByALaterLookupWhenTheSnapshotFallbackFailed() {
+    TickerTestService service = spot();
+    Ticker24Hr quiet = full24Hr("QUIETUSDT", "0", NOW - 3_000, "0", 0L);
+    quiet.setOpenTime(NOW - 86_400_000L);
+    service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 3_000, "98.9", 1L), quiet);
+    service.providerFailure = new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY, -1001, "timeout");
+    service.handle(frame("24hrMiniTicker", NOW - 1_500, NOW - 20, "BTCUSDT", "110"));
+    awaitCovered(service);
+    assertThat(prices(service.queryTickers(List.of()))).as("no price for it yet").containsExactly("BTCUSDT=110");
+
+    // the symbol lookup succeeds: its price is dated by the window start, long before the snapshot
+    service.providerFailure = null;
+    service.symbol24HrRest = List.of(quiet);
+    service.symbolRest = List.of(restTicker("QUIETUSDT", "17530", 0L));
+    assertThat(prices(service.queryTickers(List.of("QUIETUSDT")))).containsExactly("QUIETUSDT=17530");
+  }
+
+  @Test
   void spot24hrFallbackKeepsTheNewestValueOfEachFieldGroup() {
     TickerTestService service = spot();
     service.all24HrRest = List.of(full24Hr("BTCUSDT", "99", NOW - 5_000, "99", 1L));
@@ -559,6 +577,8 @@ class AbstractKlineServiceTickerPriceTest {
 
     private volatile RuntimeException all24HrFailure;
 
+    private volatile RuntimeException providerFailure;
+
     private volatile long all24HrDelayMillis;
 
     private volatile List<Ticker<?>> symbolRest = List.of();
@@ -619,6 +639,9 @@ class AbstractKlineServiceTickerPriceTest {
 
     @Override
     protected List<Ticker<?>> queryTickers0() {
+      if (providerFailure != null) {
+        throw providerFailure;
+      }
       Runnable during = duringProvider;
       if (providerRest != null && during != null) {
         duringProvider = null;
