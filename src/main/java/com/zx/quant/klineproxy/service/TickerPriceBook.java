@@ -59,6 +59,9 @@ public final class TickerPriceBook {
   /** time every listed symbol is known up to, from the latest full snapshot; 0 before the first one */
   private final AtomicLong lastFullSyncTime = new AtomicLong();
 
+  /** the symbols the latest full snapshot listed, priced or not */
+  private volatile Set<String> listedSymbols = Set.of();
+
   /**
    * @param gapMillis a jump between consecutive frames' event times larger than this means frames were lost
    * @param restLagMillis how far a REST snapshot may trail the moment it was requested
@@ -148,6 +151,7 @@ public final class TickerPriceBook {
     });
     // older no-price answers: absent symbols now need data newer than this snapshot anyway
     absentUntil.values().removeIf(absent -> absent <= coverage);
+    listedSymbols = Set.copyOf(listed);
     lastFullSyncTime.set(coverage);
   }
 
@@ -166,11 +170,13 @@ public final class TickerPriceBook {
   }
 
   /**
-   * A symbol outside the book joins only with a price newer than the latest full snapshot, which did
-   * not list it; nothing a no-price answer covers gets in. Its pending stream update follows it.
+   * A symbol the latest snapshot did not list joins only with a price newer than that snapshot;
+   * one it listed but could not price joins with any price. Nothing a no-price answer covers gets in.
+   * A pending stream update follows the symbol in.
    */
   private void admit(String symbol, BigDecimal price, long time) {
-    if (!tickers.containsKey(symbol) && time <= lastFullSyncTime.get() || isAbsentAt(symbol, time)) {
+    if (!tickers.containsKey(symbol) && !listedSymbols.contains(symbol) && time <= lastFullSyncTime.get()
+        || isAbsentAt(symbol, time)) {
       return;
     }
     upsert(symbol, price, time);
