@@ -149,8 +149,8 @@ public final class TickerPriceBook {
       }
       return pending.getTime() <= coverage;
     });
-    // older no-price answers: absent symbols now need data newer than this snapshot anyway
-    absentUntil.values().removeIf(absent -> absent <= coverage);
+    // strictly older no-price answers only: a same-moment one still decides, as it does above
+    absentUntil.values().removeIf(absent -> absent < coverage);
     listedSymbols = Set.copyOf(listed);
     lastFullSyncTime.set(coverage);
   }
