@@ -167,6 +167,19 @@ class TickerPriceBookTest {
   }
 
   @Test
+  void aSameMomentNoPriceAnswerOutlivesTheSnapshotItArrivedWith() {
+    List<BigDecimalTicker> snapshot = List.of(dated("BTCUSDT", "100", 9_500L), dated("XUSDT", "5", 1_000L));
+    book.applySnapshot(snapshot, symbolsOf(snapshot), 10_000L);
+
+    book.applyAbsent(List.of("XUSDT"), 11_000L);  // covers up to 10_000
+    book.applySnapshot(snapshot, symbolsOf(snapshot), 11_000L);  // same moment: the absence still decides
+    assertThat(book.contains("XUSDT")).isFalse();
+
+    book.applySymbols(List.of(dated("XUSDT", "5", 1_000L)));  // a delayed lookup from before it
+    assertThat(book.contains("XUSDT")).as("the marker outlives that snapshot").isFalse();
+  }
+
+  @Test
   void datedRestAndStreamMergeToTheNewestWhateverTheArrivalOrder() {
     book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);
 
