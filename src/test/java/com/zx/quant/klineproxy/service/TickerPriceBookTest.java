@@ -7,6 +7,7 @@ import com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker;
 import com.zx.quant.klineproxy.model.Ticker.StringTicker;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TickerPriceBookTest {
@@ -21,7 +22,7 @@ class TickerPriceBookTest {
   void streamOnlyUpdatesSymbolsASnapshotListedAndOnlyWhenNewer() {
     assertThat(book.updateFromStream("BTCUSDT", new BigDecimal("100"), 1_000L)).as("before any snapshot").isFalse();
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);
 
     assertThat(book.updateFromStream("BTCUSD_PERP", new BigDecimal("1"), 9_900L)).as("not listed").isFalse();
     assertThat(book.updateFromStream("BTCUSDT", new BigDecimal("99"), 999L)).isFalse();
@@ -39,7 +40,7 @@ class TickerPriceBookTest {
     book.updateFromStream("BTCUSD_PERP", new BigDecimal("77000"), 9_900L);
 
     // the snapshot trails the stream: its QUIET price predates the stream update
-    book.applySnapshot(List.of(dated("QUIET", "100", 9_500L)), 10_050L);
+    book.applySnapshot(List.of(dated("QUIET", "100", 9_500L)), symbolsOf(List.of(dated("QUIET", "100", 9_500L))), 10_050L);
 
     assertThat(price("QUIET")).isEqualTo("110");
     assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("QUIET");
@@ -48,10 +49,10 @@ class TickerPriceBookTest {
 
   @Test
   void aPendingUpdateNewerThanAnOmittingSnapshotSurvivesIt() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 9_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 9_000L);
     book.updateFromStream("NEWUSDT", new BigDecimal("8"), 10_100L);  // listed while the next snapshot is in flight
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);  // covers up to 9_000, omits NEWUSDT
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);  // covers up to 9_000, omits NEWUSDT
     book.applySymbols(List.of(dated("NEWUSDT", "7", 10_010L)));
 
     assertThat(price("NEWUSDT")).isEqualTo("8");
@@ -59,18 +60,18 @@ class TickerPriceBookTest {
 
   @Test
   void aPendingUpdateThatASnapshotCoversAndOmitsIsDropped() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 9_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 9_000L);
     book.updateFromStream("GONEUSDT", new BigDecimal("5"), 8_500L);
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);  // covers up to 9_000
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "4", 8_000L)), 11_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);  // covers up to 9_000
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "4", 8_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "4", 8_000L))), 11_000L);
 
     assertThat(price("GONEUSDT")).as("only the snapshot's own price").isEqualTo("4");
   }
 
   @Test
   void aSymbolOutsideTheBookJoinsOnlyWithAPriceNewerThanTheLatestSnapshot() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 12_000L);  // covers up to 11_000
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 12_000L);  // covers up to 11_000
 
     book.applySymbols(List.of(dated("GONEUSDT", "1", 9_500L)));  // a lookup started before the snapshot
     assertThat(book.contains("GONEUSDT")).isFalse();
@@ -81,7 +82,7 @@ class TickerPriceBookTest {
 
   @Test
   void aDatedSymbolLookupAdmitsASymbolAndReplaysItsPendingUpdate() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);
     book.updateFromStream("NEWUSDT", new BigDecimal("8"), 9_800L);
     assertThat(book.contains("NEWUSDT")).isFalse();
 
@@ -92,9 +93,9 @@ class TickerPriceBookTest {
 
   @Test
   void anOlderSnapshotFinishingLateCannotAddASymbolTheNewestOneCovered() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 12_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 12_000L);
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "101", 10_500L), dated("GONEUSDT", "1", 9_000L)), 11_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "101", 10_500L), dated("GONEUSDT", "1", 9_000L)), symbolsOf(List.of(dated("BTCUSDT", "101", 10_500L), dated("GONEUSDT", "1", 9_000L))), 11_000L);
 
     assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("BTCUSDT");
     assertThat(price("BTCUSDT")).as("existing symbols still take newer prices").isEqualTo("101");
@@ -102,7 +103,7 @@ class TickerPriceBookTest {
 
   @Test
   void anAnswerWithoutAPriceRemovesOnlyEntriesTheRequestIsNewerThan() {
-    book.applySnapshot(List.of(dated("SETTLINGUSDT", "5", 1_000L), dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("SETTLINGUSDT", "5", 1_000L), dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("SETTLINGUSDT", "5", 1_000L), dated("BTCUSDT", "100", 1_000L))), 10_000L);
     book.updateFromStream("BTCUSDT", new BigDecimal("101"), 9_500L);  // newer than the request below
 
     book.applyAbsent(List.of("SETTLINGUSDT", "BTCUSDT"), 10_000L);  // as recent as the snapshot, covers up to 9_000
@@ -112,13 +113,13 @@ class TickerPriceBookTest {
 
   @Test
   void aNoPriceAnswerKeepsOlderDataFromBringingTheSymbolBack() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L))), 10_000L);
     book.updateFromStream("XUSDT", new BigDecimal("6"), 10_500L);
     book.applyAbsent(List.of("XUSDT"), 12_000L);  // covers up to 11_000
     assertThat(book.contains("XUSDT")).isFalse();
 
     book.applySymbols(List.of(dated("XUSDT", "5.5", 10_200L)));  // delayed symbol response
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5.6", 10_300L)), 11_500L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5.6", 10_300L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5.6", 10_300L))), 11_500L);
     book.updateFromStream("XUSDT", new BigDecimal("5.7"), 10_900L);  // delayed frame
     assertThat(book.contains("XUSDT")).as("nothing older than the no-price answer").isFalse();
 
@@ -128,11 +129,11 @@ class TickerPriceBookTest {
 
   @Test
   void aDelayedSnapshotWithAPriceNewerThanANoPriceAnswerRestoresTheSymbol() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "5", 1_000L))), 10_000L);
     book.applyAbsent(List.of("XUSDT"), 12_000L);  // covers up to 11_000
 
     // requested before the no-price answer, yet it carries a later trade
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 12_100L)), 11_900L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 12_100L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 12_100L))), 11_900L);
 
     assertThat(price("XUSDT")).isEqualTo("7");
   }
@@ -140,15 +141,15 @@ class TickerPriceBookTest {
   @Test
   void aLateOlderSnapshotAdmitsAPriceNewerThanTheNewestSnapshotAndANoPriceAnswer() {
     // the newer snapshot and the no-price answer land before the older snapshot
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), 12_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L))), 12_000L);
     book.applyAbsent(List.of("XUSDT"), 13_000L);  // covers up to 12_000
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), 11_900L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L))), 11_900L);
     assertThat(price("XUSDT")).isEqualTo("7");
 
     // the older snapshot lands before the no-price answer
     TickerPriceBook other = new TickerPriceBook(GAP, REST_LAG);
-    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), 12_000L);
-    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), 11_900L);
+    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "6", 10_500L))), 12_000L);
+    other.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("XUSDT", "7", 13_100L))), 11_900L);
     other.applyAbsent(List.of("XUSDT"), 13_000L);
     assertThat(other.get(List.of("XUSDT"))).extracting(ticker -> ticker.getPrice().toString()).containsExactly("7");
   }
@@ -156,7 +157,7 @@ class TickerPriceBookTest {
   @Test
   void aNoPriceAnswerOlderThanTheLatestSnapshotDecidesNothing() {
     // QUIETUSDT trades rarely, so the snapshot dates it long before the request that listed it
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 19_000L), dated("QUIETUSDT", "5", 1_000L)), 20_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 19_000L), dated("QUIETUSDT", "5", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 19_000L), dated("QUIETUSDT", "5", 1_000L))), 20_000L);
 
     book.applyAbsent(List.of("QUIETUSDT"), 15_000L);  // a no-price answer the snapshot already superseded
 
@@ -167,7 +168,7 @@ class TickerPriceBookTest {
 
   @Test
   void datedRestAndStreamMergeToTheNewestWhateverTheArrivalOrder() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);
 
     // REST newer than the stream event, stream event handled late
     book.applySymbols(List.of(dated("BTCUSDT", "110", 9_800L)));
@@ -182,10 +183,10 @@ class TickerPriceBookTest {
 
   @Test
   void undatedRestPricesAreNeverMerged() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);
 
     book.applySymbols(List.of(dated("BTCUSDT", "999", 0L), dated("NEWUSDT", "1", 0L)));
-    book.applySnapshot(List.of(dated("BTCUSDT", "999", 0L)), 20_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "999", 0L)), symbolsOf(List.of(dated("BTCUSDT", "999", 0L))), 20_000L);
 
     assertThat(price("BTCUSDT")).isEqualTo("100");
     assertThat(book.contains("NEWUSDT")).isFalse();
@@ -198,46 +199,46 @@ class TickerPriceBookTest {
     ticker.setPrice("100.50");
     ticker.setTime(1_000L);
 
-    book.applySnapshot(List.of(ticker), 10_000L);
+    book.applySnapshot(List.of(ticker), symbolsOf(List.of(ticker)), 10_000L);
 
     assertThat(price("BTCUSDT")).isEqualTo("100.50");
   }
 
   @Test
   void snapshotRemovesUnlistedSymbolsOnlyWhenItCoversTheirLastUpdate() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L))), 10_000L);
     book.applySymbols(List.of(dated("NEWUSDT", "7", 9_500L)));  // listed after the next snapshot was taken
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_200L);  // covers up to 9_200
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_200L);  // covers up to 9_200
 
     assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("BTCUSDT", "NEWUSDT");
   }
 
   @Test
   void aRemovedSymbolComesBackOnlyThroughNewerData() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), 10_000L);
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 11_000L);  // removes GONEUSDT at 10_000
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L))), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 11_000L);  // removes GONEUSDT at 10_000
 
     book.applySymbols(List.of(dated("GONEUSDT", "1", 9_000L)));  // response issued before the removal
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), 10_500L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "1", 1_000L))), 10_500L);
     assertThat(book.contains("GONEUSDT")).as("stale data").isFalse();
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "2", 11_500L)), 12_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "2", 11_500L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("GONEUSDT", "2", 11_500L))), 12_000L);
     assertThat(price("GONEUSDT")).as("relisted by a later snapshot").isEqualTo("2");
   }
 
   @Test
   void anOlderSnapshotFinishingLateDoesNotChangeMembership() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L)), 12_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L))), 12_000L);
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 11_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 11_000L);
 
     assertThat(book.all()).extracting(Ticker::getSymbol).containsExactly("BTCUSDT", "ETHUSDT");
   }
 
   @Test
   void allMarketListIsSortedAndReusedUntilTheBookChanges() {
-    book.applySnapshot(List.of(dated("ETHUSDT", "50", 1_000L), dated("BTCUSDT", "100", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("ETHUSDT", "50", 1_000L), dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("ETHUSDT", "50", 1_000L), dated("BTCUSDT", "100", 1_000L))), 10_000L);
 
     List<Ticker<?>> first = book.all();
     assertThat(first).extracting(Ticker::getSymbol).containsExactly("BTCUSDT", "ETHUSDT");
@@ -252,7 +253,7 @@ class TickerPriceBookTest {
 
   @Test
   void getKeepsRequestOrderAndSkipsUnknownSymbols() {
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L)), 10_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L), dated("ETHUSDT", "50", 1_000L))), 10_000L);
 
     assertThat(book.get(List.of("ETHUSDT", "XRPUSDT", "BTCUSDT")))
         .extracting(Ticker::getSymbol).containsExactly("ETHUSDT", "BTCUSDT");
@@ -263,14 +264,14 @@ class TickerPriceBookTest {
     assertThat(book.isCovered()).isFalse();
     assertThat(book.hasFullSnapshot()).isFalse();
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_000L);  // covers up to 9_000
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_000L);  // covers up to 9_000
     assertThat(book.hasFullSnapshot()).isTrue();
 
     assertThat(book.onStreamFrame(9_100L, 10_000L)).isTrue();  // segment starts at 9_100
     assertThat(book.isCovered()).as("snapshot predates the segment").isFalse();
     assertThat(book.needsFullSync()).isTrue();
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 10_100L);  // covers up to 9_100
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 10_100L);  // covers up to 9_100
     assertThat(book.isCovered()).isTrue();
     assertThat(book.needsFullSync()).isFalse();
   }
@@ -289,7 +290,7 @@ class TickerPriceBookTest {
   @Test
   void contiguousFramesContinueTheSegmentAndAJumpStartsANewOne() {
     assertThat(book.onStreamFrame(9_010L, 9_990L)).isTrue();
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 11_000L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 11_000L);
     assertThat(book.onStreamFrame(10_020L, 10_980L)).isFalse();
     assertThat(book.isCovered()).isTrue();
 
@@ -297,8 +298,27 @@ class TickerPriceBookTest {
     assertThat(book.onStreamFrame(12_010L, 12_990L)).isTrue();
     assertThat(book.isCovered()).isFalse();
 
-    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), 13_100L);
+    book.applySnapshot(List.of(dated("BTCUSDT", "100", 1_000L)), symbolsOf(List.of(dated("BTCUSDT", "100", 1_000L))), 13_100L);
     assertThat(book.isCovered()).isTrue();
+  }
+
+  @Test
+  void aSymbolTheSnapshotListsWithoutAPriceStaysInTheMarketWithoutLosingItsPrice() {
+    List<BigDecimalTicker> snapshot = List.of(dated("BTCUSDT", "100", 9_500L));
+    Set<String> listed = Set.of("BTCUSDT", "QUIETUSDT");  // the snapshot lists QUIETUSDT but cannot price it
+
+    book.applySnapshot(snapshot, listed, 10_000L);
+    assertThat(book.contains("QUIETUSDT")).isFalse();
+
+    // priced later, dated by the window start, then kept by the next snapshot that still cannot price it
+    book.applySymbols(List.of(dated("QUIETUSDT", "17530", 9_300L)));
+    book.applySnapshot(snapshot, listed, 10_500L);
+
+    assertThat(price("QUIETUSDT")).isEqualTo("17530");
+  }
+
+  private static Set<String> symbolsOf(List<? extends Ticker<?>> tickers) {
+    return tickers.stream().map(Ticker::getSymbol).collect(java.util.stream.Collectors.toSet());
   }
 
   private String price(String symbol) {
