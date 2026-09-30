@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zx.quant.klineproxy.client.BinanceFutureClient;
 import com.zx.quant.klineproxy.client.BinanceSpotClient;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
+import com.zx.quant.klineproxy.model.EventMiniTicker24HrEvent;
+import com.zx.quant.klineproxy.model.EventTicker24HrEvent;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.KlineSet;
 import com.zx.quant.klineproxy.model.KlineSetKey;
@@ -25,12 +27,14 @@ import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSy
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.monitor.MonitorManager;
 import com.zx.quant.klineproxy.service.ExchangeService;
+import com.zx.quant.klineproxy.service.TickerPriceBook;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -57,7 +61,9 @@ class SingleTickerMemoryFirstTest {
   @MethodSource("marketsAndNumberTypes")
   void cachedPriceBypassesRestAndLimiterAndImmediatelyReflectsStreamUpdates(boolean future, String type) {
     Fixture f = fixture(future, type);
-    f.service.updateStreamKline(SYMBOL, "1h", bar(f, OPEN, "123.4500", 1), false);
+    f.seedLivePrice("123.4500");
+    // A cached kline must not override the authoritative ticker price or its event timestamp.
+    f.service.updateStreamKline(SYMBOL, "1h", bar(f, OPEN, "999.0000", 1), false);
 
     List<Ticker<?>> first = f.service.queryTickers(List.of(SYMBOL));
     assertThat(first).hasSize(1);
@@ -69,7 +75,7 @@ class SingleTickerMemoryFirstTest {
       assertThat(first.getFirst().getPrice().toString()).isEqualTo("123.4500");
     }
 
-    f.service.updateStreamKline(SYMBOL, "1h", bar(f, OPEN, "124.5600", 2), false);
+    f.streamPrice("124.5600", NOW + 1);
     assertThat(new BigDecimal(f.service.queryTickers(List.of(SYMBOL)).getFirst().getPrice().toString()))
         .isEqualByComparingTo("124.56");
     verifyNoInteractions(f.limiter, f.futureClient, f.spotClient);
@@ -77,14 +83,11 @@ class SingleTickerMemoryFirstTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
-  void readsAnotherSubscribedIntervalWhileTheFirstIsStillEmpty(boolean future) {
+  void tickerBookAnswersWhileSubscribedKlineIntervalsAreStillEmpty(boolean future) {
     Fixture f = fixture(future, "bigDecimal");
     KlineSetKey emptyKey = new KlineSetKey(SYMBOL, "1h");
     f.service.klineSetMap.put(emptyKey, new KlineSet(emptyKey));
-    long dayOpen = NOW / (24 * HOUR) * (24 * HOUR);
-    Kline day = bar(f, dayOpen, "456.7800", 1);
-    day.setCloseTime(dayOpen + 24 * HOUR - 1);
-    f.service.updateStreamKline(SYMBOL, "1d", day, false);
+    f.seedLivePrice("456.7800");
 
     assertThat(f.service.queryTickers(List.of(SYMBOL)).getFirst().getPrice())
         .isEqualTo(new BigDecimal("456.7800"));
@@ -144,7 +147,7 @@ class SingleTickerMemoryFirstTest {
   @ValueSource(booleans = {true, false})
   void preservesMarketSpecificPriceResponseShape(boolean future) {
     Fixture f = fixture(future, "bigDecimal");
-    f.service.updateStreamKline(SYMBOL, "1h", bar(f, OPEN, "123.4500", 1), false);
+    f.seedLivePrice("123.4500");
 
     JsonNode display = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL)
         .valueToTree(ConvertUtil.convertToDisplayTicker(
@@ -209,6 +212,36 @@ class SingleTickerMemoryFirstTest {
   private record Fixture(boolean future, AbstractKlineService<?> service,
                          BinanceFutureClient futureClient, BinanceSpotClient spotClient,
                          RateLimitManager limiter) {
+    void seedLivePrice(String price) {
+      TickerPriceBook book = (TickerPriceBook) ReflectionTestUtils.getField(service, "tickerPriceBook");
+      book.onStreamFrame(NOW - 2_000, NOW);
+      Ticker.BigDecimalTicker ticker = new Ticker.BigDecimalTicker();
+      ticker.setSymbol(SYMBOL);
+      ticker.setPrice(new BigDecimal(price));
+      ticker.setTime(NOW - 1);
+      book.applySnapshot(List.of(ticker), Set.of(SYMBOL), NOW);
+      assertThat(book.isCovered()).isTrue();
+      streamPrice(price, NOW);
+    }
+
+    void streamPrice(String price, long eventTime) {
+      if (future) {
+        EventTicker24HrEvent event = new EventTicker24HrEvent();
+        event.setEventType("24hrTicker");
+        event.setEventTime(eventTime);
+        event.setSymbol(SYMBOL);
+        event.setLastPrice(new BigDecimal(price));
+        assertThat(service.doForTicker24HrEvents(List.of(event))).isTrue();
+      } else {
+        EventMiniTicker24HrEvent event = new EventMiniTicker24HrEvent();
+        event.setEventType("24hrMiniTicker");
+        event.setEventTime(eventTime);
+        event.setSymbol(SYMBOL);
+        event.setLastPrice(new BigDecimal(price));
+        assertThat(service.doForMiniTicker24HrEvents(List.of(event))).isTrue();
+      }
+    }
+
     Object client() {
       return future ? futureClient : spotClient;
     }
