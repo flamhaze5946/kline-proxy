@@ -17,7 +17,16 @@ public final class FinalBarWaitRegistry {
 
   /** Register first, then recheck the store: a close preceding registration is already visible. */
   public Registration register(Collection<Key> keys) {
-    Registration registration = new Registration(List.copyOf(new HashSet<>(keys)));
+    return register(keys, false);
+  }
+
+  /** A bulk request only needs to resume when its entire initial pending set has settled. */
+  public Registration registerAll(Collection<Key> keys) {
+    return register(keys, true);
+  }
+
+  private Registration register(Collection<Key> keys, boolean all) {
+    Registration registration = new Registration(List.copyOf(new HashSet<>(keys)), all);
     for (Key key : registration.keys) {
       listeners.compute(key, (ignored, current) -> {
         Set<Registration> bucket = current == null ? new HashSet<>() : current;
@@ -32,7 +41,7 @@ public final class FinalBarWaitRegistry {
     // Removal is atomic with registration/cleanup. The detached bucket is no longer mutated.
     Set<Registration> ready = listeners.remove(key);
     if (ready != null) {
-      ready.forEach(Registration::signal);
+      ready.forEach(registration -> registration.signal(key));
     }
   }
 
@@ -46,20 +55,46 @@ public final class FinalBarWaitRegistry {
     return listeners.size();
   }
 
+  /** Removal makes pending bars absent; publish that change instead of polling every request. */
+  public void removedSeries(String symbol, String interval) {
+    for (Key key : listeners.keySet()) {
+      if (key.symbol().equals(symbol) && key.interval().equals(interval)) {
+        signal(key);
+      }
+    }
+  }
+
   public final class Registration implements AutoCloseable {
     private final List<Key> keys;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition changed = lock.newCondition();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final Set<Key> remaining;
     private volatile long version;
 
-    private Registration(List<Key> keys) {
+    private Registration(List<Key> keys, boolean all) {
       this.keys = keys;
+      remaining = all ? new HashSet<>(keys) : null;
     }
 
     /** Capture BEFORE checking pending bars, so a notification during that check is retained. */
     public long version() {
       return version;
+    }
+
+    /** A close can precede registration; acknowledge the store recheck without losing a signal. */
+    public void observePending(Collection<Key> pending) {
+      if (remaining == null) {
+        return;
+      }
+      lock.lock();
+      try {
+        if (remaining.retainAll(pending) && remaining.isEmpty()) {
+          signalLocked();
+        }
+      } finally {
+        lock.unlock();
+      }
     }
 
     public void awaitChange(long observedVersion, long timeoutNanos) throws InterruptedException {
@@ -73,14 +108,20 @@ public final class FinalBarWaitRegistry {
       }
     }
 
-    private void signal() {
+    private void signal(Key key) {
       lock.lock();
       try {
-        version++;
-        changed.signalAll();
+        if (remaining == null || remaining.remove(key) && remaining.isEmpty()) {
+          signalLocked();
+        }
       } finally {
         lock.unlock();
       }
+    }
+
+    private void signalLocked() {
+      version++;
+      changed.signalAll();
     }
 
     @Override
@@ -94,7 +135,12 @@ public final class FinalBarWaitRegistry {
           return bucket.isEmpty() ? null : bucket;
         });
       }
-      signal();
+      lock.lock();
+      try {
+        signalLocked();
+      } finally {
+        lock.unlock();
+      }
     }
   }
 }

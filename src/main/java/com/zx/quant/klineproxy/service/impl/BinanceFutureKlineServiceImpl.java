@@ -134,6 +134,11 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
   }
 
   @Override
+  protected java.util.Set<String> getTradingSymbols() {
+    return exchangeService.querySymbolSet();
+  }
+
+  @Override
   protected List<String> getSymbols() {
     return exchangeService.querySymbols();
   }

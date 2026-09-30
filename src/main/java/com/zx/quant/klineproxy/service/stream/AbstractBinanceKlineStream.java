@@ -35,7 +35,8 @@ public abstract class AbstractBinanceKlineStream {
     }
     return new KlineDispatchMetadata(new KlineDispatchMetadata.Series(market, symbol, header.interval()),
         header.openTime(), header.closed(), header.tradeCount(), header.eventTime(),
-        StringUtils.isNotBlank(header.stream()) ? header.stream() : topic);
+        StringUtils.isNotBlank(header.stream()) ? header.stream() : topic,
+        header.directDecodeSafe() ? header.eventType() : null, header.stream());
   }
 
   public final boolean accepts(String eventType) {
@@ -47,7 +48,9 @@ public abstract class AbstractBinanceKlineStream {
     if (!accepts(message.eventType())) {
       return null;
     }
-    EventKlineEvent<?, ?> event = serializer.treeToValue(message.payloadNode(), numberType.eventKlineEventClass());
+    EventKlineEvent<?, ?> event = message.directPayload()
+        ? serializer.readWebSocketPayload(message.rawMessage(), message.combined(), numberType.eventKlineEventClass())
+        : serializer.treeToValue(message.payloadNode(), numberType.eventKlineEventClass());
     if (event == null || event.getEventKline() == null) {
       return null;
     }

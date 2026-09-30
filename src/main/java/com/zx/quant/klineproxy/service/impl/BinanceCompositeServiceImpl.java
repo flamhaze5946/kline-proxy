@@ -1,5 +1,8 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.zx.quant.klineproxy.util.BlockingWorkExecutor;
+import jakarta.annotation.PreDestroy;
+
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.BinanceCompositeClient;
@@ -24,6 +27,13 @@ import org.springframework.stereotype.Service;
 @Service("binanceCompositeService")
 public class BinanceCompositeServiceImpl implements CompositeService {
 
+  private final BlockingWorkExecutor cacheLoads = new BlockingWorkExecutor("cms-loader", 4, 64);
+
+  @PreDestroy
+  public void closeCacheLoads() {
+    cacheLoads.close();
+  }
+
   private final LoadingCache<CmsArticlesKey, CompositeResponse<CompositeArticles>> articlesCache = Caffeine.newBuilder()
       .maximumSize(64)
       .expireAfterWrite(Duration.ofMinutes(5))
@@ -40,14 +50,14 @@ public class BinanceCompositeServiceImpl implements CompositeService {
   @Override
   public CompositeResponse<CompositeArticles> queryCmsArticleCatalogs(String catalogId, Integer pageNo, Integer pageSize) {
     CmsArticlesKey cmsArticlesKey = new CmsArticlesKey(catalogId, pageNo, pageSize);
-    return articlesCache.get(cmsArticlesKey);
+    return cacheLoads.get(articlesCache, cmsArticlesKey);
   }
 
   @Override
   public CompositeResponse<?> queryCmsArticles(String catalogId, Integer type, Integer pageNo,
       Integer pageSize) {
     CmsArticleCatalogsKey cmsArticleCatalogsKey = new CmsArticleCatalogsKey(catalogId, type, pageNo, pageSize);
-    return articleCatalogsCache.get(cmsArticleCatalogsKey);
+    return cacheLoads.get(articleCatalogsCache, cmsArticleCatalogsKey);
   }
 
   private CompositeResponse<CompositeArticles> queryCmsArticles0(CmsArticlesKey key) {

@@ -1,5 +1,9 @@
 package com.zx.quant.klineproxy.service.impl;
 
+
+import com.zx.quant.klineproxy.service.cache.TradingSymbolsCache;
+import java.util.Set;
+
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -15,6 +19,8 @@ import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.model.exceptions.ApiException;
 import com.zx.quant.klineproxy.service.FutureExchangeService;
 import com.zx.quant.klineproxy.util.ClientUtil;
+import com.zx.quant.klineproxy.util.BlockingWorkExecutor;
+import jakarta.annotation.PreDestroy;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.ConvertUtil.DisplayFundingRate;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
@@ -50,6 +56,13 @@ import retrofit2.Call;
 @Slf4j
 @Service("binanceFutureExchangeService")
 public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<BinanceFutureExchange>, InitializingBean {
+
+  private final BlockingWorkExecutor cacheLoads = new BlockingWorkExecutor("future-metadata-loader", 2, 32);
+
+  @PreDestroy
+  public void closeCacheLoads() {
+    cacheLoads.close();
+  }
 
   private static final String VALID_SYMBOL_STATUS = "TRADING";
 
@@ -110,7 +123,19 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       .maximumSize(720)
       .build();
 
+  private final TradingSymbolsCache<BinanceFutureExchange> tradingSymbols = new TradingSymbolsCache<>(
+      exchange -> exchange.getSymbols().stream()
+          .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
+          .map(BinanceFutureSymbol::getSymbol).toList());
+
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
+
+  private final BlockingWorkExecutor fundingLoads = new BlockingWorkExecutor("funding-loader", 8, 256);
+
+  @PreDestroy
+  public void closeFundingLoads() {
+    fundingLoads.close();
+  }
 
   @Autowired
   private BinanceFutureClient binanceFutureClient;
@@ -175,7 +200,7 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Override
   public BinanceFutureExchange queryExchange() {
-    BinanceFutureExchange exchange = exchangeCache.get(StringUtils.EMPTY);
+    BinanceFutureExchange exchange = cacheLoads.get(exchangeCache, StringUtils.EMPTY);
     exchange.setServerTime(queryServerTime());
     return exchange;
   }
@@ -196,6 +221,64 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Override
   public BulkFundingRateResponse queryBulkFundingRates(Collection<String> symbols, Long sinceMs, Long untilMs, Integer limit) {
+    if (Thread.currentThread().isVirtual()) {
+      if (sinceMs != null && untilMs != null) {
+        if (sinceMs >= untilMs) {
+          return new BulkFundingRateResponse(System.currentTimeMillis(), new LinkedHashMap<>());
+        }
+        long width = untilMs - sinceMs;
+        if (symbols == null || symbols.isEmpty()
+            || width > 0 && width <= FUNDING_CHUNK_CACHE_WINDOW_THRESHOLD_MS) {
+          List<Map<String, List<DisplayFundingRate>>> chunks = cachedChunks(sinceMs, untilMs);
+          if (chunks != null) {
+            int count = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_FUNDING_LIMIT, 1),
+                MAX_BULK_FUNDING_LIMIT);
+            List<String> selected = symbols == null || symbols.isEmpty() ? null : normalizeFundingSymbols(symbols);
+            return assembleFundingChunks(selected, sinceMs, untilMs, count, chunks);
+          }
+        }
+      }
+      // Keep the common hit on the request thread. Cold loaders (including nested chunk-cache
+      // loaders and publication grace) run entirely on platform threads, not under a carrier's
+      // ConcurrentHashMap.compute monitor.
+      if (sinceMs == null && untilMs == null) {
+        long now = System.currentTimeMillis();
+        long boundary = Math.floorDiv(now, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+        boolean noSymbols = symbols == null || symbols.isEmpty();
+        if (!noSymbols || now - boundary >= fundingPublicationGraceMs) {
+          int count = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_FUNDING_LIMIT, 1),
+              MAX_BULK_FUNDING_LIMIT_NO_RANGE);
+          RecentFundingKey key = new RecentFundingKey(noSymbols ? List.of() : normalizeFundingSymbols(symbols),
+              count, boundary);
+          BulkFundingRateResponse cached = bulkFundingRecentCache.getIfPresent(key);
+          if (cached != null) {
+            return cached;
+          }
+        }
+      }
+      return fundingLoads.call(() -> queryBulkFundingRatesInline(symbols, sinceMs, untilMs, limit));
+    }
+    return queryBulkFundingRatesInline(symbols, sinceMs, untilMs, limit);
+  }
+
+  /** Capture the actual values, so eviction after this check cannot turn a hit into blocking I/O. */
+  private List<Map<String, List<DisplayFundingRate>>> cachedChunks(long sinceMs, long untilMs) {
+    long now = System.currentTimeMillis();
+    long first = Math.floorDiv(sinceMs, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    long last = Math.floorDiv(untilMs - 1, RECENT_CACHE_BOUNDARY_MS) * RECENT_CACHE_BOUNDARY_MS;
+    List<Map<String, List<DisplayFundingRate>>> chunks = new ArrayList<>();
+    for (long hour = first; hour <= last && hour <= now; hour += RECENT_CACHE_BOUNDARY_MS) {
+      Map<String, List<DisplayFundingRate>> chunk = historicalChunkCache.getIfPresent(hour);
+      if (chunk == null) {
+        return null;
+      }
+      chunks.add(chunk);
+    }
+    return chunks;
+  }
+
+  private BulkFundingRateResponse queryBulkFundingRatesInline(Collection<String> symbols, Long sinceMs,
+      Long untilMs, Integer limit) {
     // Two different notions of "bounded", and they must not be conflated: the
     // result ceiling follows what `loadBulkFundingRates` treats as a bounded
     // window (EITHER bound), while chunk assembly needs BOTH bounds to know
@@ -270,6 +353,11 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
       chunksInWindow.add(loadChunk(chunkStart));
     }
 
+    return assembleFundingChunks(symbols, sinceMs, untilMs, limit, chunksInWindow);
+  }
+
+  private BulkFundingRateResponse assembleFundingChunks(List<String> symbols, long sinceMs,
+      long untilMs, int limit, List<Map<String, List<DisplayFundingRate>>> chunksInWindow) {
     List<String> responseSymbols;
     if (symbols == null || symbols.isEmpty()) {
       responseSymbols = chunksInWindow.stream()
@@ -535,11 +623,14 @@ public class BinanceFutureExchangeServiceImpl implements FutureExchangeService<B
 
   @Override
   public List<String> querySymbols() {
-    return queryExchange().getSymbols().stream()
-        .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
-        .map(BinanceFutureSymbol::getSymbol)
-        .collect(Collectors.toList());
+    return tradingSymbols.symbols(queryExchange());
   }
+
+  @Override
+  public Set<String> querySymbolSet() {
+    return tradingSymbols.symbolSet(queryExchange());
+  }
+
 
   private void refreshServerTimeDelta() {
     Call<BinanceServerTime> serverTimeCall = binanceFutureClient.getServerTime();

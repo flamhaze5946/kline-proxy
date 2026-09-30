@@ -1,5 +1,8 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.zx.quant.klineproxy.util.BlockingWorkExecutor;
+import jakarta.annotation.PreDestroy;
+
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.zx.quant.klineproxy.client.BlockChainCenterClient;
@@ -55,6 +58,13 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service("binanceStatisticService")
 public class BinanceStatisticServiceImpl implements StatisticService {
+
+  private final BlockingWorkExecutor cacheLoads = new BlockingWorkExecutor("statistics-loader", 2, 64);
+
+  @PreDestroy
+  public void closeCacheLoads() {
+    cacheLoads.close();
+  }
 
   private static final IntervalEnum ATR_INTERVAL = IntervalEnum.ONE_HOUR;
 
@@ -137,9 +147,6 @@ public class BinanceStatisticServiceImpl implements StatisticService {
     List<BigDecimal> lows = klines.stream()
         .map(BigDecimalKline::getLowPrice)
         .toList();
-    List<BigDecimal> opens = klines.stream()
-        .map(BigDecimalKline::getOpenPrice)
-        .toList();
     List<BigDecimal> closes = klines.stream()
         .map(BigDecimalKline::getClosePrice)
         .toList();
@@ -175,17 +182,17 @@ public class BinanceStatisticServiceImpl implements StatisticService {
 
   @Override
   public Map<String, Float> getAltCoinIndex() {
-    return altCoinIndexCache.get(StringUtil.EMPTY_STRING);
+    return cacheLoads.get(altCoinIndexCache, StringUtil.EMPTY_STRING);
   }
 
   @Override
   public Map<Long, Yama01Index> getYama01AltCoinIndex() {
-    return yama01altCoinIndexCache.get(StringUtil.EMPTY_STRING);
+    return cacheLoads.get(yama01altCoinIndexCache, StringUtil.EMPTY_STRING);
   }
 
   @Override
   public Map<Long, Yama02Index> getYama02AltCoinIndex() {
-    return yama02altCoinIndexCache.get(StringUtil.EMPTY_STRING);
+    return cacheLoads.get(yama02altCoinIndexCache, StringUtil.EMPTY_STRING);
   }
 
   private Map<Long, Yama01Index> getYama01AltCoinIndex0() {
@@ -265,24 +272,23 @@ public class BinanceStatisticServiceImpl implements StatisticService {
         continue;
       }
       List<YamaDateSymbolInfo> yamaDateSymbolInfos = new ArrayList<>();
+      BigDecimal quoteVolumeSum = BigDecimal.ZERO;
+      int quoteVolumeWindow = Math.max(1, yamaAltCoinIndexQuoteVolumeStatisticDays);
       for (int i = 0; i < klines.size(); i++) {
         BigDecimalKline currentKline = klines.get(i);
         BigDecimal priceChange = BigDecimal.ZERO;
-        BigDecimal quoteVolumeSum = currentKline.getQuoteVolume();
+        // BigDecimal addition/subtraction is exact here (no MathContext), so this
+        // preserves the original window sum and its float conversion without rescanning.
+        quoteVolumeSum = quoteVolumeSum.add(currentKline.getQuoteVolume());
+        if (i >= quoteVolumeWindow) {
+          quoteVolumeSum = quoteVolumeSum.subtract(klines.get(i - quoteVolumeWindow).getQuoteVolume());
+        }
         int priceCompareIndex = i - yama01altCoinIndexStatisticDays + 1;
         if (priceCompareIndex >= 0) {
           BigDecimalKline priceChangeCompareKline = klines.get(priceCompareIndex);
           priceChange = currentKline.getOpenPrice()
               .divide(priceChangeCompareKline.getOpenPrice(), 8, RoundingMode.DOWN)
               .subtract(BigDecimal.ONE);
-        }
-        for(int j = yamaAltCoinIndexQuoteVolumeStatisticDays - 1; j > 0 ; j--) {
-          int accumulateKlineIndex = i - j;
-          if (accumulateKlineIndex < 0) {
-            continue;
-          }
-          BigDecimalKline previousKline = klines.get(accumulateKlineIndex);
-          quoteVolumeSum = quoteVolumeSum.add(previousKline.getQuoteVolume());
         }
         YamaDateSymbolInfo yamaDateSymbolInfo = new YamaDateSymbolInfo();
         yamaDateSymbolInfo.setSymbol(symbol);
@@ -412,17 +418,20 @@ public class BinanceStatisticServiceImpl implements StatisticService {
   }
 
   private static List<BigDecimal> calculateRollingMeans(List<BigDecimal> values, int windowSize) {
-    List<BigDecimal> result = new ArrayList<>();
+    List<BigDecimal> result = new ArrayList<>(values.size());
+    BigDecimal sum = BigDecimal.ZERO;
 
     for (int i = 0; i < values.size(); i++) {
       int start = Math.max(0, i - windowSize + 1);
       int end = i + 1;
 
-      BigDecimal sum = BigDecimal.ZERO;
-      for (int j = start; j < end; j++) {
-        sum = sum.add(values.get(j));
+      if (start < end) {
+        sum = sum.add(values.get(i));
+        if (start > 0) {
+          sum = sum.subtract(values.get(start - 1));
+        }
       }
-      BigDecimal mean = sum.divide(new BigDecimal(end - start), Constants.SCALE, RoundingMode.DOWN);
+      BigDecimal mean = sum.divide(BigDecimal.valueOf(end - start), Constants.SCALE, RoundingMode.DOWN);
       result.add(mean);
     }
 

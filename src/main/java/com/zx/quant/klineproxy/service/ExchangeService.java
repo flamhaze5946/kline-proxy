@@ -1,6 +1,8 @@
 package com.zx.quant.klineproxy.service;
 
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
 
 /**
  * exchange service
@@ -25,4 +27,8 @@ public interface ExchangeService<T> {
    * @return symbols
    */
   List<String> querySymbols();
+
+  default Set<String> querySymbolSet() {
+    return new HashSet<>(querySymbols());
+  }
 }

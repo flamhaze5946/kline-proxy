@@ -4,6 +4,7 @@ import java.util.Set;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import lombok.AccessLevel;
@@ -11,6 +12,8 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import com.zx.quant.klineproxy.model.enums.IntervalEnum;
+import com.zx.quant.klineproxy.util.KlineFill;
 
 /**
  * kline set key
@@ -36,6 +39,21 @@ public class KlineSet {
   @ToString.Exclude
   @EqualsAndHashCode.Exclude
   private final NavigableMap<Long, StreamVersion> streamVersions = new TreeMap<>();
+
+  /** Structural changes invalidate cached forming windows, including provisional tails. */
+  private volatile long windowGeneration;
+
+  // Runtime evidence of WebSocket x=true. REST, disk restore and gap fills cannot grant this.
+  @Getter(AccessLevel.NONE)
+  @lombok.Setter(AccessLevel.NONE)
+  private long latestStreamFinalOpenTime = Long.MIN_VALUE;
+
+  public synchronized Kline currentPlaceholder(IntervalEnum interval, long now) {
+    var last = klineMap.lastEntry();
+    return last == null ? null
+        : KlineFill.currentAfter(last.getValue(), isFinal(last.getKey())
+            && last.getKey() == latestStreamFinalOpenTime, interval, now);
+  }
 
   /**
    * One commit lock covers compare, replacement and final publication for ALL writers, including
@@ -79,6 +97,15 @@ public class KlineSet {
       streamVersions.remove(openTime);
     }
     boolean becameFinal = closed && finalOpenTimes.add(openTime);
+    boolean streamFinalObserved = source == KlineUpdateSource.STREAM && closed
+        && openTime > latestStreamFinalOpenTime;
+    if (streamFinalObserved) {
+      latestStreamFinalOpenTime = openTime;
+    }
+    if (existing == null || becameFinal || streamFinalObserved || changed && wasFinal
+        || existing.getCloseTime() != incoming.getCloseTime()) {
+      windowGeneration++;
+    }
     return new Commit(changed, becameFinal, changed && wasFinal);
   }
 
@@ -101,21 +128,43 @@ public class KlineSet {
     return finalOpenTimes.contains(openTime);
   }
 
-  /** Copy references under the commit lock; expensive persistence encoding happens afterwards. */
-  public synchronized List<Kline> finalSnapshot(long now) {
-    return klineMap.values().stream()
-        .filter(kline -> kline.getCloseTime() < now && finalOpenTimes.contains(kline.getOpenTime()))
-        .toList();
+  public List<Kline> finalSnapshot(long now) {
+    return persistenceSnapshot(now).klines();
   }
+
+  /** Copy ordered references under the commit lock; encoding happens afterwards. */
+  public synchronized PersistenceSnapshot persistenceSnapshot(long now) {
+    List<Kline> klines = new ArrayList<>();
+    boolean hasDeferredFinals = false;
+    for (Kline kline : klineMap.values()) {
+      if (!finalOpenTimes.contains(kline.getOpenTime())) {
+        continue;
+      }
+      if (kline.getCloseTime() < now) {
+        klines.add(kline);
+      } else {
+        hasDeferredFinals = true;
+      }
+    }
+    return new PersistenceSnapshot(List.copyOf(klines), hasDeferredFinals);
+  }
+
+  public record PersistenceSnapshot(List<Kline> klines, boolean hasDeferredFinals) { }
 
   /** @return true when the flag was newly set */
   public synchronized boolean markFinal(long openTime) {
-    return finalOpenTimes.add(openTime);
+    boolean added = finalOpenTimes.add(openTime);
+    if (added) {
+      windowGeneration++;
+    }
+    return added;
   }
 
   public synchronized void dropFinalBefore(long firstOpenTime) {
     finalOpenTimes.removeIf(openTime -> openTime < firstOpenTime);
     streamVersions.headMap(firstOpenTime, false).clear();
+    // The retained window may have shrunk after a query copied the append generation.
+    windowGeneration++;
   }
 
   public KlineSet(KlineSetKey key) {

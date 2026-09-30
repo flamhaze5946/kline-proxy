@@ -21,6 +21,11 @@ public class KlinePersistenceProperties {
 
   private int dumpIntervalSeconds = 300;
 
+  /** Background dumps pause around every enabled spot/futures interval boundary. */
+  private long boundaryGuardBeforeMs = 30_000L;
+
+  private long boundaryGuardAfterMs = 30_000L;
+
   private String rootDir = "./data/kline-cache";
 
   private ServicePersistenceConfig spot = new ServicePersistenceConfig();

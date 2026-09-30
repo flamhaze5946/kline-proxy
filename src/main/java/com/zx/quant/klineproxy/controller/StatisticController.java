@@ -1,5 +1,8 @@
 package com.zx.quant.klineproxy.controller;
 
+import com.zx.quant.klineproxy.util.BlockingWorkExecutor;
+import jakarta.annotation.PreDestroy;
+
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -30,6 +33,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("statistic")
 public class StatisticController {
+
+  private final BlockingWorkExecutor cacheLoads = new BlockingWorkExecutor("chart-loader", 1, 32);
+
+  @PreDestroy
+  public void closeCacheLoads() {
+    cacheLoads.close();
+  }
 
   private static final String YAMA_ALT_DATE_PATTERN = "yyyy-MM-dd";
 
@@ -76,7 +86,7 @@ public class StatisticController {
 
   @GetMapping("pic/getYama01AltCoinIndex")
   public ResponseEntity<byte[]> getYama01AltCoinIndexPic() throws IOException {
-    byte[] imageBytes = imageCache.get(YAMA_01_INDEX_TITLE);
+    byte[] imageBytes = cacheLoads.get(imageCache, YAMA_01_INDEX_TITLE);
 
     return ResponseEntity
         .ok()
@@ -93,7 +103,7 @@ public class StatisticController {
 
   @GetMapping("pic/getYama02AltCoinIndex")
   public ResponseEntity<byte[]> getYama02AltCoinIndexPic() throws IOException {
-    byte[] imageBytes = imageCache.get(YAMA_02_INDEX_TITLE);
+    byte[] imageBytes = cacheLoads.get(imageCache, YAMA_02_INDEX_TITLE);
 
     return ResponseEntity
         .ok()
@@ -122,7 +132,7 @@ public class StatisticController {
 
   @GetMapping("pic/getYamaAggAltCoinIndex")
   public ResponseEntity<byte[]> getYamaAggAltCoinIndexPic() throws IOException {
-    byte[] imageBytes = imageCache.get(YAMA_AGG_INDEX_TITLE);
+    byte[] imageBytes = cacheLoads.get(imageCache, YAMA_AGG_INDEX_TITLE);
 
     return ResponseEntity
         .ok()

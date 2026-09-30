@@ -4,6 +4,14 @@ at least 500MB free memory, depends on your configuration.
 ### Configuration
 refer to src/main/resources/application.yaml
 
+K 线落盘避让配置见 [周期边界避让说明](docs/kline-persistence-boundary-guard.md)。
+
+Java 现货、合约日线的快照配置与实机重启验证见 [日线快照记录](docs/java-daily-snapshot-20260929.md)。
+
+收到上一根 WebSocket `x=true` 后的临时补零规则见 [当前周期占位说明](docs/current-zero-bar-20260928.md)。
+
+Java 1.8.9 的性能优化、VPS 部署和 Rust 对比见 [性能复测报告](docs/java-performance-optimization-20260930.md)。
+
 ### How to build
 
 ```shell

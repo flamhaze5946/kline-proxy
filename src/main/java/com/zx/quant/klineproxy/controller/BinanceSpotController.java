@@ -3,7 +3,6 @@ package com.zx.quant.klineproxy.controller;
 import com.zx.quant.klineproxy.client.model.BinanceSpotExchange;
 import com.zx.quant.klineproxy.client.model.BinanceSpotSymbol;
 import com.zx.quant.klineproxy.client.model.BinanceSpotServerTime;
-import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
@@ -13,6 +12,9 @@ import com.zx.quant.klineproxy.util.ClientUtil;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.Serializer;
 import java.util.List;
+import java.util.Collection;
+import java.util.Set;
+import com.zx.quant.klineproxy.service.cache.PublicationCache;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -38,6 +40,12 @@ import retrofit2.Call;
 public class BinanceSpotController extends GenericController {
 
   private static final int DEFAULT_LIMIT = 500;
+
+  private final PublicationCache<BinanceSpotExchange, Set<String>> symbolSets = new PublicationCache<>();
+
+  private final PublicationCache<BinanceSpotExchange, Map<String, BinanceSpotSymbol>> symbolMaps =
+      new PublicationCache<>();
+
 
   @Autowired
   @Qualifier("binanceSpotKlineService")
@@ -129,23 +137,15 @@ public class BinanceSpotController extends GenericController {
       List<Object[]> responseBody = ClientUtil.getResponseBody(klinesCall);
       return responseBody.toArray(Object[][]::new);
     }
-    Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
-    Object[][] displayKlines = new Object[klines.length][];
-    for(int i = 0; i < klines.length; i++) {
-      Kline kline = klines[i];
-      Object[] displayKline = ConvertUtil.convertToDisplayKline(kline);
-      displayKlines[i] = displayKline;
-    }
-    return displayKlines;
+    return klineService.queryDisplayKlines(symbol, interval, startTime, endTime, realLimit);
   }
 
-  private List<String> allSymbols(BinanceSpotExchange exchange) {
+  private Collection<String> allSymbols(BinanceSpotExchange exchange) {
     if (exchange == null || CollectionUtils.isEmpty(exchange.getSymbols())) {
       return exchangeService.querySymbols();
     }
-    return exchange.getSymbols().stream()
-        .map(BinanceSpotSymbol::getSymbol)
-        .collect(Collectors.toList());
+    return symbolSets.get(exchange, metadata -> Set.copyOf(metadata.getSymbols().stream()
+        .map(BinanceSpotSymbol::getSymbol).toList()));
   }
 
   private Map<String, BinanceSpotSymbol> allSymbolMap(BinanceSpotExchange exchange) {
@@ -157,8 +157,8 @@ public class BinanceSpotController extends GenericController {
             return spotSymbol;
           }, (o, n) -> o));
     }
-    return exchange.getSymbols().stream()
-        .collect(Collectors.toMap(BinanceSpotSymbol::getSymbol, Function.identity()));
+    return symbolMaps.get(exchange, metadata -> metadata.getSymbols().stream()
+        .collect(Collectors.toUnmodifiableMap(BinanceSpotSymbol::getSymbol, Function.identity())));
   }
 
   private List<String> filterSymbolsByStatus(List<String> symbols, String symbolStatus,
@@ -194,8 +194,8 @@ public class BinanceSpotController extends GenericController {
     if (cachedResponse != null && cachedResponse.source() == tickers) {
       return cachedResponse.response();
     }
-    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker(tickers, true, false));
-    ResponseEntity<String> response = ResponseEntity.ok()
+    byte[] payload = serializer.toJsonBytes(ConvertUtil.convertToDisplayTicker(tickers, true, false));
+    ResponseEntity<byte[]> response = ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_JSON)
         .body(payload);
     allMarketTickerResponse.set(new RenderedJsonResponse<>(tickers, response));
@@ -209,14 +209,14 @@ public class BinanceSpotController extends GenericController {
     if (cachedResponse != null && cachedResponse.source() == ticker24Hrs) {
       return cachedResponse.response();
     }
-    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, true, mini));
-    ResponseEntity<String> response = ResponseEntity.ok()
+    byte[] payload = serializer.toJsonBytes(ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, true, mini));
+    ResponseEntity<byte[]> response = ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_JSON)
         .body(payload);
     cacheRef.set(new RenderedJsonResponse<>(ticker24Hrs, response));
     return response;
   }
 
-  private record RenderedJsonResponse<T>(T source, ResponseEntity<String> response) {
+  private record RenderedJsonResponse<T>(T source, ResponseEntity<byte[]> response) {
   }
 }

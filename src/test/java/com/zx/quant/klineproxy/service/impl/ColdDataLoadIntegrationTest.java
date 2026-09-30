@@ -245,6 +245,9 @@ class ColdDataLoadIntegrationTest {
     Set<KlineSetKey> restored = rebooted.invokeRestorePersistedKlines(Set.of(key));
     rebooted.invokeWarmUpPersistedKlines(restored);
     rebooted.invokeReconcilePersistedKlines(Set.of(key));
+    // Reconciliation at +5 s is deferred; the periodic dump saves it after the guard ends.
+    rebooted.setServerTime(BASE_TIME + 72 * HOUR + 30_000L);
+    rebooted.invokeDumpPersistedKlines(false);
 
     // a third restart must find ALL 72 closed hours on disk — no Binance fetch needed
     HarnessKlineService thirdBoot = new HarnessKlineService("double", store, maintainCount);

@@ -2,11 +2,16 @@ package com.zx.quant.klineproxy.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.client.ws.client.WebSocketClient;
@@ -19,6 +24,8 @@ import com.zx.quant.klineproxy.model.Ticker.BigDecimalTicker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.config.KlinePersistenceProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties;
+import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.BinanceFutureKlineSyncConfigProperties;
+import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.BinanceSpotKlineSyncConfigProperties;
 import com.zx.quant.klineproxy.model.config.KlineSyncConfigProperties.IntervalSyncConfig;
 import com.zx.quant.klineproxy.model.enums.IntervalEnum;
 import com.zx.quant.klineproxy.model.persistence.PersistedKlineRow;
@@ -34,11 +41,46 @@ import java.util.stream.IntStream;
 import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.config.KlineBulkProperties;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.config.DependencyDescriptor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class AbstractKlineServiceFillKlinesTest {
+
+  @Test
+  void ordinaryDisplayKeepsSelectionAndTracksCorrectionsWithoutRestOrSharedMutableArrays() {
+    TestKlineService service = new TestKlineService();
+    long hour = IntervalEnum.ONE_HOUR.getMills();
+    service.setServerTime(hour * 2 + 100);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100"),
+        buildKline(hour, "101"), buildKline(hour * 2, "102")));
+    for (Long start : new Long[] {null, 0L, hour}) {
+      for (Long end : new Long[] {null, hour * 2 - 1}) {
+        Object[][] expected = java.util.Arrays.stream(service.queryKlineArray(
+            "BTCUSDT", "1h", start, end, 2))
+            .map(com.zx.quant.klineproxy.util.ConvertUtil::convertToDisplayKline)
+            .toArray(Object[][]::new);
+        assertTrue(java.util.Arrays.deepEquals(expected,
+            service.queryDisplayKlines("BTCUSDT", "1h", start, end, 2)));
+      }
+    }
+    Object[][] first = service.queryDisplayKlines("BTCUSDT", "1h", null, hour * 2 - 1, 2);
+    first[1][4] = "caller mutation";
+    assertEquals("101", service.queryDisplayKlines("BTCUSDT", "1h", null, hour * 2 - 1, 2)[1][4]);
+    StringKline correction = buildKline(hour, "111");
+    correction.setTradeNum(2);
+    StringKline forming = buildKline(hour * 2, "112");
+    forming.setTradeNum(2);
+    service.updateKlines("BTCUSDT", "1h", List.of(correction, forming));
+    assertEquals("111", service.queryDisplayKlines("BTCUSDT", "1h", null, hour * 2 - 1, 2)[1][4]);
+    assertEquals("112", service.queryDisplayKlines("BTCUSDT", "1h", null, null, 2)[1][4]);
+    assertThat(service.getQueryRequests()).isEmpty();
+  }
 
   @Test
   void updateKlinesShouldFillMissingKlineWithPreviousCloseAndBinanceStyleCloseTime() {
@@ -252,6 +294,309 @@ class AbstractKlineServiceFillKlinesTest {
     assertEquals(service.getServerTimeForTest(), dumpInvocation.currentTime());
   }
 
+  @ParameterizedTest
+  @ValueSource(longs = {-30_000L, -1L, 0L, 29_999L})
+  void periodicPersistenceDefersWithoutTakingSnapshotsOrLosingDirtyKeys(long offset) {
+    long boundary = 2 * H;
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(boundary + offset);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    KlineSetKey key = new KlineSetKey("BTCUSDT", "1h");
+    KlineSet trackedSet = spy(service.klineSetMap.get(key));
+    service.klineSetMap.put(key, trackedSet);
+
+    assertFalse(service.invokeDumpPersistedKlines(false));
+    verify(trackedSet, never()).persistenceSnapshot(anyLong());
+    assertEquals(0, store.dumpCount);
+    assertEquals(Set.of(key), service.dirtyPersistenceKeysForTest());
+
+    service.setServerTime(boundary + 30_000L);
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(1, store.dumpCount);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+  }
+
+  @Test
+  void persistenceResumesAfterAnotherMarketsUnpersistedIntervalBoundaryAndKeepsNormalCadence() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    BinanceFutureKlineSyncConfigProperties futureConfig = new BinanceFutureKlineSyncConfigProperties();
+    futureConfig.setIntervalSyncConfigs(Map.of("5m", new KlineSyncConfigProperties.IntervalSyncFutureConfig()));
+    ReflectionTestUtils.setField(service, "persistenceSyncConfigs", List.of(service.syncConfig, futureConfig));
+    // Only spot 1h data is being persisted, but the enabled futures 5m boundary protects CPU too.
+    long boundary = 2 * H + IntervalEnum.FIVE_MINUTE.getMills();
+    service.setServerTime(boundary - 10_000L);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(0, store.dumpCount);
+    service.setServerTime(boundary + 29_999L);
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(0, store.dumpCount);
+    service.setServerTime(boundary + 30_000L);
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(1, store.dumpCount);
+
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "101")));
+    service.setServerTime(boundary + 30_000L + 299_999L);
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(1, store.dumpCount);
+    service.setServerTime(boundary + 30_000L + 300_000L);
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(2, store.dumpCount);
+  }
+
+  @Test
+  void disabledMarketsDoNotBlockPersistence() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    BinanceFutureKlineSyncConfigProperties disabledConfig = new BinanceFutureKlineSyncConfigProperties();
+    disabledConfig.setEnabled(false);
+    disabledConfig.setIntervalSyncConfigs(Map.of("1m", new KlineSyncConfigProperties.IntervalSyncFutureConfig()));
+    ReflectionTestUtils.setField(service, "persistenceSyncConfigs", List.of(service.syncConfig, disabledConfig));
+    service.setServerTime(2 * H + 5 * 60_000L);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(1, store.dumpCount);
+  }
+
+  @Test
+  void springDiscoversBothMarketConfigurationsForPersistenceGuard() throws Exception {
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(BinanceSpotKlineSyncConfigProperties.class);
+      context.registerBean(BinanceFutureKlineSyncConfigProperties.class);
+      context.refresh();
+      DependencyDescriptor descriptor = new DependencyDescriptor(
+          AbstractKlineService.class.getDeclaredField("persistenceSyncConfigs"), false);
+      Object configs = context.getBeanFactory().resolveDependency(descriptor, null);
+      assertThat(configs).isInstanceOf(List.class);
+      assertThat((List<?>) configs).hasSize(2);
+    }
+  }
+
+  @Test
+  void persistenceStopsBetweenSymbolsWhenABatchReachesTheGuardWindow() {
+    long boundary = 2 * H;
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(boundary - 30_001L);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    service.updateKlines("ETHUSDT", "1h", List.of(buildKline(0, "200")));
+    store.afterDump = () -> service.setServerTime(boundary - 30_000L);
+
+    assertFalse(service.invokeDumpPersistedKlines(false));
+    assertEquals(1, store.dumpCount);
+    assertEquals(1, service.dirtyPersistenceKeysForTest().size());
+
+    store.afterDump = () -> {};
+    service.setServerTime(boundary + 30_000L);
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(2, store.dumpCount);
+    assertEquals(2, store.lastDumpInvocations.size());
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+  }
+
+  @Test
+  void persistenceRechecksTheWindowAfterWaitingForAnotherWriter() throws Exception {
+    long boundary = 2 * H;
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(boundary - 30_001L);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    KlineSetKey key = new KlineSetKey("BTCUSDT", "1h");
+    Object lock = ReflectionTestUtils.invokeMethod(service, "getPersistenceDumpLock", key);
+    CompletableFuture<Boolean> result = new CompletableFuture<>();
+    Thread writer = new Thread(() -> {
+      try {
+        result.complete(service.invokeDumpPersistedKlines(false));
+      } catch (Throwable error) {
+        result.completeExceptionally(error);
+      }
+    });
+    try {
+      synchronized (lock) {
+        writer.start();
+        assertTrue(awaitCondition(() -> writer.getState() == Thread.State.BLOCKED));
+        service.setServerTime(boundary - 30_000L);
+      }
+      assertFalse(result.get(3, TimeUnit.SECONDS));
+      assertEquals(0, store.dumpCount);
+      assertEquals(Set.of(key), service.dirtyPersistenceKeysForTest());
+    } finally {
+      writer.join(3_000L);
+    }
+  }
+
+  @Test
+  void deferredReconciliationQueuesCleanRestoredSeriesForPeriodicPersistence() {
+    long boundary = 2 * H;
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(boundary + 5_000L);
+    KlineSetKey key = new KlineSetKey("BTCUSDT", "1h");
+    store.setLoadRows("spot", "1h", "BTCUSDT", List.of(buildPersistedRow(0, "100")));
+    service.invokeRestorePersistedKlines(Set.of(key));
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+
+    ReflectionTestUtils.invokeMethod(service, "reconcilePersistedKlines", Set.of(key));
+    assertEquals(0, store.dumpCount);
+    assertEquals(Set.of(key), service.dirtyPersistenceKeysForTest());
+    service.setServerTime(boundary + 30_000L);
+    service.invokeDumpPersistedKlinesWhenDue();
+    assertEquals(1, store.dumpCount);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+  }
+
+  @Test
+  void shutdownPersistenceAndExplicitlyDisabledGuardAllowDumpingInsideTheWindow() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(2 * H);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    service.dumpPersistedKlinesOnShutdown();
+    assertEquals(1, store.dumpCount);
+
+    KlinePersistenceProperties properties = (KlinePersistenceProperties)
+        ReflectionTestUtils.getField(service, "persistenceProperties");
+    properties.setBoundaryGuardBeforeMs(0);
+    properties.setBoundaryGuardAfterMs(0);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "101")));
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(2, store.dumpCount);
+  }
+
+  @Test
+  void persistenceRetainsUpdatesThatArriveDuringADumpAndRetriesFailedWrites() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(H + H / 2);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    KlineSetKey key = new KlineSetKey("BTCUSDT", "1h");
+    store.afterDump = () -> service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "101")));
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(Set.of(key), service.dirtyPersistenceKeysForTest());
+
+    store.afterDump = () -> { throw new IllegalStateException("simulated write failure"); };
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertEquals(Set.of(key), service.dirtyPersistenceKeysForTest());
+    store.afterDump = () -> {};
+    assertTrue(service.invokeDumpPersistedKlines(false));
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+    assertEquals(3, store.dumpCount);
+  }
+
+  @Test
+  void formingUpdatesDoNotRedumpFinalHistoryAndUnchangedClosingUpdateStillPersists() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(H + H / 2);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(H, 10, "101"), false);
+    service.invokeDumpPersistedKlines(false);
+
+    for (int i = 0; i < 5; i++) {
+      service.updateStreamKline("BTCUSDT", "1h", hourBar(H, 11 + i, "102"), false);
+      service.invokeDumpPersistedKlines(false);
+    }
+    assertEquals(1, store.dumpCount);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+
+    service.setServerTime(2 * H + 30_000);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(H, 15, "102"), true);
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(2, store.dumpCount);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows())
+        .extracting(PersistedKlineRow::getOpenTime).containsExactly(0L, H);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(H, 15, "102"), true);
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(2, store.dumpCount);
+  }
+
+  @Test
+  void finalCorrectionPersistsButStaleFinalDoesNotTriggerAnotherDump() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(H + H / 2);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), true, 1L);
+    service.invokeDumpPersistedKlines(false);
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "101"), true, 2L);
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(2, store.dumpCount);
+    assertEquals("101", store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows().getFirst().getClosePrice());
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), true, 1L);
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(2, store.dumpCount);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+  }
+
+  @Test
+  void formingAppendThatTrimsFinalHistoryStillPersistsTheNewRetentionWindow() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, 3, Map.of());
+    service.setServerTime(53 * H + H / 2);
+    service.updateKlines("BTCUSDT", "1h", IntStream.range(0, 53)
+        .mapToObj(i -> (Kline) buildKline(i * H, "100")).toList());
+    service.invokeDumpPersistedKlines(false);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+
+    service.updateStreamKline("BTCUSDT", "1h", hourBar(53 * H, 10, "101"), false);
+    assertEquals(Set.of(new KlineSetKey("BTCUSDT", "1h")), service.dirtyPersistenceKeysForTest());
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(2, store.dumpCount);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows())
+        .extracting(PersistedKlineRow::getOpenTime).containsExactly(51 * H, 52 * H);
+  }
+
+  @Test
+  void formingUpdateDuringDumpDoesNotScheduleAnotherUnchangedDump() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    service.setServerTime(H + H / 2);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100")));
+    store.afterDump = () -> service.updateStreamKline("BTCUSDT", "1h", hourBar(H, 10, "101"), false);
+    service.invokeDumpPersistedKlines(false);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+    service.invokeDumpPersistedKlines(false);
+    assertEquals(1, store.dumpCount);
+  }
+
+  @Test
+  void partialDumpRetainsAFinalWhoseCloseTimeIsNotYetEligible() {
+    TestKlineService service = new TestKlineService();
+    RecordingPersistenceStore store = new RecordingPersistenceStore();
+    service.configurePersistence(store, null, Map.of());
+    KlinePersistenceProperties props = (KlinePersistenceProperties)
+        ReflectionTestUtils.getField(service, "persistenceProperties");
+    props.setBoundaryGuardBeforeMs(0);
+    props.setBoundaryGuardAfterMs(0);
+    service.setServerTime(2 * H - 1);
+    service.updateKlines("BTCUSDT", "1h", List.of(buildKline(0, "100"), buildKline(H, "101")));
+    service.invokeDumpPersistedKlines(false);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows())
+        .extracting(PersistedKlineRow::getOpenTime).containsExactly(0L);
+    assertEquals(Set.of(new KlineSetKey("BTCUSDT", "1h")), service.dirtyPersistenceKeysForTest());
+
+    service.setServerTime(2 * H);
+    service.invokeDumpPersistedKlines(false);
+    assertThat(store.getLastDumpInvocation("spot", "1h", "BTCUSDT").rows())
+        .extracting(PersistedKlineRow::getOpenTime).containsExactly(0L, H);
+    assertTrue(service.dirtyPersistenceKeysForTest().isEmpty());
+  }
+
   @Test
   void restorePersistedKlinesShouldLoadOnlyMinMaintainCount() {
     TestKlineService service = new TestKlineService();
@@ -353,6 +698,10 @@ class AbstractKlineServiceFillKlinesTest {
 
   private static class RecordingPersistenceStore implements KlinePersistenceStore {
 
+    private int dumpCount;
+
+    private Runnable afterDump = () -> {};
+
     private final Map<StoreKey, List<PersistedKlineRow>> loadRowsByKey = new HashMap<>();
 
     private final Map<StoreKey, Integer> lastLoadMaxStoreCount = new HashMap<>();
@@ -383,6 +732,8 @@ class AbstractKlineServiceFillKlinesTest {
                          int maxStoreCount, long currentTime) {
       lastDumpInvocations.put(new StoreKey(service, interval, symbol),
           new DumpInvocation(List.copyOf(rows), maxStoreCount, currentTime));
+      dumpCount++;
+      afterDump.run();
     }
   }
 
@@ -419,7 +770,8 @@ class AbstractKlineServiceFillKlinesTest {
 
   @Test
   void persistenceWaitsForFinalEvenWhenCloseTimeHasPassedAndDataDoesNotChange() {
-    TestKlineService service = finalWaitService(H + 100, 0);
+    // Outside the boundary guard: finality itself must still prevent writing the forming bar.
+    TestKlineService service = finalWaitService(H + 30_000, 0);
     RecordingPersistenceStore store = new RecordingPersistenceStore();
     service.configurePersistence(store, null, Map.of());
     service.updateStreamKline("BTCUSDT", "1h", hourBar(0, 10, "100"), false);
@@ -854,8 +1206,17 @@ class AbstractKlineServiceFillKlinesTest {
       ReflectionTestUtils.invokeMethod(this, "warmUpPersistedKlines", restoredKlineSetKeys);
     }
 
-    private void invokeDumpPersistedKlines(boolean force) {
-      ReflectionTestUtils.invokeMethod(this, "dumpPersistedKlines", force);
+    private boolean invokeDumpPersistedKlines(boolean force) {
+      return ReflectionTestUtils.invokeMethod(this, "dumpPersistedKlines", force);
+    }
+
+    private void invokeDumpPersistedKlinesWhenDue() {
+      ReflectionTestUtils.invokeMethod(this, "dumpPersistedKlinesWhenDue");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<KlineSetKey> dirtyPersistenceKeysForTest() {
+      return (Set<KlineSetKey>) ReflectionTestUtils.getField(this, "dirtyPersistenceKeys");
     }
 
     private void invokeSyncConfiguredKlinesOnce() {

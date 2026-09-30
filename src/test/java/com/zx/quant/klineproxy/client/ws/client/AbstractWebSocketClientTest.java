@@ -28,6 +28,35 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AbstractWebSocketClientTest {
 
   @Test
+  void classifiedClosingFrameDecodesWithoutMaterializingATree() throws Exception {
+    CountingSerializer serializer = new CountingSerializer(new ObjectMapper());
+    TestWebSocketClient client = new TestWebSocketClient(serializer);
+    var stream = new com.zx.quant.klineproxy.service.stream.BinanceKlineStream();
+    try (var dispatcher = new KlineMessageDispatcher(new KlineIngressProperties())) {
+      ReflectionTestUtils.setField(client, "klineMessageDispatcher", dispatcher);
+      client.setKlineMessageClassifier(raw -> stream.dispatchMetadata("future",
+          com.zx.quant.klineproxy.service.stream.BinanceKlineHeader.parse(raw, serializer)));
+      CountDownLatch done = new CountDownLatch(1);
+      AtomicReference<ParsedWebSocketMessage> received = new AtomicReference<>();
+      client.addMessageHandler(message -> {
+        var event = stream.parse(message,
+            com.zx.quant.klineproxy.model.enums.NumberTypeEnum.DOUBLE, serializer);
+        assertTrue(event.getEventKline().isClosed());
+        received.set(message);
+        done.countDown();
+        return true;
+      });
+      client.onReceive("{\"e\":\"kline\",\"s\":\"BTCUSDT\",\"E\":100,\"k\":{\"t\":0,\"i\":\"1h\",\"x\":true,\"n\":20}}");
+      assertTrue(done.await(2, TimeUnit.SECONDS));
+      assertTrue(received.get().timing() != null);
+      assertEquals(0, serializer.readTreeCalls.get());
+      assertEquals(0, serializer.treeToValueCalls.get());
+      assertTrue(received.get().payloadNode().path("k").path("x").asBoolean());
+      assertEquals(1, serializer.readTreeCalls.get());
+    }
+  }
+
+  @Test
   void classifiedFormingSkipsCloseDiagnosticsWhileFinalKeepsReceiptTiming() throws Exception {
     TestWebSocketClient client = new TestWebSocketClient(new Serializer(new ObjectMapper()));
     try (var dispatcher = new KlineMessageDispatcher(new KlineIngressProperties())) {

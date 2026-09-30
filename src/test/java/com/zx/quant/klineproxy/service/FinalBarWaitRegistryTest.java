@@ -14,6 +14,45 @@ class FinalBarWaitRegistryTest {
   private final Key eth = new Key("ETHUSDT", "1h", 0);
 
   @Test
+  void bulkRegistrationWakesOnceWhenAllRequestedBarsHaveSettled() throws Exception {
+    FinalBarWaitRegistry registry = new FinalBarWaitRegistry();
+    try (var registration = registry.registerAll(List.of(btc, eth));
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      long observed = registration.version();
+      registry.signal(btc);
+      assertThat(registration.version()).isEqualTo(observed);
+      // A stale store-check result must never re-add the already signalled BTC key.
+      registration.observePending(List.of(btc, eth));
+      registry.signal(eth);
+      assertThat(registration.version()).isEqualTo(observed + 1);
+      executor.submit(() -> {
+        registration.awaitChange(observed, TimeUnit.SECONDS.toNanos(30)); return null;
+      }).get(1, TimeUnit.SECONDS);
+      registry.signal(eth);
+      assertThat(registration.version()).isEqualTo(observed + 1);
+    }
+    assertThat(registry.subscribedKeyCount()).isZero();
+  }
+
+  @Test
+  void bulkRecheckCoversCloseBeforeRegistrationAndSeriesRemoval() throws Exception {
+    FinalBarWaitRegistry registry = new FinalBarWaitRegistry();
+    registry.signal(btc); // Its final publication predates this request's registration.
+    try (var registration = registry.registerAll(List.of(btc, eth));
+        var unrelated = registry.registerAll(List.of(new Key("ETHUSDT", "1d", 0)));
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      long observed = registration.version();
+      registration.observePending(List.of(eth));
+      registry.removedSeries("ETHUSDT", "1h");
+      executor.submit(() -> {
+        registration.awaitChange(observed, TimeUnit.SECONDS.toNanos(30)); return null;
+      }).get(1, TimeUnit.SECONDS);
+      assertThat(unrelated.version()).isZero();
+    }
+    assertThat(registry.subscribedKeyCount()).isZero();
+  }
+
+  @Test
   void retainsNotificationBetweenStoreCheckAndAwaitWithoutWakingUnrelatedRequests() throws Exception {
     FinalBarWaitRegistry registry = new FinalBarWaitRegistry();
     try (var a = registry.register(List.of(btc)); var b = registry.register(List.of(eth));

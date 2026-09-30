@@ -7,7 +7,8 @@ import java.io.IOException;
 
 /** Small streaming header scan; malformed/unknown frames fall back to the reliable generic path. */
 public record BinanceKlineHeader(String eventType, String symbol, String pair, String contractType,
-    String interval, long openTime, boolean closed, int tradeCount, Long eventTime, String stream) {
+    String interval, long openTime, boolean closed, int tradeCount, Long eventTime, String stream,
+    boolean directDecodeSafe) {
 
   public static BinanceKlineHeader parse(String raw, Serializer serializer) {
     try (JsonParser parser = serializer.createParser(raw)) {
@@ -26,7 +27,9 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
       }
       return new BinanceKlineHeader(payload.event, payload.symbol, payload.pair, payload.contract,
           payload.kline.interval, payload.kline.open, payload.kline.closed, payload.kline.trades,
-          payload.eventTime, root.stream);
+          payload.eventTime, root.stream,
+          root.direct && payload.direct && payload.kline.direct
+              && (root.stream == null || root.stream.isBlank() || root.data != null));
     } catch (IOException | RuntimeException invalidHeader) {
       return null;
     }
@@ -40,6 +43,11 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
       }
       String name = parser.currentName();
       parser.nextToken();
+      if (parser.currentToken() == JsonToken.VALUE_NUMBER_FLOAT
+          && (name.equals("e") || name.equals("s") || name.equals("ps")
+              || name.equals("ct") || name.equals("E") || name.equals("stream"))) {
+        fields.direct = false;
+      }
       switch (name) {
         case "e" -> fields.event = text(parser);
         case "s" -> fields.symbol = text(parser);
@@ -47,7 +55,11 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
         case "ct" -> fields.contract = text(parser);
         case "E" -> fields.eventTime = eventTime(parser);
         case "stream" -> fields.stream = text(parser);
+        case "id", "result" -> { fields.direct = false; parser.skipChildren(); }
         case "data" -> {
+          if (++fields.dataMembers > 1) {
+            fields.direct = false; // The legacy tree retains the last duplicate member.
+          }
           fields.hasPayload = root && parser.currentToken() != JsonToken.VALUE_NULL;
           fields.data = root && parser.currentToken() == JsonToken.START_OBJECT ? readObject(parser, false) : null;
           parser.skipChildren();
@@ -71,12 +83,24 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
       }
       String name = parser.currentName();
       parser.nextToken();
+      if (parser.currentToken() == JsonToken.VALUE_NUMBER_FLOAT
+          && (name.equals("T") || name.equals("f") || name.equals("L")
+              || name.equals("s") || name.equals("i") || name.equals("B"))) {
+        fields.direct = false;
+      }
       switch (name) {
         case "i" -> fields.interval = text(parser);
         case "t" -> fields.open = parser.currentToken() == JsonToken.VALUE_NUMBER_INT ? parser.getLongValue() : null;
         case "n" -> fields.trades = parser.currentToken() == JsonToken.VALUE_NUMBER_INT ? parser.getIntValue() : null;
         case "x" -> fields.closed = parser.currentToken() == JsonToken.VALUE_TRUE ? Boolean.TRUE
             : parser.currentToken() == JsonToken.VALUE_FALSE ? Boolean.FALSE : null;
+        case "o", "h", "l", "c", "v", "q", "V", "Q" -> {
+          // Binance publishes these as strings. Numeric JSON literals keep the old tree's
+          // numeric coercion path, including its BigDecimal/float rounding behavior.
+          fields.direct &= parser.currentToken() == JsonToken.VALUE_STRING
+              || parser.currentToken() == JsonToken.VALUE_NULL;
+          parser.skipChildren();
+        }
         default -> parser.skipChildren();
       }
       parser.skipChildren();
@@ -111,6 +135,8 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
     private Fields data;
     private boolean hasPayload;
     private KlineFields kline;
+    private boolean direct = true;
+    private int dataMembers;
   }
 
   private static final class KlineFields {
@@ -118,5 +144,6 @@ public record BinanceKlineHeader(String eventType, String symbol, String pair, S
     private Long open;
     private Boolean closed;
     private Integer trades;
+    private boolean direct = true;
   }
 }

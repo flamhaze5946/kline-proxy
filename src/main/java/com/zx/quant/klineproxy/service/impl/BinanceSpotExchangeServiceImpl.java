@@ -1,5 +1,8 @@
 package com.zx.quant.klineproxy.service.impl;
 
+import com.zx.quant.klineproxy.util.BlockingWorkExecutor;
+import jakarta.annotation.PreDestroy;
+
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -10,6 +13,8 @@ import com.zx.quant.klineproxy.client.model.BinanceSpotSymbol;
 import com.zx.quant.klineproxy.manager.RateLimitManager;
 import com.zx.quant.klineproxy.model.constant.Constants;
 import com.zx.quant.klineproxy.service.ExchangeService;
+import com.zx.quant.klineproxy.service.cache.TradingSymbolsCache;
+import java.util.Set;
 import com.zx.quant.klineproxy.util.ClientUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.ThreadFactoryUtil;
@@ -35,6 +40,13 @@ import retrofit2.Call;
 @Service("binanceSpotExchangeService")
 public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSpotExchange>, InitializingBean {
 
+  private final BlockingWorkExecutor cacheLoads = new BlockingWorkExecutor("spot-metadata-loader", 2, 32);
+
+  @PreDestroy
+  public void closeCacheLoads() {
+    cacheLoads.close();
+  }
+
   private static final String VALID_SYMBOL_STATUS = "TRADING";
 
   private static final String SERVER_TIME_REFRESHER_GROUP = "spotServerTimeRefresher";
@@ -43,6 +55,11 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
       ThreadFactoryUtil.getNamedThreadFactory(SERVER_TIME_REFRESHER_GROUP));
 
   private final LoadingCache<String, BinanceSpotExchange> exchangeCache = buildExchangeCache();
+
+  private final TradingSymbolsCache<BinanceSpotExchange> tradingSymbols = new TradingSymbolsCache<>(
+      exchange -> exchange.getSymbols().stream()
+          .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
+          .map(BinanceSpotSymbol::getSymbol).toList());
 
   private final AtomicLong serverTimeDelta = new AtomicLong(0);
 
@@ -60,7 +77,7 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
 
   @Override
   public BinanceSpotExchange queryExchange() {
-    BinanceSpotExchange exchange = exchangeCache.get(StringUtils.EMPTY);
+    BinanceSpotExchange exchange = cacheLoads.get(exchangeCache, StringUtils.EMPTY);
     exchange.setServerTime(queryServerTime());
     return exchange;
   }
@@ -72,11 +89,14 @@ public class BinanceSpotExchangeServiceImpl implements ExchangeService<BinanceSp
 
   @Override
   public List<String> querySymbols() {
-    return queryExchange().getSymbols().stream()
-        .filter(symbol -> StringUtils.equals(symbol.getStatus(), VALID_SYMBOL_STATUS))
-        .map(BinanceSpotSymbol::getSymbol)
-        .collect(Collectors.toList());
+    return tradingSymbols.symbols(queryExchange());
   }
+
+  @Override
+  public Set<String> querySymbolSet() {
+    return tradingSymbols.symbolSet(queryExchange());
+  }
+
 
   private void refreshServerTimeDelta() {
     Call<BinanceServerTime> serverTimeCall = binanceSpotClient.getServerTime();

@@ -4,6 +4,7 @@ import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
+import com.zx.quant.klineproxy.util.ConvertUtil;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -50,6 +51,17 @@ public interface KlineService {
    */
   default Kline[] queryKlineArray(String symbol, String interval, Long startTime, Long endTime, int limit) {
     return queryKlineArray(symbol, interval, startTime, endTime, limit, false);
+  }
+
+  /** HTTP display conversion; implementations may share immutable closed rows across requests. */
+  default Object[][] queryDisplayKlines(String symbol, String interval, Long startTime,
+      Long endTime, int limit) {
+    Kline[] klines = queryKlineArray(symbol, interval, startTime, endTime, limit);
+    Object[][] rows = new Object[klines.length][];
+    for (int i = 0; i < klines.length; i++) {
+      rows[i] = ConvertUtil.convertToDisplayKline(klines[i]);
+    }
+    return rows;
   }
 
   /**

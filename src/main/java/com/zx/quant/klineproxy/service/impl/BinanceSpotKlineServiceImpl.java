@@ -85,6 +85,11 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
   }
 
   @Override
+  protected java.util.Set<String> getTradingSymbols() {
+    return exchangeService.querySymbolSet();
+  }
+
+  @Override
   protected List<String> getSymbols() {
     return exchangeService.querySymbols();
   }

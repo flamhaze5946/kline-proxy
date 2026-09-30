@@ -774,15 +774,15 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
       if (timing != null) {
         timing.jsonParsed();
       }
-      if (timing != null && parsedMessage.payloadObject()
-          && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)) {
+      if (timing != null && (parsedMessage.directPayload() ? metadata.closed()
+          : parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false))) {
         timing.executorSnapshot(dispatcher != null ? dispatcher.activeWorkers() : MESSAGE_EXECUTOR.getActiveCount(),
             dispatcher != null ? dispatcher.workerCount() : MESSAGE_EXECUTOR.getPoolSize(), 0L);
       }
       if (metadata == null) {
         heartbeatTopic(parsedMessage);
       } // classified frames already recorded their heartbeat at receipt, before any queue delay
-      if (isListTopicsMessage(parsedMessage.rootNode())) {
+      if (!parsedMessage.directPayload() && isListTopicsMessage(parsedMessage.rootNode())) {
         ListTopicsEvent listTopicsEvent = serializer.treeToValue(parsedMessage.rootNode(), ListTopicsEvent.class);
         synchronized (channelRegisteredTopics) {
           channelRegisteredTopics.clear();
@@ -798,7 +798,7 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
         }
       }
 
-      if (!isWebSocketResponseMessage(parsedMessage)) {
+      if (parsedMessage.directPayload() || !isWebSocketResponseMessage(parsedMessage)) {
         if (dispatcher != null) {
           throw new IllegalStateException("Classified kline was not handled: " + metadata.bar());
         }
@@ -814,6 +814,10 @@ public abstract class AbstractWebSocketClient<T> implements WebSocketClient {
 
   private ParsedWebSocketMessage parseMessage(String message, WebSocketMessageTiming timing, long receiveSequence,
       KlineDispatchMetadata metadata) {
+    if (metadata != null && metadata.eventType() != null) {
+      return ParsedWebSocketMessage.classified(message, timing, receiveSequence, metadata,
+          () -> serializer.readTree(message));
+    }
     JsonNode rootNode = serializer.readTree(message);
     JsonNode payloadNode = rootNode;
     String stream = extractTextField(rootNode, "stream");

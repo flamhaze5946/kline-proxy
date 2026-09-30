@@ -8,7 +8,6 @@ import com.zx.quant.klineproxy.model.BulkFundingRateResponse;
 import com.zx.quant.klineproxy.model.BulkKlinesRequest;
 import com.zx.quant.klineproxy.model.BulkKlinesResponse;
 import com.zx.quant.klineproxy.model.FutureFundingRate;
-import com.zx.quant.klineproxy.model.Kline;
 import com.zx.quant.klineproxy.model.Ticker;
 import com.zx.quant.klineproxy.model.Ticker24Hr;
 import com.zx.quant.klineproxy.model.exceptions.ApiException;
@@ -21,6 +20,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Collection;
+import java.util.Set;
+import com.zx.quant.klineproxy.service.cache.PublicationCache;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +46,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class BinanceFutureController extends GenericController {
 
   private static final int DEFAULT_LIMIT = 500;
+
+  private final PublicationCache<BinanceFutureExchange, Set<String>> symbolSets = new PublicationCache<>();
+
 
   @Autowired
   @Qualifier("binanceFutureKlineService")
@@ -188,14 +193,7 @@ public class BinanceFutureController extends GenericController {
       @RequestParam(value = "limit", required = false) Integer limit
   ) {
     int realLimit = limit != null ? limit : DEFAULT_LIMIT;
-    Kline[] klines = klineService.queryKlineArray(symbol, interval, startTime, endTime, realLimit);
-    Object[][] displayKlines = new Object[klines.length][];
-    for(int i = 0; i < klines.length; i++) {
-      Kline kline = klines[i];
-      Object[] displayKline = ConvertUtil.convertToDisplayKline(kline);
-      displayKlines[i] = displayKline;
-    }
-    return displayKlines;
+    return klineService.queryDisplayKlines(symbol, interval, startTime, endTime, realLimit);
   }
 
   private List<String> parseCsv(String symbols) {
@@ -232,13 +230,12 @@ public class BinanceFutureController extends GenericController {
     return List.copyOf(out);
   }
 
-  private List<String> allSymbols(BinanceFutureExchange exchange) {
+  private Collection<String> allSymbols(BinanceFutureExchange exchange) {
     if (exchange == null || exchange.getSymbols() == null || exchange.getSymbols().isEmpty()) {
       return exchangeService.querySymbols();
     }
-    return exchange.getSymbols().stream()
-        .map(BinanceFutureSymbol::getSymbol)
-        .toList();
+    return symbolSets.get(exchange, metadata -> Set.copyOf(metadata.getSymbols().stream()
+        .map(BinanceFutureSymbol::getSymbol).toList()));
   }
 
   private Object renderAllMarketTickerResponse(List<Ticker<?>> tickers) {
@@ -246,8 +243,8 @@ public class BinanceFutureController extends GenericController {
     if (cachedResponse != null && cachedResponse.source() == tickers) {
       return cachedResponse.response();
     }
-    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker(tickers, true));
-    ResponseEntity<String> response = ResponseEntity.ok()
+    byte[] payload = serializer.toJsonBytes(ConvertUtil.convertToDisplayTicker(tickers, true));
+    ResponseEntity<byte[]> response = ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_JSON)
         .body(payload);
     allMarketTickerResponse.set(new RenderedJsonResponse<>(tickers, response));
@@ -259,14 +256,14 @@ public class BinanceFutureController extends GenericController {
     if (cachedResponse != null && cachedResponse.source() == ticker24Hrs) {
       return cachedResponse.response();
     }
-    String payload = serializer.toJsonString(ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, true));
-    ResponseEntity<String> response = ResponseEntity.ok()
+    byte[] payload = serializer.toJsonBytes(ConvertUtil.convertToDisplayTicker24hr(ticker24Hrs, true));
+    ResponseEntity<byte[]> response = ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_JSON)
         .body(payload);
     allMarketTicker24HrResponse.set(new RenderedJsonResponse<>(ticker24Hrs, response));
     return response;
   }
 
-  private record RenderedJsonResponse<T>(T source, ResponseEntity<String> response) {
+  private record RenderedJsonResponse<T>(T source, ResponseEntity<byte[]> response) {
   }
 }

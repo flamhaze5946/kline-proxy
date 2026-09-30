@@ -45,6 +45,7 @@ import com.zx.quant.klineproxy.service.stream.BinanceKlineStream;
 import com.zx.quant.klineproxy.service.stream.BinanceKlineHeader;
 import com.zx.quant.klineproxy.util.CommonUtil;
 import com.zx.quant.klineproxy.util.HourBoundaryGuard;
+import com.zx.quant.klineproxy.util.IntervalBoundaryGuard;
 import com.zx.quant.klineproxy.util.ConvertUtil;
 import com.zx.quant.klineproxy.util.ExceptionSafeRunnable;
 import com.zx.quant.klineproxy.util.Serializer;
@@ -53,6 +54,7 @@ import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
+import com.zx.quant.klineproxy.service.cache.ClosedKlineViewCache;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -61,6 +63,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -179,13 +182,14 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       .expireAfterWrite(Duration.ofDays(1))
       .build();
 
-  private final Cache<BulkKlinesKey, BulkKlinesResponse> bulkKlinesCache = Caffeine.newBuilder()
+  private final Cache<BulkKlinesKey, CachedBulk> bulkKlinesCache = Caffeine.newBuilder()
       .expireAfterWrite(BULK_KLINES_CACHE_TTL)
       .maximumSize(64)
       .build();
-  private final ConcurrentHashMap<BulkKlinesKey, CompletableFuture<BulkKlinesResponse>> bulkKlinesInFlight =
+  private final ConcurrentHashMap<BulkKlinesKey, CompletableFuture<CachedBulk>> bulkKlinesInFlight =
       new ConcurrentHashMap<>();
   private final AtomicLong finalRevision = new AtomicLong();
+  private final ClosedKlineViewCache closedKlineViews = new ClosedKlineViewCache();
 
   private final ClosedBarArrivalTracker closedBarArrivalTracker =
       new ClosedBarArrivalTracker(this::closedBarUniverse);
@@ -209,6 +213,11 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   private final AtomicLong lastAllMarketTicker24HrAccessTime = new AtomicLong(0L);
 
   private final Set<KlineSetKey> dirtyPersistenceKeys = ConcurrentHashMap.newKeySet();
+
+  private static final long PERSISTENCE_CHECK_INTERVAL_MS = 1_000L;
+
+  // Accessed only by the persistence scheduler; deferred passes leave the deadline unchanged.
+  private long nextPersistenceDumpTime;
 
   private static final int PERSISTENCE_DUMP_LOCK_STRIPES = 64;
 
@@ -242,6 +251,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   @Autowired
   private KlinePersistenceProperties persistenceProperties;
+
+  // Both markets share CPU, so a spot dump must also respect enabled futures intervals.
+  @Autowired(required = false)
+  private List<KlineSyncConfigProperties<?>> persistenceSyncConfigs = List.of();
 
   @Autowired(required = false)
   private KlineBulkProperties bulkProperties;
@@ -319,6 +332,12 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   @Override
   public List<Ticker<?>> queryTickers(Collection<String> symbols) {
     if (CollectionUtils.isNotEmpty(symbols)) {
+      if (symbols.size() == 1) {
+        Ticker<?> cachedTicker = queryCachedTicker(symbols.iterator().next());
+        if (cachedTicker != null) {
+          return List.of(cachedTicker);
+        }
+      }
       List<Ticker<?>> realtimeTickers = queryTickersBySymbols(symbols);
       if (CollectionUtils.isNotEmpty(realtimeTickers)) {
         return realtimeTickers;
@@ -360,6 +379,29 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return tickers;
   }
 
+  /**
+   * Reuse the existing in-memory kline close price before acquiring any REST quota. During
+   * initialization one subscribed interval can still be empty while another already has data.
+   * Missing lookups must not create empty series or trigger history loading.
+   */
+  private Ticker<?> queryCachedTicker(String symbol) {
+    List<IntervalEnum> intervals = getSubscribeIntervals();
+    if (CollectionUtils.isEmpty(intervals)) {
+      intervals = List.of(DEFAULT_TICKER_INTERVAL);
+    }
+    for (IntervalEnum interval : intervals) {
+      KlineSet series = klineSetMap.get(new KlineSetKey(symbol, interval.code()));
+      if (series == null) {
+        continue;
+      }
+      Entry<Long, Kline> latest = series.getKlineMap().lastEntry();
+      if (latest != null) {
+        return Ticker.create(symbol, latest.getValue(), getServerTime());
+      }
+    }
+    return null;
+  }
+
   @Override
   public List<Ticker24Hr> queryTicker24hrs(Collection<String> symbols) {
     if (CollectionUtils.isNotEmpty(symbols)) {
@@ -396,7 +438,6 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     KlineSetKey key = new KlineSetKey(symbol, intervalEnum.code());
     KlineSet klineSet = klineSetMap.computeIfAbsent(key, var -> new KlineSet(key));
     ConcurrentSkipListMap<Long, Kline> klineSetMap = klineSet.getKlineMap();
-    NavigableMap<Long, Kline> savedKlineMap;
 
     if (makeUp) {
       List<ImmutablePair<Long, Long>> makeUpTimeRanges =
@@ -409,25 +450,61 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       }
     }
 
-    if (MapUtils.isEmpty(klineSetMap)) {
-      return ImmutablePair.of(Collections.emptyList(), 0);
+    synchronized (klineSet) {
+      if (MapUtils.isEmpty(klineSetMap)) {
+        return ImmutablePair.of(Collections.emptyList(), 0);
+      }
+      Kline placeholder = currentPlaceholder(symbol, klineSet, intervalEnum, getServerTime());
+      if (startTime == null && endTime == null && placeholder != null) {
+        return selectKlines(klineSetMap,
+            placeholder.getOpenTime() - calculateKlinesDuration(intervalEnum, limit),
+            placeholder.getOpenTime(), intervalEnum, placeholder);
+      }
+      ImmutablePair<Collection<Kline>, Integer> selected = selectKlines(klineSetMap,
+          realStartTime, realEndTime, intervalEnum, placeholder);
+      if (startTime == null && endTime == null && selected.getRight() < limit) {
+        Kline last = placeholder != null ? placeholder : klineSetMap.lastEntry().getValue();
+        selected = selectKlines(klineSetMap,
+            last.getOpenTime() - calculateKlinesDuration(intervalEnum, limit), last.getOpenTime(),
+            intervalEnum, placeholder);
+      }
+      return selected;
     }
+  }
 
-    savedKlineMap = klineSetMap
-        .subMap(realStartTime, true, realEndTime, true);
-
-    int mapSize = getMapSize(savedKlineMap, intervalEnum);
-    if (startTime == null && endTime == null && mapSize < limit) {
-      long klinesDuration = calculateKlinesDuration(intervalEnum, limit);
-      Kline lastKline = klineSetMap.lastEntry().getValue();
-      long lastKlineOpenTime = lastKline.getOpenTime();
-      long startKlineOpenTime = lastKlineOpenTime - klinesDuration;
-      savedKlineMap = klineSetMap
-          .subMap(startKlineOpenTime, true, lastKlineOpenTime, true);
-      mapSize = getMapSize(savedKlineMap, intervalEnum);
+  @Override
+  public Object[][] queryDisplayKlines(String symbol, String interval, Long startTime,
+      Long endTime, int limit) {
+    Kline[] selected = queryKlineArray(symbol, interval, startTime, endTime, limit);
+    KlineSet set = klineSetMap.get(new KlineSetKey(symbol, interval));
+    Object[][] rows = new Object[selected.length][];
+    for (int i = 0; i < selected.length; i++) {
+      Kline kline = selected[i];
+      boolean finalRow = set != null && kline != null && set.isFinal(kline.getOpenTime())
+          && set.getKlineMap().get(kline.getOpenTime()) == kline;
+      rows[i] = closedKlineViews.display(kline, finalRow);
     }
+    return rows;
+  }
 
-    return ImmutablePair.of(savedKlineMap.values(), mapSize);
+  private Kline currentPlaceholder(String symbol, KlineSet set, IntervalEnum interval, long now) {
+    // Subscription reconciliation already refreshes exchange status. Never load it on a query.
+    ExpectedTopicsSnapshot snapshot = expectedTopicsSnapshot;
+    return snapshot != null && !snapshot.symbols().contains(symbol) ? null
+        : set.currentPlaceholder(interval, now);
+  }
+
+  private ImmutablePair<Collection<Kline>, Integer> selectKlines(NavigableMap<Long, Kline> map,
+      long first, long last, IntervalEnum interval, Kline placeholder) {
+    NavigableMap<Long, Kline> selected = map.subMap(first, true, last, true);
+    if (placeholder == null || placeholder.getOpenTime() < first || placeholder.getOpenTime() > last) {
+      return ImmutablePair.of(selected.values(), getMapSize(selected, interval));
+    }
+    List<Kline> rows = new ArrayList<>(selected.values());
+    rows.add(placeholder);
+    int span = selected.isEmpty() ? 1
+        : (int) ((placeholder.getOpenTime() - selected.firstKey()) / interval.getMills() + 1);
+    return ImmutablePair.of(rows, span);
   }
 
   @Override
@@ -439,20 +516,35 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_KLINES_LIMIT, MIN_LIMIT),
         MAX_BULK_KLINES_LIMIT);
     List<String> normalizedSymbols = normalizeBulkSymbols(symbols, intervalEnum);
+    for (int attempt = 0; attempt < 4; attempt++) {
+      CachedBulk snapshot = queryBulkSnapshot(intervalEnum, realLimit, closedOnly, normalizedSymbols);
+      if (snapshot.current(klineSetMap, getServerTime())) {
+        return snapshot.response();
+      }
+    }
+    // Continuous updates must not starve a query; take one uncached view after retrying.
+    long now = getServerTime();
+    long boundary = Math.floorDiv(now, intervalEnum.getMills()) * intervalEnum.getMills();
+    return buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols,
+        awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary)).response();
+  }
+
+  private CachedBulk queryBulkSnapshot(IntervalEnum intervalEnum, int realLimit, boolean closedOnly,
+      List<String> normalizedSymbols) {
     long now = getServerTime();
     long boundary = Math.floorDiv(now, intervalEnum.getMills()) * intervalEnum.getMills();
     // the boundary is part of the key so a pre-boundary response can never be served after it
     BulkKlinesKey cacheKey = new BulkKlinesKey(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols,
         boundary, finalRevision.get());
-    BulkKlinesResponse cached = bulkKlinesCache.getIfPresent(cacheKey);
-    if (cached != null) {
+    CachedBulk cached = bulkKlinesCache.getIfPresent(cacheKey);
+    if (cached != null && cached.current(klineSetMap, now)) {
       return cached;
     }
     // single-flight per key: concurrent identical requests share one wait+build instead of each
     // holding a Tomcat thread through the settling window (Caffeine's loader cannot skip caching
     // a non-final result, hence the explicit in-flight map)
-    CompletableFuture<BulkKlinesResponse> flight = new CompletableFuture<>();
-    CompletableFuture<BulkKlinesResponse> existing = bulkKlinesInFlight.putIfAbsent(cacheKey, flight);
+    CompletableFuture<CachedBulk> flight = new CompletableFuture<>();
+    CompletableFuture<CachedBulk> existing = bulkKlinesInFlight.putIfAbsent(cacheKey, flight);
     if (existing != null) {
       try {
         return existing.join();
@@ -471,10 +563,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     }
     try {
       FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
-      BulkKlinesResponse response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
+      CachedBulk response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
           normalizedSymbols, wait);
       // never cache a snapshot that still carries non-final just-closed bars
-      if (response.finalized()) {
+      if (response.response().finalized()) {
         bulkKlinesCache.put(cacheKey, response);
       }
       flight.complete(response);
@@ -518,7 +610,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       List<FinalBarWaitRegistry.Key> keys = pending.stream()
           .map(symbol -> new FinalBarWaitRegistry.Key(symbol, intervalEnum.code(), justClosedOpenTime))
           .toList();
-      try (var registration = finalBarWaitRegistry.register(keys)) {
+      try (var registration = finalBarWaitRegistry.registerAll(keys)) {
         while (true) {
           long observed = registration.version();
           // Recheck after registering and before sleeping. A close during this check increments
@@ -528,9 +620,13 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           if (pending.isEmpty() || remainingNanos <= 0) {
             break;
           }
+          registration.observePending(pending.stream()
+              .map(symbol -> new FinalBarWaitRegistry.Key(symbol, intervalEnum.code(), justClosedOpenTime))
+              .toList());
           try {
-            // Fallback also observes cache removals, which are not final publications.
-            registration.awaitChange(observed, Math.min(TimeUnit.MILLISECONDS.toNanos(25), remainingNanos));
+            // Final publications and cache removals both notify the exact keys. No periodic
+            // wake-up storm while hundreds of requests wait for the same closing batch.
+            registration.awaitChange(observed, remainingNanos);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             break;
@@ -592,34 +688,65 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    */
   private Set<String> tradingSymbolsOrNull() {
     try {
-      List<String> symbols = getSymbols();
-      return CollectionUtils.isEmpty(symbols) ? null : new HashSet<>(symbols);
+      Set<String> symbols = getTradingSymbols();
+      return CollectionUtils.isEmpty(symbols) ? null : symbols;
     } catch (RuntimeException e) {
       log.warn("tradingSymbolsOrNull: exchange info unavailable, not filtering by symbol status: {}", e.toString());
       return null;
     }
   }
 
+  protected Set<String> getTradingSymbols() {
+    List<String> symbols = getSymbols();
+    return CollectionUtils.isEmpty(symbols) ? Set.of() : new HashSet<>(symbols);
+  }
+
   private static boolean isTrading(Set<String> trading, String symbol) {
     return trading == null || trading.contains(symbol);
   }
 
-  private BulkKlinesResponse buildBulkKlinesResponse(String interval, int limit, boolean closedOnly,
+  private CachedBulk buildBulkKlinesResponse(String interval, int limit, boolean closedOnly,
       List<String> symbols, FinalWaitOutcome wait) {
     long now = getServerTime();
     Map<String, List<Object[]>> out = new LinkedHashMap<>();
+    List<BulkVersion> versions = new ArrayList<>();
+    long validFrom = Long.MIN_VALUE;
+    long validUntil = Long.MAX_VALUE;
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
     for (String symbol : symbols) {
-      KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
-      if (klineSet == null || MapUtils.isEmpty(klineSet.getKlineMap())) {
+      KlineSetKey key = new KlineSetKey(symbol, interval);
+      KlineSet klineSet = klineSetMap.get(key);
+      if (klineSet == null) {
+        if (!closedOnly) {
+          versions.add(new BulkVersion(key, null, 0));
+        }
         continue;
       }
-      List<Kline> klines = klineSet.getKlineMap()
-          .descendingMap()
-          .values()
-          .stream()
-          .filter(kline -> !closedOnly || kline.getCloseTime() <= now)
-          .limit(limit)
-          .collect(Collectors.toCollection(ArrayList::new));
+      if (closedOnly) {
+        ClosedKlineViewCache.View view = closedKlineViews.snapshot(klineSet, limit, now);
+        versions.add(new BulkVersion(key, klineSet, view.generation()));
+        validFrom = Math.max(validFrom, view.validFrom());
+        validUntil = Math.min(validUntil, view.validUntil());
+        if (!view.rows().isEmpty()) {
+          out.put(symbol, view.rows());
+        }
+        continue;
+      }
+      List<Kline> klines;
+      synchronized (klineSet) {
+        if (!closedOnly) {
+          versions.add(new BulkVersion(key, klineSet, klineSet.getWindowGeneration()));
+        }
+        Kline placeholder = closedOnly ? null : currentPlaceholder(symbol, klineSet, intervalEnum, now);
+        klines = klineSet.getKlineMap().descendingMap().values().stream()
+            .filter(kline -> !closedOnly || kline.getCloseTime() <= now)
+            .limit(limit - (placeholder == null ? 0 : 1))
+            .collect(Collectors.toCollection(ArrayList::new));
+        if (placeholder != null) {
+          klines.addFirst(placeholder);
+          validUntil = Math.min(validUntil, placeholder.getCloseTime() + 1);
+        }
+      }
       if (klines.isEmpty()) {
         continue;
       }
@@ -627,8 +754,29 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       out.put(symbol, klines.stream().map(ConvertUtil::convertToDisplayKline).toList());
     }
     List<String> pending = List.copyOf(wait.pending());
-    return new BulkKlinesResponse(interval, now, out, pending.isEmpty(), pending, wait.waitedMs(),
-        List.copyOf(wait.notTrading()));
+    return new CachedBulk(new BulkKlinesResponse(interval, now, out, pending.isEmpty(), pending,
+        wait.waitedMs(), List.copyOf(wait.notTrading())), List.copyOf(versions), validFrom, validUntil);
+  }
+
+  private record BulkVersion(KlineSetKey key, KlineSet set, long generation) {
+    boolean current(Map<KlineSetKey, KlineSet> catalog) {
+      return catalog.get(key) == set && (set == null || set.getWindowGeneration() == generation);
+    }
+  }
+
+  private record CachedBulk(BulkKlinesResponse response, List<BulkVersion> versions,
+      long validFrom, long validUntil) {
+    boolean current(Map<KlineSetKey, KlineSet> catalog, long now) {
+      if (now < validFrom || now >= validUntil) {
+        return false;
+      }
+      for (BulkVersion version : versions) {
+        if (!version.current(catalog)) {
+          return false;
+        }
+      }
+      return true;
+    }
   }
 
   private record FinalWaitOutcome(long justClosedOpenTime, List<String> pending, long waitedMs,
@@ -844,8 +992,10 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void afterKlineCommit(KlineSet klineSet, IntervalEnum intervalEnum, KlineSet.Commit commit) {
-    trimKlinesIfNeeded(klineSet, intervalEnum);
-    if ((commit.updated() || commit.becameFinal()) && isPersistenceEnabledFor(intervalEnum)) {
+    boolean trimmed = trimKlinesIfNeeded(klineSet, intervalEnum);
+    // Forming prices are never persisted. Retention changes still matter even when the
+    // append that triggered trimming is forming, as do corrections to existing finals.
+    if ((commit.becameFinal() || commit.finalRevised() || trimmed) && isPersistenceEnabledFor(intervalEnum)) {
       dirtyPersistenceKeys.add(klineSet.getKey());
     }
     if (commit.finalRevised()) {
@@ -891,66 +1041,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private Kline createFilledKline(Kline previousKline, long openTime, IntervalEnum intervalEnum) {
-    long closeTime = openTime + intervalEnum.getMills() - 1;
-    if (previousKline instanceof StringKline stringKline) {
-      StringKline insertKline = stringKline.deepCopy();
-      insertKline.setOpenTime(openTime);
-      insertKline.setCloseTime(closeTime);
-      insertKline.setHighPrice(stringKline.getClosePrice());
-      insertKline.setLowPrice(stringKline.getClosePrice());
-      insertKline.setOpenPrice(stringKline.getClosePrice());
-      insertKline.setClosePrice(stringKline.getClosePrice());
-      insertKline.setVolume("0");
-      insertKline.setQuoteVolume("0");
-      insertKline.setTradeNum(0);
-      insertKline.setActiveBuyVolume("0");
-      insertKline.setActiveBuyQuoteVolume("0");
-      return insertKline;
-    } else if (previousKline instanceof FloatKline floatKline) {
-      FloatKline insertKline = floatKline.deepCopy();
-      insertKline.setOpenTime(openTime);
-      insertKline.setCloseTime(closeTime);
-      insertKline.setHighPrice(floatKline.getClosePrice());
-      insertKline.setLowPrice(floatKline.getClosePrice());
-      insertKline.setOpenPrice(floatKline.getClosePrice());
-      insertKline.setClosePrice(floatKline.getClosePrice());
-      insertKline.setVolume(0);
-      insertKline.setQuoteVolume(0);
-      insertKline.setTradeNum(0);
-      insertKline.setActiveBuyVolume(0);
-      insertKline.setActiveBuyQuoteVolume(0);
-      return insertKline;
-    } else if (previousKline instanceof DoubleKline doubleKline) {
-      DoubleKline insertKline = doubleKline.deepCopy();
-      insertKline.setOpenTime(openTime);
-      insertKline.setCloseTime(closeTime);
-      insertKline.setHighPrice(doubleKline.getClosePrice());
-      insertKline.setLowPrice(doubleKline.getClosePrice());
-      insertKline.setOpenPrice(doubleKline.getClosePrice());
-      insertKline.setClosePrice(doubleKline.getClosePrice());
-      insertKline.setVolume(0);
-      insertKline.setQuoteVolume(0);
-      insertKline.setTradeNum(0);
-      insertKline.setActiveBuyVolume(0);
-      insertKline.setActiveBuyQuoteVolume(0);
-      return insertKline;
-    } else if (previousKline instanceof BigDecimalKline bigDecimalKline) {
-      BigDecimalKline insertKline = bigDecimalKline.deepCopy();
-      insertKline.setOpenTime(openTime);
-      insertKline.setCloseTime(closeTime);
-      insertKline.setHighPrice(bigDecimalKline.getClosePrice());
-      insertKline.setLowPrice(bigDecimalKline.getClosePrice());
-      insertKline.setOpenPrice(bigDecimalKline.getClosePrice());
-      insertKline.setClosePrice(bigDecimalKline.getClosePrice());
-      insertKline.setVolume(BigDecimal.ZERO);
-      insertKline.setQuoteVolume(BigDecimal.ZERO);
-      insertKline.setTradeNum(0);
-      insertKline.setActiveBuyVolume(BigDecimal.ZERO);
-      insertKline.setActiveBuyQuoteVolume(BigDecimal.ZERO);
-      return insertKline;
-    } else {
-      throw new UnsupportedOperationException();
-    }
+    return com.zx.quant.klineproxy.util.KlineFill.zeroVolume(previousKline, openTime,
+        openTime + intervalEnum.getMills() - 1);
   }
 
   @Override
@@ -985,7 +1077,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         return false;
       }
       Trace trace = closedBarLatencyEnabled && parsedMessage.timing() != null
-          && parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false)
+          && (parsedMessage.directPayload() ? parsedMessage.dispatchMetadata().closed()
+              : parsedMessage.payloadObject() && parsedMessage.payloadNode().path("k").path("x").asBoolean(false))
           ? new Trace(parsedMessage.timing()) : null;
       return doForKlineEvent(stream.parse(parsedMessage, getNumberType(), serializer), trace,
           parsedMessage.receiveSequence());
@@ -1256,7 +1349,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       long maxEndTime = realStartTime + klinesDuration;
       realEndTime = Math.min(realEndTime, maxEndTime);
     } else if (startTime == null && endTime == null) {
-      realEndTime = (long) Math.floor((double) System.currentTimeMillis() / (double) intervalMills) * intervalMills;
+      realEndTime = (long) Math.floor((double) getServerTime() / (double) intervalMills) * intervalMills;
       realStartTime = realEndTime - klinesDuration;
     } else if (startTime == null) {
       realEndTime = (long) Math.floor((double) endTime / (double) intervalMills) * intervalMills;
@@ -1655,8 +1748,15 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
         rateLimitManager.acquire(getRateLimiterName(), getMakeUpKlinesWeight());
         List<Kline> subKlines = queryKlines0(symbol, interval,
             rangePair.getLeft(), rangePair.getRight(), getMakeUpKlinesLimit());
-        for (Kline makeUpKline : subKlines) {
-          updateKline(symbol, interval, makeUpKline);
+        if (isCachedTailPage(symbol, interval, subKlines)) {
+          // All rows already exist and the page is contiguous through the latest bar:
+          // run the batch pipeline once instead of synthesizing the same cached gaps
+          // for every row. Cold loads, sparse/older pages retain their existing path.
+          updateKlines(symbol, interval, subKlines);
+        } else {
+          for (Kline makeUpKline : subKlines) {
+            updateKline(symbol, interval, makeUpKline);
+          }
         }
         fetchedKlines.addAll(subKlines);
       })
@@ -1665,6 +1765,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return fetchedKlines.stream()
         .sorted(Comparator.comparing(Kline::getOpenTime))
         .toList();
+  }
+
+  private boolean isCachedTailPage(String symbol, String interval, List<Kline> klines) {
+    if (CollectionUtils.isEmpty(klines)) {
+      return false;
+    }
+    IntervalEnum intervalEnum = CommonUtil.getEnumByCode(interval, IntervalEnum.class);
+    KlineSet klineSet = klineSetMap.get(new KlineSetKey(symbol, interval));
+    if (intervalEnum == null || klineSet == null) {
+      return false;
+    }
+    NavigableMap<Long, Kline> map = klineSet.getKlineMap();
+    Entry<Long, Kline> last = map.lastEntry();
+    if (last == null || klines.getLast().getOpenTime() != last.getKey()) {
+      return false;
+    }
+    long expectedOpenTime = klines.getFirst().getOpenTime();
+    for (Kline kline : klines) {
+      if (kline.getOpenTime() != expectedOpenTime || !map.containsKey(expectedOpenTime)) {
+        return false;
+      }
+      expectedOpenTime += intervalEnum.getMills();
+    }
+    return true;
   }
 
   private void startSymbolOfflineCleaner() {
@@ -1679,6 +1803,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
           }
           for (KlineSetKey klineSetKey : offlineKlineSetKeys) {
             klineSetMap.remove(klineSetKey);
+            finalBarWaitRegistry.removedSeries(klineSetKey.getSymbol(), klineSetKey.getInterval());
             cleanupPersistedKlines(klineSetKey);
             log.info("symbol: {} offline, kline set of interval: {} removed", klineSetKey.getSymbol(), klineSetKey.getInterval());
           }
@@ -1754,11 +1879,58 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     if (!isPersistenceEnabled()) {
       return;
     }
-    long dumpIntervalSeconds = Math.max(1, persistenceProperties.getDumpIntervalSeconds());
+    long beforeMs = Math.max(0, persistenceProperties.getBoundaryGuardBeforeMs());
+    long afterMs = Math.max(0, persistenceProperties.getBoundaryGuardAfterMs());
+    for (IntervalEnum interval : getPersistenceGuardIntervals()) {
+      if (interval != IntervalEnum.ONE_MONTH
+          && (beforeMs >= interval.getMills() || afterMs >= interval.getMills() - beforeMs)) {
+        log.warn("background kline persistence for {} has no safe window: interval={}, before={} ms, after={} ms; "
+                + "reduce kline.persistence.boundaryGuardBeforeMs/boundaryGuardAfterMs to allow background dumps",
+            getPersistenceServiceCode(), interval.code(), beforeMs, afterMs);
+      }
+    }
+    nextPersistenceDumpTime = getServerTime() + getPersistenceDumpIntervalMs();
     SCHEDULE_EXECUTOR_SERVICE.scheduleWithFixedDelay(
-        new ExceptionSafeRunnable(() -> dumpPersistedKlines(false)),
-        dumpIntervalSeconds, dumpIntervalSeconds, TimeUnit.SECONDS
+        new ExceptionSafeRunnable(this::dumpPersistedKlinesWhenDue),
+        PERSISTENCE_CHECK_INTERVAL_MS, PERSISTENCE_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS
     );
+  }
+
+  private long getPersistenceDumpIntervalMs() {
+    return TimeUnit.SECONDS.toMillis(Math.max(1, persistenceProperties.getDumpIntervalSeconds()));
+  }
+
+  private void dumpPersistedKlinesWhenDue() {
+    if (getServerTime() < nextPersistenceDumpTime) {
+      return;
+    }
+    // Retrying on the normal dump interval can hit the same boundary forever (e.g. 5m).
+    if (dumpPersistedKlines(false)) {
+      nextPersistenceDumpTime = getServerTime() + getPersistenceDumpIntervalMs();
+    }
+  }
+
+  private Set<IntervalEnum> getPersistenceGuardIntervals() {
+    Set<IntervalEnum> intervals = EnumSet.noneOf(IntervalEnum.class);
+    Collection<KlineSyncConfigProperties<?>> configs = persistenceSyncConfigs.isEmpty()
+        ? List.of(getSyncConfig()) : persistenceSyncConfigs;
+    for (KlineSyncConfigProperties<?> config : configs) {
+      if (!Boolean.TRUE.equals(config.getEnabled()) || MapUtils.isEmpty(config.getIntervalSyncConfigs())) {
+        continue;
+      }
+      for (String code : config.getIntervalSyncConfigs().keySet()) {
+        IntervalEnum interval = CommonUtil.getEnumByCode(code, IntervalEnum.class);
+        if (interval != null) {
+          intervals.add(interval);
+        }
+      }
+    }
+    return intervals;
+  }
+
+  private boolean shouldDeferPersistence(long now, Collection<IntervalEnum> intervals) {
+    return IntervalBoundaryGuard.shouldSkip(now, intervals,
+        persistenceProperties.getBoundaryGuardBeforeMs(), persistenceProperties.getBoundaryGuardAfterMs());
   }
 
   private Set<String> buildNeedSubscribeKlineUpdateTopics(Collection<String> needSubscribeIntervals) {
@@ -1840,24 +2012,29 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return webSocketClients.subList(0, connectionCount.get());
   }
 
-  private void trimKlinesIfNeeded(KlineSet klineSet, IntervalEnum intervalEnum) {
+  private boolean trimKlinesIfNeeded(KlineSet klineSet, IntervalEnum intervalEnum) {
     IntervalSyncConfig intervalSyncConfig = getSyncConfig().getIntervalSyncConfigs().get(intervalEnum.code());
     if (intervalSyncConfig == null || intervalSyncConfig.getMinMaintainCount() == null) {
-      return;
+      return false;
     }
     int minMaintainCount = getEffectiveMaintainCount(klineSet.getKey().getSymbol(), intervalEnum);
     NavigableMap<Long, Kline> klineMap = klineSet.getKlineMap();
     if (klineMap.size() <= minMaintainCount + KLINE_TRIM_BUFFER) {
-      return;
+      return false;
     }
+    List<Long> removed = new ArrayList<>();
     synchronized (klineSet) {
       while (klineMap.size() > minMaintainCount) {
-        klineMap.pollFirstEntry();
+        removed.add(klineMap.pollFirstEntry().getKey());
       }
       if (!klineMap.isEmpty()) {
         klineSet.dropFinalBefore(klineMap.firstKey());
       }
     }
+    for (Long openTime : removed) {
+      signalFinal(klineSet.getKey().getSymbol(), klineSet.getKey().getInterval(), openTime);
+    }
+    return !removed.isEmpty();
   }
 
   private Kline convertToKline(EventKlineEvent<?, ?> event) {
@@ -2161,39 +2338,48 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private void reconcilePersistedKlines(Set<KlineSetKey> configuredKlineSetKeys) {
-    if (CollectionUtils.isEmpty(configuredKlineSetKeys)) {
+    if (!isPersistenceEnabled() || CollectionUtils.isEmpty(configuredKlineSetKeys)) {
       return;
     }
-    long currentTime = getServerTime();
     for (KlineSetKey klineSetKey : configuredKlineSetKeys) {
-      // runs inside the async warmup future: one failing key must not silently kill the rest
-      try {
-        dumpPersistedKlineSetTracked(klineSetKey, currentTime);
-      } catch (Exception e) {
-        log.warn("failed to reconcile persisted klines for symbol: {}, interval: {}, skipped.",
-            klineSetKey.getSymbol(), klineSetKey.getInterval(), e);
+      // Restored series may be clean. Queue them before checking the guard so a deferred
+      // reconciliation is not lost; the periodic updater will pick up the remaining keys.
+      synchronized (getPersistenceDumpLock(klineSetKey)) {
+        IntervalEnum interval = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
+        if (klineSetMap.containsKey(klineSetKey) && isPersistenceEnabledFor(interval)) {
+          dirtyPersistenceKeys.add(klineSetKey);
+        }
       }
     }
+    dumpPersistedKlines(false);
   }
 
-  private void dumpPersistedKlines(boolean force) {
+  /** @return false only when the boundary guard deferred part or all of this pass. */
+  private boolean dumpPersistedKlines(boolean force) {
     if (!isPersistenceEnabled()) {
-      return;
+      return true;
+    }
+    Collection<IntervalEnum> guardIntervals = force ? List.of() : getPersistenceGuardIntervals();
+    // Check before even copying the dirty set or taking/formatting any kline snapshots.
+    if (shouldDeferPersistence(getServerTime(), guardIntervals)) {
+      return false;
     }
     Set<KlineSetKey> keys = force ? new HashSet<>(klineSetMap.keySet()) : new HashSet<>(dirtyPersistenceKeys);
     if (CollectionUtils.isEmpty(keys)) {
-      return;
+      return true;
     }
-    long currentTime = getServerTime();
     for (KlineSetKey key : keys) {
       // one failing symbol (e.g. transient IO error) must not skip the remaining dumps
       try {
-        dumpPersistedKlineSetTracked(key, currentTime);
+        if (!dumpPersistedKlineSetTracked(key, guardIntervals)) {
+          return false;
+        }
       } catch (Exception e) {
         log.warn("failed to dump persisted klines for symbol: {}, interval: {}, skipped.",
             key.getSymbol(), key.getInterval(), e);
       }
     }
+    return true;
   }
 
   /**
@@ -2202,17 +2388,27 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
    * concurrent update simply re-adds the key and the next cycle retries; on skip/failure
    * the flag is restored.
    */
-  private void dumpPersistedKlineSetTracked(KlineSetKey klineSetKey, long currentTime) {
-    boolean wasDirty = dirtyPersistenceKeys.remove(klineSetKey);
-    boolean dumped;
-    try {
-      dumped = dumpPersistedKlineSet(klineSetKey, currentTime);
-    } catch (Exception e) {
-      restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
-      throw e;
-    }
-    if (!dumped) {
-      restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
+  private boolean dumpPersistedKlineSetTracked(KlineSetKey klineSetKey,
+                                               Collection<IntervalEnum> guardIntervals) {
+    synchronized (getPersistenceDumpLock(klineSetKey)) {
+      // Refresh time per series, after acquiring the lock: a long batch or lock wait may
+      // have crossed into the window. An in-progress series is allowed to finish.
+      long currentTime = getServerTime();
+      if (shouldDeferPersistence(currentTime, guardIntervals)) {
+        return false;
+      }
+      boolean wasDirty = dirtyPersistenceKeys.remove(klineSetKey);
+      boolean dumped;
+      try {
+        dumped = dumpPersistedKlineSet(klineSetKey, currentTime);
+      } catch (Exception e) {
+        restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
+        throw e;
+      }
+      if (!dumped) {
+        restoreDirtyFlagIfStillTracked(klineSetKey, wasDirty);
+      }
+      return true;
     }
   }
 
@@ -2226,8 +2422,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   /**
    * @return true when the key needs no further dumping (written, or nothing will ever be
-   *         persistable for it); false when the dump was SKIPPED and the dirty flag must
-   *         survive so the next cycle retries
+   *         persistable for it); false when the dump was skipped or has deferred finals,
+   *         so the dirty flag must survive for the next cycle
    */
   private boolean dumpPersistedKlineSet(KlineSetKey klineSetKey, long currentTime) {
     IntervalEnum intervalEnum = CommonUtil.getEnumByCode(klineSetKey.getInterval(), IntervalEnum.class);
@@ -2235,26 +2431,25 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
       // nothing will ever be persisted for this key: drop any dirty flag
       return true;
     }
-    // snapshot INSIDE the lock: a delayed writer must never overwrite a newer snapshot,
-    // nor resurrect shards that concurrent offline cleanup just deleted
-    synchronized (getPersistenceDumpLock(klineSetKey)) {
-      KlineSet klineSet = klineSetMap.get(klineSetKey);
-      Collection<Kline> sourceKlines = klineSet == null ? List.of() : klineSet.finalSnapshot(currentTime);
-      List<PersistedKlineRow> persistedRows = sourceKlines.stream()
-          .sorted(Comparator.comparingLong(Kline::getOpenTime))
-          .map(this::toPersistedKlineRow)
-          .toList();
-      if (CollectionUtils.isEmpty(persistedRows)) {
-        // an empty in-memory set (failed restore, loadOnStartup=false, or only the open
-        // candle yet) must NOT wipe recoverable shards on disk; explicit deletion happens
-        // only through cleanupPersistedKlines when a symbol goes offline
-        return false;
-      }
-      klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
-          klineSetKey.getSymbol(), persistedRows,
-          getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), currentTime);
-      return true;
+    // Caller holds the per-key lock across the snapshot and write, including dirty tracking.
+    KlineSet klineSet = klineSetMap.get(klineSetKey);
+    KlineSet.PersistenceSnapshot snapshot = klineSet == null
+        ? new KlineSet.PersistenceSnapshot(List.of(), false) : klineSet.persistenceSnapshot(currentTime);
+    List<PersistedKlineRow> persistedRows = snapshot.klines().stream()
+        .map(this::toPersistedKlineRow)
+        .toList();
+    if (CollectionUtils.isEmpty(persistedRows)) {
+      // an empty in-memory set (failed restore, loadOnStartup=false, or only the open
+      // candle yet) must NOT wipe recoverable shards on disk; explicit deletion happens
+      // only through cleanupPersistedKlines when a symbol goes offline
+      return false;
     }
+    klinePersistenceStore.dumpRows(getPersistenceServiceCode(), klineSetKey.getInterval(),
+        klineSetKey.getSymbol(), persistedRows,
+        getPersistenceMaxStoreCount(klineSetKey.getSymbol(), intervalEnum), currentTime);
+    // Keep the dirty signal if a final was published before its close-time gate. It must
+    // be retried when eligible even if no subsequent forming update marks this series.
+    return !snapshot.hasDeferredFinals();
   }
 
   private void cleanupPersistedKlines(KlineSetKey klineSetKey) {

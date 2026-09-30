@@ -31,6 +31,11 @@ kline:
     loadOnStartup: true
     dumpOnShutdown: true
     dumpIntervalSeconds: 300
+    # Pause background dumps around ALL enabled spot/futures interval boundaries (UTC).
+    # Their sum must be less than the shortest enabled interval to leave time to dump.
+    # Set both to 0 to disable the guard. Shutdown dumps always proceed.
+    boundaryGuardBeforeMs: 30000
+    boundaryGuardAfterMs: 30000
     rootDir: ./data/kline-cache
     spot:
       intervalConfigs:
@@ -39,11 +44,16 @@ kline:
           maxStoreCount: 18000
           symbolMaxStoreCounts:
             BTCUSDT: 20000
+        "1d":
+          # Match the subscribed daily serving window.
+          maxStoreCount: 1000
     future:
       intervalConfigs:
         "1h":
           # default is minMaintainCount * 2 when omitted
           maxStoreCount: 2000
+        "1d":
+          maxStoreCount: 1000
   binance:
     spot:
       intervalSyncConfigs:
@@ -99,6 +109,10 @@ kline.bulk.finalWaitMaxMs: 8000
 # default 200 would queue a third of the fleet behind the settle. Once virtual threads are on the
 # cap stops mattering, but it stays here as the fallback the flag can be turned off to.
 server.tomcat.threads.max: 400
+# 1.8.4: absorb the hourly Lambda burst and retain bounded nginx upstream connections.
+server.tomcat.accept-count: 1024
+server.tomcat.keep-alive-timeout: 70m
+server.tomcat.max-keep-alive-requests: 10000
 # Off on purpose for the first release: the container swap and the threading model are separate
 # risks and should fail separately. Flip to true only after a cycle has run green on Tomcat.
 spring.threads.virtual.enabled: false
