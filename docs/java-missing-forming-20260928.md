@@ -4,7 +4,7 @@
 
 ## 核对对象及验证方法
 
-- 线上实例：`45.76.207.137`，服务 `kline-proxy`，查询时 PID `531654`。
+- 线上实例：`192.0.2.30`，服务 `kline-proxy`，查询时 PID `531654`。
 - 实际加载 JAR：`/opt/kline-proxy/kline-proxy-1.8.1-low-risk-4b8808074930.jar`。
 - JAR SHA-256：`4b88080749301f9556067db6ca4b3b3e0e72465844af81a92247172de8111a4a`。
 - `AbstractKlineService`、`KlineService`、`BinanceFutureController`、`BinanceSpotController`、`KlineSet` 五个关键类的线上字节码 SHA-256 均与本地 `target/classes` 一致。

@@ -1,6 +1,6 @@
 # Java / Rust 部署记录：2026-09-28
 
-已部署 Java **1.8.2** 到 https://market.feng.dog（45.76.207.137），Rust **0.4.15** 到 https://market-mirror.feng.dog（149.28.26.254）。以下时间均为 UTC（迪拜时间加 4 小时）。
+已部署 Java **1.8.2** 到 https://market.feng.dog（192.0.2.30），Rust **0.4.15** 到 https://market-mirror.feng.dog（192.0.2.40）。以下时间均为 UTC（迪拜时间加 4 小时）。
 
 | 项目 | Java | Rust |
 |---|---|---|
