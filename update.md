@@ -1,5 +1,6 @@
 ## Unreleased
 
+- 修复 bulk `closed_only=true` 的整点边界判定滞后：合约、现货原先按交易所时间估计判定周期边界，而该估计比真实时间晚约 RTT/2（到 fapi 约 10 ms），整点后最初几 ms 到达的请求拿到的是上一小时视图（2026-09-30 15:00Z 缺 14:00 bar）。现在 bulk 路径的边界判定、缓存 key、时间闸和 `ts_ms` 统一使用宿主机时钟，且不早于交易所时间估计；其他使用 server time 的位置不变。时钟改动可通过 `kline.bulk.hostClockBoundary: false`（默认 true）恢复为修复前的判定，改后需重启。新增 `kline.bulk.preBoundaryWaitMs`（默认 250，0 关闭）：边界前该窗口内到达的 `closed_only` 请求先等到边界，再走正常的 final 等待。[说明](docs/boundary-clock-bias-20260930.md)。
 - 优化收盘热路径：按市场、symbol、interval 分片处理；同一 openTime 的排队 forming 保留最新有效快照，所有 `x=true` 单独进入有界优先队列，容量满时背压。新增 `kline.ingress.*` 配置和接纳、处理、合并、失败、背压指标。
 - WS、REST、恢复统一原子提交，修复相同成交笔数 final 未替换旧值及并发旧消息回写；final 修订会失效 bulk 缓存。WS 补洞占位不提前确认收盘，持久化只保存一致的已确认 final 快照；正常停机先停止收帧并排空消息，再持久化。
 - 收齐统计从逐消息扫描全部缓存改为边界计数，bulk 改为按 bar 定向通知；增加单条更新快速路径，减少 forming 诊断分配和版本元数据开销，修复 PING/PONG 名称误判与 Netty buffer 引用泄漏。[实现、回放结果和验证边界](docs/kline-ingress-implementation-20260913.md)。

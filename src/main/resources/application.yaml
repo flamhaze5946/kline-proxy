@@ -98,6 +98,12 @@ ws:
 # `server:` already exist above and YAML forbids duplicate root keys.
 kline.bulk.finalWaitEnabled: true
 kline.bulk.finalWaitMaxMs: 8000
+# closed_only requests arriving less than this before a boundary sleep to it, then take the final
+# wait above; 0 disables (docs/boundary-clock-bias-20260930.md)
+kline.bulk.preBoundaryWaitMs: 250
+# bulk boundaries on the host clock (never behind the trailing server-time estimate); false
+# restores the pre-2026-09-30 server-time decision without a new jar (restart required)
+kline.bulk.hostClockBoundary: true
 # ~300 fleet requests block together at the boundary while a third-party tenant sends ~40 req/s.
 # 1.8.0: the container is TOMCAT again (the undertow starter is gone, the tomcat exclusion with it).
 # The swap exists only so `spring.threads.virtual.enabled` can be used: Spring Boot's virtual-thread

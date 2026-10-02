@@ -275,7 +275,12 @@ class BinanceFutureContinuousKlineTest {
   }
 
   private static Fixture fixture(boolean continuous, String numberType, List<BinanceFutureSymbol> symbols) {
-    BinanceFutureKlineServiceImpl service = new BinanceFutureKlineServiceImpl();
+    BinanceFutureKlineServiceImpl service = new BinanceFutureKlineServiceImpl() {
+      @Override
+      protected long getHostTime() {
+        return BOUNDARY + 150L;  // the same instant as the exchange clock below
+      }
+    };
     BinanceFutureKlineSyncConfigProperties config = new BinanceFutureKlineSyncConfigProperties();
     IntervalSyncFutureConfig hour = new IntervalSyncFutureConfig();
     hour.setListenSymbolPatterns(List.of(".*"));

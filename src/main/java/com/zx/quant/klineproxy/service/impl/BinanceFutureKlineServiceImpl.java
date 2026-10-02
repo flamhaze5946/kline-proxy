@@ -128,6 +128,17 @@ public class BinanceFutureKlineServiceImpl extends AbstractKlineService<BinanceF
     return exchangeService.queryServerTime();
   }
 
+  /**
+   * The host clock, never behind the server-time estimate. That estimate is taken when the /time
+   * response arrives, so it trails the true time by about half a round trip: a bulk request just
+   * after the hour was answered with the previous hour (docs/boundary-clock-bias-20260930.md).
+   * {@code kline.bulk.hostClockBoundary=false} restores the server-time decision.
+   */
+  @Override
+  protected long getBoundaryTime() {
+    return hostClockBoundaryTime();
+  }
+
   @Override
   protected String getRateLimiterName() {
     return Constants.BINANCE_FUTURE_KLINES_FETCHER_RATE_LIMITER_NAME;

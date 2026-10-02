@@ -340,6 +340,30 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     return System.currentTimeMillis();
   }
 
+  /** The host's own wall clock, NTP-disciplined in production. */
+  protected long getHostTime() {
+    return System.currentTimeMillis();
+  }
+
+  /**
+   * Clock for interval-boundary decisions on the bulk endpoint: which bar has just closed, the
+   * boundary in the cache key, and the closed-view and cached-response time gates. Defaults to
+   * {@link #getServerTime()}. The Binance services override it, because their server time is an
+   * estimate that trails the true time (docs/boundary-clock-bias-20260930.md).
+   */
+  protected long getBoundaryTime() {
+    return getServerTime();
+  }
+
+  /**
+   * The host clock, never behind the server-time estimate, while {@code kline.bulk.hostClockBoundary}
+   * is on (default); the server time alone, as before 2026-09-30, when it is off.
+   */
+  protected final long hostClockBoundaryTime() {
+    long serverTime = getServerTime();
+    return getBulkProperties().isHostClockBoundary() ? Math.max(getHostTime(), serverTime) : serverTime;
+  }
+
   /** the all-market stream feeding the price book and the 24hr fallback cache */
   protected AllMarketTickerStream getAllMarketTickerStream() {
     return AllMarketTickerStream.TICKER;
@@ -634,22 +658,61 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     int realLimit = Math.min(Math.max(limit != null ? limit : DEFAULT_BULK_KLINES_LIMIT, MIN_LIMIT),
         MAX_BULK_KLINES_LIMIT);
     List<String> normalizedSymbols = normalizeBulkSymbols(symbols, intervalEnum);
+    long notBefore = closedOnly && !normalizedSymbols.isEmpty()
+        ? awaitPreBoundary(intervalEnum) : Long.MIN_VALUE;
     for (int attempt = 0; attempt < 4; attempt++) {
-      CachedBulk snapshot = queryBulkSnapshot(intervalEnum, realLimit, closedOnly, normalizedSymbols);
-      if (snapshot.current(klineSetMap, getServerTime())) {
+      CachedBulk snapshot = queryBulkSnapshot(intervalEnum, realLimit, closedOnly, normalizedSymbols, notBefore);
+      if (snapshot.current(klineSetMap, bulkNow(notBefore))) {
         return snapshot.response();
       }
     }
     // Continuous updates must not starve a query; take one uncached view after retrying.
-    long now = getServerTime();
+    long now = bulkNow(notBefore);
     long boundary = Math.floorDiv(now, intervalEnum.getMills()) * intervalEnum.getMills();
-    return buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols,
+    return buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols, notBefore,
         awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary)).response();
   }
 
+  /** The bulk clock, floored by the boundary a pre-boundary wait has already slept to. */
+  private long bulkNow(long notBefore) {
+    return Math.max(getBoundaryTime(), notBefore);
+  }
+
+  /**
+   * A closed_only request arriving less than {@code kline.bulk.preBoundaryWaitMs} before an interval
+   * boundary sleeps until it (wall clock, so a frozen test clock cannot stall it) and is answered as
+   * of that boundary, final-bar wait included.
+   *
+   * @return the boundary slept to, which floors the request's clock, or {@link Long#MIN_VALUE}
+   */
+  private long awaitPreBoundary(IntervalEnum intervalEnum) {
+    KlineBulkProperties props = getBulkProperties();
+    long windowMs = props.effectivePreBoundaryWaitMs();
+    if (!props.isFinalWaitEnabled() || props.effectiveFinalWaitMaxMs() <= 0 || windowMs <= 0) {
+      return Long.MIN_VALUE;
+    }
+    long now = getBoundaryTime();
+    long mills = intervalEnum.getMills();
+    long boundary = Math.floorDiv(now, mills) * mills + mills;
+    long earlyMs = boundary - now;
+    if (earlyMs > windowMs) {
+      return Long.MIN_VALUE;
+    }
+    long startNanos = System.nanoTime();
+    try {
+      Thread.sleep(earlyMs);
+    } catch (InterruptedException e) {
+      // still answered as of the boundary: the closing bars are then reported pending, not dropped
+      Thread.currentThread().interrupt();
+    }
+    log.info("BULK_PRE_BOUNDARY_WAIT interval={} boundary={} early_ms={} slept_ms={}",
+        intervalEnum.code(), boundary, earlyMs, (System.nanoTime() - startNanos) / 1_000_000L);
+    return boundary;
+  }
+
   private CachedBulk queryBulkSnapshot(IntervalEnum intervalEnum, int realLimit, boolean closedOnly,
-      List<String> normalizedSymbols) {
-    long now = getServerTime();
+      List<String> normalizedSymbols, long notBefore) {
+    long now = bulkNow(notBefore);
     long boundary = Math.floorDiv(now, intervalEnum.getMills()) * intervalEnum.getMills();
     // the boundary is part of the key so a pre-boundary response can never be served after it
     BulkKlinesKey cacheKey = new BulkKlinesKey(intervalEnum.code(), realLimit, closedOnly, normalizedSymbols,
@@ -682,7 +745,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
     try {
       FinalWaitOutcome wait = awaitJustClosedBarsFinal(intervalEnum, normalizedSymbols, closedOnly, now, boundary);
       CachedBulk response = buildBulkKlinesResponse(intervalEnum.code(), realLimit, closedOnly,
-          normalizedSymbols, wait);
+          normalizedSymbols, notBefore, wait);
       // never cache a snapshot that still carries non-final just-closed bars
       if (response.response().finalized()) {
         bulkKlinesCache.put(cacheKey, response);
@@ -699,7 +762,7 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
 
   /**
    * Block (bounded) until every requested TRADING symbol whose just-closed bar exists has received
-   * its final update; symbols whose exchange status is no longer TRADING are skipped and reported. The window is measured from the interval boundary in server time; the actual
+   * its final update; symbols whose exchange status is no longer TRADING are skipped and reported. The window is measured from the interval boundary on the bulk clock; the actual
    * sleeping uses the wall clock so a frozen test clock cannot spin forever.
    */
   private FinalWaitOutcome awaitJustClosedBarsFinal(IntervalEnum intervalEnum, List<String> symbols,
@@ -824,8 +887,8 @@ public abstract class AbstractKlineService<T extends WebSocketClient> implements
   }
 
   private CachedBulk buildBulkKlinesResponse(String interval, int limit, boolean closedOnly,
-      List<String> symbols, FinalWaitOutcome wait) {
-    long now = getServerTime();
+      List<String> symbols, long notBefore, FinalWaitOutcome wait) {
+    long now = bulkNow(notBefore);
     Map<String, List<Object[]>> out = new LinkedHashMap<>();
     List<BulkVersion> versions = new ArrayList<>();
     long validFrom = Long.MIN_VALUE;

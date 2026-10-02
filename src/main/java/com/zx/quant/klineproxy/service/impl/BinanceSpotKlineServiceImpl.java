@@ -99,6 +99,12 @@ public class BinanceSpotKlineServiceImpl extends AbstractKlineService<BinanceSpo
     return exchangeService.queryServerTime();
   }
 
+  /** As for futures: the host clock, never behind the trailing server-time estimate. */
+  @Override
+  protected long getBoundaryTime() {
+    return hostClockBoundaryTime();
+  }
+
   @Override
   protected String getRateLimiterName() {
     return Constants.BINANCE_SPOT_KLINES_FETCHER_RATE_LIMITER_NAME;
