@@ -36,3 +36,6 @@ build/
 
 ### Python ###
 __pycache__/
+
+### Research evidence stays local ###
+/research/
