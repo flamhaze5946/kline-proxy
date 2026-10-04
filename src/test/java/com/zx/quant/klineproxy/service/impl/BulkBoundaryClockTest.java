@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.context.properties.bind.Bindable;
@@ -34,7 +35,11 @@ import org.springframework.test.util.ReflectionTestUtils;
  * trip to fapi. Requests arriving at T+0..4 ms were answered at once, and the 14:00 bar was
  * missing from their answer. Both clocks are pinned here. The host clock stands for true time and
  * the exchange estimate trails it by {@link #LAG_MS}.
+ *
+ * <p>Every test sleeps on the wall clock. A wrong boundary could sleep up to an interval, so
+ * each test is bounded.
  */
+@Timeout(30)
 class BulkBoundaryClockTest {
 
   private static final long H = IntervalEnum.ONE_HOUR.getMills();
@@ -188,6 +193,70 @@ class BulkBoundaryClockTest {
     assertThat(lastRow(response)[0]).isEqualTo(T - H);
     assertThat(lastRow(response)[4]).isEqualTo("final");
     assertThat(response.finalized()).isTrue();
+  }
+
+  /**
+   * A host clock ahead of the exchange estimate decides the boundary: max(host, server) = host.
+   * Early by true time, the request only waits for the closing update. It never serves the bar
+   * before its x=true.
+   */
+  @Test
+  void aFastHostClockDecidesTheBoundaryAndOnlyWaitsForTheClosingBar() throws Exception {
+    Fixture f = fixture(Market.FUTURE, 250L, 8_000L);
+    f.clocks.host = T + 5;
+    f.clocks.server = T - 995;  // outside the pre-boundary window on its own
+    f.seedFormingHour();
+    Thread closer = f.closeLater(150);
+    BulkKlinesResponse response = f.bulk(true);
+    closer.join();
+
+    assertThat(response.tsMs()).isEqualTo(T + 5);
+    assertThat(lastRow(response)[0]).isEqualTo(T - H);
+    assertThat(lastRow(response)[4]).isEqualTo("final");
+    assertThat(response.finalized()).isTrue();
+    assertThat(response.waitedMs()).isGreaterThanOrEqualTo(100L);
+  }
+
+  /**
+   * Concurrent requests 100 ms before the boundary: every one sleeps to it and is answered with the
+   * just-closed FINAL bar. The final wait starts at the boundary. Distinct limits give distinct
+   * cache keys, and repeated limits share one flight.
+   */
+  @Test
+  void concurrentPreBoundaryWaitersAreAllAnsweredAsOfTheBoundary() throws Exception {
+    Fixture f = fixture(Market.FUTURE, 250L, 3_000L);
+    f.at(T - 100);
+    f.seedFormingHour();
+    int waiters = 12;
+    java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(waiters);
+    try {
+      java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+      List<java.util.concurrent.Future<BulkKlinesResponse>> futures = new java.util.ArrayList<>();
+      for (int i = 0; i < waiters; i++) {
+        int limit = 2 + i % 4;
+        futures.add(pool.submit(() -> {
+          start.await();
+          return f.service().queryBulkKlines("1h", limit, true, List.of(SYMBOL));
+        }));
+      }
+      long started = System.nanoTime();
+      start.countDown();
+      Thread closer = f.closeLater(300);
+      for (java.util.concurrent.Future<BulkKlinesResponse> future : futures) {
+        BulkKlinesResponse response = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(lastRow(response)[0]).isEqualTo(T - H);
+        assertThat(lastRow(response)[4]).isEqualTo("final");
+        assertThat(response.finalized()).isTrue();
+        assertThat(response.pending()).isEmpty();
+        assertThat(response.tsMs()).isGreaterThanOrEqualTo(T);
+        assertThat(response.waitedMs()).isBetween(50L, 3_000L);
+      }
+      closer.join();
+      long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
+      assertThat(elapsedMs).isBetween(250L, 3_100L);  // pre-boundary sleep + final wait, within the cap
+    } finally {
+      pool.shutdownNow();
+    }
   }
 
   @Test

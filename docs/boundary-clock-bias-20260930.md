@@ -89,7 +89,7 @@ bulk 路径内所有依赖时间的判定都换成这个时钟，包括：
 
 ## 测试
 
-新增 `BulkBoundaryClockTest`，11 项。测试使用生产类 `BinanceFutureKlineServiceImpl` / `BinanceSpotKlineServiceImpl`，并固定两个时钟：`getHostTime()` 代表真实时间，交易所时间估计比它落后 10 ms。
+新增 `BulkBoundaryClockTest`，13 项：11 项随修复合入，下表最后 2 项于 2026-10-04 从 1.8.10 部署分支补入。测试类带 `@Timeout(30)`：边界判错时，测试可能一直睡到下一个周期，超时保证它失败而不是挂起。测试使用生产类 `BinanceFutureKlineServiceImpl` / `BinanceSpotKlineServiceImpl`，并固定两个时钟：`getHostTime()` 代表真实时间，交易所时间估计比它落后 10 ms。
 
 | 测试 | 场景 | 变异检查 |
 |---|---|---|
@@ -102,6 +102,8 @@ bulk 路径内所有依赖时间的判定都换成这个时钟，包括：
 | `preBoundaryWaitBindsDefaultsTo250AndIsCapped` | 配置绑定、默认值、上下限 | 修复前代码下无法编译；M7 失败 |
 | `theSwitchOffRestoresTheServerTimeBoundaryDecision`（合约、现货两个参数） | `hostClockBoundary=false`，重放 (a) 的事故场景。期望恢复修复前的判定：在 T+5 ms 立即返回 T−5 s 缓存的同一份快照，最后一根为 13:00，没有等待，`ts_ms` = T−5010 | 修复前代码下无法编译（缺开关）；M9 失败 |
 | `hostClockBoundaryBindsAndDefaultsToOn` | 开关的绑定，以及默认值为 `true` | 修复前代码下无法编译；M10 失败 |
+| `aFastHostClockDecidesTheBoundaryAndOnlyWaitsForTheClosingBar` | 本机时钟比交易所估计快 1 s（本机 T+5，估计 T−995）：判定取本机时钟，`ts_ms` = T+5；请求只多等 `x=true`，不会在收盘前返回该 bar | 部署分支上修复前代码、M1、M3、M4 失败；master 上忽略本机时钟（只用交易所估计）时失败 |
+| `concurrentPreBoundaryWaitersAreAllAnsweredAsOfTheBoundary` | 12 个并发请求在 T−100 ms 到达，其中既有不同 cache key，也有共享单飞的相同 key：全部先睡到边界，再得到 14:00 的 FINAL bar；总耗时在上限内 | 部署分支上修复前代码、M2、M3、M8 失败；master 上关闭边界前等待时失败 |
 
 变异体说明（每个变异体都在独立副本中重新编译）：
 
@@ -125,6 +127,8 @@ bulk 路径内所有依赖时间的判定都换成这个时钟，包括：
 已有测试 `BinanceFutureContinuousKlineTest` 的 fixture 直接构造生产类，并把交易所时钟固定在 `BOUNDARY + 150`。改动后生产类会读取真实本机时钟，这个 fixture 因此失败 8 项。修正方式是把 `getHostTime()` 也固定到同一时刻，断言一条都没有改。
 
 全量测试：JDK 21.0.8，`mvn -B -ntp clean test`，共 328 项，327 通过，0 失败，0 错误，1 项原有跳过。修改前 master 为 317 项，本次新增 11 项。摘要见 `research/boundary-clock-bias-20260930/full-test.log`。
+
+2026-10-04 补入 2 项后（JDK 21.0.8，`mvn -B -ntp clean test`）：共 330 项，329 通过，0 失败，0 错误，1 项原有跳过。
 
 新测试含计时断言。`BulkBoundaryClockTest`、`BinanceFutureContinuousKlineTest`、`AbstractKlineServiceFillKlinesTest`、`CurrentZeroBarTest` 这 4 个测试类在加开关后合计 87 项，连续重复运行 5 轮，均全部通过（加开关前为 84 项，同样 5 轮全部通过）。`git diff --check` 通过。
 
